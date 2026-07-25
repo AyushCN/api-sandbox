@@ -1,0 +1,58 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum EnvironmentStatus {
+  IDLE
+  BUILDING
+  RUNNING
+  STOPPED
+  FAILED
+}
+
+model Environment {
+  id            String            @id @default(cuid())
+  name          String
+  gitUrl        String
+  githubBranch  String            @default("main")
+  status        EnvironmentStatus @default(IDLE)
+  publicUrl     String?
+  containerId   String?
+  port          Int?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  expiresAt     DateTime?
+  logs          Log[]
+  metrics       Metric[]
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Log {
+  id            String      @id @default(cuid())
+  environmentId String
+  environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+  message       String      @db.Text
+  level         String      @default("info")
+  timestamp     DateTime    @default(now())
+
+  @@index([environmentId])
+  @@index([timestamp])
+}
+
+model Metric {
+  id            String      @id @default(cuid())
+  environmentId String
+  environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+  cpuUsage      Float
+  memoryUsage   Float
+  timestamp     DateTime    @default(now())
+
+  @@index([environmentId])
+  @@index([timestamp])
+}

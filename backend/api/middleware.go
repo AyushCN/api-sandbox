@@ -7,6 +7,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/api-sandbox/backend/db"
+	"context"
+	"time"
 )
 
 func AuthMiddleware() gin.HandlerFunc {
@@ -29,7 +32,7 @@ func AuthMiddleware() gin.HandlerFunc {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 			}
-			return jwtSecret, nil
+			return []byte(getJWTSecret()), nil
 		})
 
 		if err != nil || !token.Valid {
@@ -41,6 +44,35 @@ func AuthMiddleware() gin.HandlerFunc {
 			c.Set("userId", claims["userId"])
 		} else {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid token claims"})
+			return
+		}
+
+		c.Next()
+	}
+}
+
+func RateLimitRegister() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		clientIP := c.ClientIP()
+		key := fmt.Sprintf("register:%s", clientIP)
+
+		ctx := context.Background()
+		count, err := db.RedisClient.Incr(ctx, key).Result()
+		if err != nil {
+			// If Redis fails, log it but don't block registration
+			fmt.Printf("Redis error during rate limiting: %v\n", err)
+			c.Next()
+			return
+		}
+
+		if count == 1 {
+			// Set expiry on first request
+			db.RedisClient.Expire(ctx, key, 1*time.Hour)
+		}
+
+		if count > 5 {
+			c.JSON(http.StatusTooManyRequests, gin.H{"error": "Too many registration attempts. Try again in 1 hour."})
+			c.Abort()
 			return
 		}
 

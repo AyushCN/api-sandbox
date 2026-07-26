@@ -20,7 +20,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const storedToken = localStorage.getItem("token");
     if (storedToken) {
       setToken(storedToken);
-    } else if (pathname !== "/login" && pathname !== "/register") {
+    } else if (
+      pathname !== "/login" && 
+      pathname !== "/register" &&
+      pathname !== "/forgot-password" &&
+      pathname !== "/reset-password" &&
+      pathname !== "/verify"
+    ) {
       router.push("/login");
     }
   }, [pathname, router]);

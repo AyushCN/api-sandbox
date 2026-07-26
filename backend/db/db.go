@@ -8,9 +8,13 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+	"github.com/redis/go-redis/v9"
 )
 
-var DB *gorm.DB
+var (
+	DB          *gorm.DB
+	RedisClient *redis.Client
+)
 
 func InitDB() {
 	dsn := os.Getenv("DATABASE_URL")
@@ -33,4 +37,16 @@ func InitDB() {
 	}
 
 	log.Println("Database connection established and schemas migrated.")
+
+	redisUrl := os.Getenv("REDIS_URL")
+	if redisUrl == "" {
+		redisUrl = "redis://localhost:6379"
+	}
+	
+	opt, err := redis.ParseURL(redisUrl)
+	if err != nil {
+		log.Fatalf("Failed to parse Redis URI: %v", err)
+	}
+
+	RedisClient = redis.NewClient(opt)
 }

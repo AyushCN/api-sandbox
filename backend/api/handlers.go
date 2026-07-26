@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -23,8 +24,11 @@ type CreateEnvironmentRequest struct {
 func SetupRoutes(router *gin.Engine) {
 	api := router.Group("/api")
 	{
-		api.POST("/auth/register", Register)
+		api.POST("/auth/register", RateLimitRegister(), Register)
 		api.POST("/auth/login", Login)
+		api.GET("/auth/verify", VerifyEmail)
+		api.POST("/auth/forgot-password", RateLimitRegister(), ForgotPassword)
+		api.POST("/auth/reset-password", ResetPassword)
 
 		protected := api.Group("/environments")
 		protected.Use(AuthMiddleware())
@@ -60,9 +64,44 @@ func CreateEnvironment(c *gin.Context) {
 	}
 
 	userID, _ := c.Get("userId")
+	uid := userID.(string)
+
+	// Fetch user to get quota limits
+	var user models.User
+	if err := db.DB.First(&user, "id = ?", uid).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch user limits"})
+		return
+	}
+
+	// 1. Check concurrent running/building environments
+	var currentActive int64
+	db.DB.Model(&models.Environment{}).
+		Where("user_id = ? AND status IN ?", uid, []models.EnvironmentStatus{models.StatusBuilding, models.StatusRunning}).
+		Count(&currentActive)
+
+	if currentActive >= int64(user.MaxEnvironments) {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": fmt.Sprintf("You have reached the limit of %d concurrent environments. Stop or delete an existing environment first.", user.MaxEnvironments),
+		})
+		return
+	}
+
+	// 2. Check builds per hour
+	oneHourAgo := time.Now().Add(-1 * time.Hour)
+	var buildsLastHour int64
+	db.DB.Model(&models.Environment{}).
+		Where("user_id = ? AND created_at > ?", uid, oneHourAgo).
+		Count(&buildsLastHour)
+
+	if buildsLastHour >= int64(user.MaxBuildsPerHour) {
+		c.JSON(http.StatusTooManyRequests, gin.H{
+			"error": fmt.Sprintf("You can only create %d environments per hour. Please try again later.", user.MaxBuildsPerHour),
+		})
+		return
+	}
 
 	env := models.Environment{
-		UserID:       userID.(string),
+		UserID:       uid,
 		Name:         req.Name,
 		GitURL:       req.GitURL,
 		GithubBranch: req.GithubBranch,

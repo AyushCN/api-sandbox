@@ -20,9 +20,16 @@ const (
 type User struct {
 	ID        string    `gorm:"type:text;primaryKey" json:"id"`
 	Email     string    `gorm:"type:text;unique;not null" json:"email"`
-	Password  string    `gorm:"type:text;not null" json:"-"` // never return password to client
-	CreatedAt time.Time `gorm:"default:current_timestamp" json:"createdAt"`
-	UpdatedAt time.Time `gorm:"default:current_timestamp" json:"updatedAt"`
+	Password         string     `gorm:"type:text;not null" json:"-"` // never return password to client
+	IsEmailVerified  bool       `gorm:"default:false" json:"isEmailVerified"`
+	VerificationCode  string     `gorm:"type:text" json:"-"`
+	VerificationExp   *time.Time `gorm:"type:timestamp" json:"-"`
+	ResetPasswordCode string     `gorm:"type:text" json:"-"`
+	ResetPasswordExp  *time.Time `gorm:"type:timestamp" json:"-"`
+	MaxEnvironments   int        `gorm:"default:5" json:"maxEnvironments"`
+	MaxBuildsPerHour  int        `gorm:"default:10" json:"maxBuildsPerHour"`
+	CreatedAt         time.Time  `gorm:"default:current_timestamp" json:"createdAt"`
+	UpdatedAt        time.Time  `gorm:"default:current_timestamp" json:"updatedAt"`
 }
 
 func (u *User) BeforeCreate(tx *gorm.DB) (err error) {

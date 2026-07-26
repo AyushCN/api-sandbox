@@ -24,7 +24,7 @@ export default function RegisterPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Registration failed");
       
-      toast.success("Account created! Please sign in.");
+      toast.success(data.message || "Account created! Please check your email to verify.");
       router.push("/login");
     } catch (err: any) {
       toast.error(err.message);
@@ -55,7 +55,8 @@ export default function RegisterPage() {
             onChange={(e) => setPassword(e.target.value)}
             className="glass-input w-full px-4 py-2"
             required
-            minLength={6}
+            minLength={12}
+            placeholder="Min 12 chars (upper, lower, num, special)"
           />
         </div>
         <button

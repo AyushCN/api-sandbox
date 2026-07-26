@@ -39,6 +39,9 @@ func CloneAndBuildImage(ctx context.Context, envID string, gitURL string, branch
 	})
 
 	// 1. Clone Repo
+	// Ensure temp directory is clean before cloning
+	_ = os.RemoveAll(tmpDir)
+	
 	// Try cloning with the specified branch first
 	cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", "--branch", branch, gitURL, tmpDir)
 	if _, err := cmd.CombinedOutput(); err != nil {
@@ -61,6 +64,21 @@ func CloneAndBuildImage(ctx context.Context, envID string, gitURL string, branch
 		Message:       fmt.Sprintf("Building Docker image %s...", imageTag),
 		Level:         models.LogLevelInfo,
 	})
+
+	// Pre-build analysis: Check if Dockerfile exists and has an EXPOSE statement
+	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
+	if content, err := os.ReadFile(dockerfilePath); err == nil {
+		if !strings.Contains(strings.ToUpper(string(content)), "EXPOSE ") {
+			// Append EXPOSE 5000 as a fallback so PublishAllPorts works
+			newContent := string(content) + "\n# Auto-injected by API Sandbox\nEXPOSE 5000\n"
+			os.WriteFile(dockerfilePath, []byte(newContent), 0644)
+			db.DB.Create(&models.Log{
+				EnvironmentID: envID,
+				Message:       "No EXPOSE instruction found in Dockerfile. Auto-injecting 'EXPOSE 5000'...",
+				Level:         models.LogLevelWarn,
+			})
+		}
+	}
 
 	// 2. Tar the directory for build context
 	tarStream, err := tarballDir(tmpDir)
@@ -103,6 +121,9 @@ func StartContainer(ctx context.Context, envID string, imageTag string) (string,
 		Message:       fmt.Sprintf("Starting container for image %s...", imageTag),
 		Level:         models.LogLevelInfo,
 	})
+
+	// Pre-cleanup in case a zombie container with this name exists from a previous failed run
+	_ = CleanupContainer(ctx, fmt.Sprintf("api-sandbox-env-%s", envID))
 
 	opts := docker.CreateContainerOptions{
 		Name: fmt.Sprintf("api-sandbox-env-%s", envID),

@@ -5,7 +5,7 @@ import useSWR from "swr";
 import { useParams, useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import "xterm/css/xterm.css";
-import { Activity, Box, Clock, ExternalLink, GitBranch, Terminal as TerminalIcon, Loader2, Trash2 } from "lucide-react";
+import { Activity, Box, Clock, ExternalLink, GitBranch, Terminal as TerminalIcon, Loader2, Trash2, RefreshCw } from "lucide-react";
 
 import { fetchWithAuth } from "@/lib/auth";
 
@@ -26,6 +26,7 @@ export default function EnvironmentDetail() {
   const id = params.id as string;
   const router = useRouter();
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isRestarting, setIsRestarting] = useState(false);
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<any>(null);
   
@@ -112,10 +113,33 @@ export default function EnvironmentDetail() {
       });
       if (!res.ok) throw new Error("Failed to delete sandbox");
       toast.success("Sandbox deleted successfully");
-      router.push("/");
+      router.push("/dashboard");
     } catch (e: any) {
       toast.error(e.message);
       setIsDeleting(false);
+    }
+  };
+
+  const handleRestart = async () => {
+    if (!confirm("Are you sure you want to restart this sandbox? It will pull the latest code and rebuild the image.")) return;
+    setIsRestarting(true);
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(`/api/environments/${id}/restart`, { 
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error("Failed to restart sandbox");
+      toast.success("Sandbox restart initiated");
+      // Clear local terminal logs as they will be re-fetched
+      if (xtermRef.current) {
+        xtermRef.current.clear();
+        xtermRef.current._logCount = 0;
+      }
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setIsRestarting(false);
     }
   };
 
@@ -169,9 +193,17 @@ export default function EnvironmentDetail() {
               </a>
             )}
             <button
+              onClick={handleRestart}
+              disabled={isRestarting || env.status === 'BUILDING'}
+              className="px-5 py-2.5 rounded-lg border border-primary/30 bg-primary/10 text-primary hover:bg-primary/20 flex items-center gap-2 transition-colors disabled:opacity-50"
+            >
+              {isRestarting ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+              Restart
+            </button>
+            <button
               onClick={handleDelete}
               disabled={isDeleting}
-              className="px-5 py-2.5 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20 flex items-center gap-2 transition-colors"
+              className="px-5 py-2.5 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20 flex items-center gap-2 transition-colors disabled:opacity-50"
             >
               {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
               Delete

@@ -36,6 +36,7 @@ func SetupRoutes(router *gin.Engine) {
 			protected.GET("", GetEnvironments)
 			protected.POST("", CreateEnvironment)
 			protected.GET("/:id", GetEnvironment)
+			protected.POST("/:id/restart", RestartEnvironment)
 			protected.DELETE("/:id", DeleteEnvironment)
 			protected.GET("/:id/logs/stream", StreamLogs)
 		}
@@ -187,6 +188,8 @@ func DeleteEnvironment(c *gin.Context) {
 	if env.ContainerID != nil && *env.ContainerID != "" {
 		_ = worker.CleanupContainer(c.Request.Context(), *env.ContainerID)
 	}
+	// Also attempt to cleanup by predictable name, in case it was created but ContainerID wasn't saved
+	_ = worker.CleanupContainer(c.Request.Context(), fmt.Sprintf("api-sandbox-env-%s", env.ID))
 
 	// Delete from database
 	if err := db.DB.Delete(&env).Error; err != nil {
@@ -195,5 +198,50 @@ func DeleteEnvironment(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Environment deleted successfully"})
+}
+
+func RestartEnvironment(c *gin.Context) {
+	id := c.Param("id")
+	userID, _ := c.Get("userId")
+	
+	var env models.Environment
+	if err := db.DB.Where("user_id = ?", userID).First(&env, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Environment not found"})
+		return
+	}
+
+	// Try to stop and remove old docker container if it exists
+	if env.ContainerID != nil && *env.ContainerID != "" {
+		_ = worker.CleanupContainer(c.Request.Context(), *env.ContainerID)
+	}
+	// Also attempt to cleanup by predictable name, in case it was created but ContainerID wasn't saved
+	_ = worker.CleanupContainer(c.Request.Context(), fmt.Sprintf("api-sandbox-env-%s", env.ID))
+
+	// Delete old logs
+	db.DB.Where("environment_id = ?", env.ID).Delete(&models.Log{})
+
+	// Update status back to building
+	env.Status = models.StatusBuilding
+	env.ContainerID = nil
+	if err := db.DB.Save(&env).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update environment status"})
+		return
+	}
+
+	// Enqueue the build task again
+	payload, err := json.Marshal(map[string]string{"environmentId": env.ID})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to serialize task payload"})
+		return
+	}
+
+	task := asynq.NewTask(queue.TaskBuildEnvironment, payload)
+	_, err = queue.Client.Enqueue(task, asynq.MaxRetry(3))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to enqueue restart task"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Environment restart initiated"})
 }
 

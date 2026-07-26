@@ -93,65 +93,69 @@ export default function UploadPage() {
   };
 
   return (
-    <div className="max-w-2xl mx-auto mt-12">
-      <div className="glass-panel p-8 md:p-12">
-        <div className="text-center mb-10">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary/10 text-primary mb-6 ring-1 ring-primary/20">
-            <Code className="w-8 h-8" />
+    <div className="max-w-2xl mx-auto mt-12 mb-24">
+      <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-8 md:p-12 shadow-2xl relative overflow-hidden">
+        <div className="absolute top-0 right-0 p-16 opacity-5 pointer-events-none">
+          <span className="material-symbols-outlined text-[200px] text-primary-fixed">cloud_upload</span>
+        </div>
+        
+        <div className="text-center mb-10 relative z-10">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary-container/20 text-primary-fixed mb-6 border border-primary-container/30 hover:scale-110 transition-transform">
+            <span className="material-symbols-outlined text-[32px]">deployed_code</span>
           </div>
-          <h1 className="text-3xl font-bold text-white mb-3">Deploy New Sandbox</h1>
-          <p className="text-white/60">Connect a public GitHub repository to instantly build and deploy an isolated container.</p>
+          <h1 className="text-3xl font-bold text-on-surface mb-3">Deploy New Sandbox</h1>
+          <p className="text-on-surface-variant">Connect a public GitHub repository to instantly build and deploy an isolated container.</p>
         </div>
 
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-6 relative z-10">
           <div className="space-y-2">
-            <label className="text-sm font-medium text-white/80">Project Name</label>
+            <label className="text-sm font-bold tracking-wide text-on-surface-variant uppercase">Project Name</label>
             <input
               {...register("name")}
               placeholder="e.g. my-awesome-api"
-              className="glass-input w-full px-4 py-3"
+              className="w-full bg-surface-container px-4 py-3 rounded-lg border border-outline-variant text-on-surface focus:border-primary-fixed focus:ring-1 focus:ring-primary-fixed transition-all"
             />
-            {errors.name && <p className="text-sm text-red-400">{errors.name.message}</p>}
+            {errors.name && <p className="text-sm text-error font-medium">{errors.name.message}</p>}
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-medium text-white/80">GitHub Repository URL</label>
+            <label className="text-sm font-bold tracking-wide text-on-surface-variant uppercase">GitHub Repository URL</label>
             <input
               {...register("gitUrl")}
               placeholder="https://github.com/username/repo"
-              className="glass-input w-full px-4 py-3"
+              className="w-full bg-surface-container px-4 py-3 rounded-lg border border-outline-variant text-on-surface focus:border-primary-fixed focus:ring-1 focus:ring-primary-fixed transition-all"
             />
-            {errors.gitUrl && <p className="text-sm text-red-400">{errors.gitUrl.message}</p>}
+            {errors.gitUrl && <p className="text-sm text-error font-medium">{errors.gitUrl.message}</p>}
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-medium text-white/80 flex items-center gap-2">
+            <label className="text-sm font-bold tracking-wide text-on-surface-variant uppercase flex items-center gap-2">
               Branch 
-              {isFetchingBranches && <Loader2 className="w-3 h-3 animate-spin text-white/50" />}
+              {isFetchingBranches && <Loader2 className="w-3 h-3 animate-spin text-primary-fixed" />}
             </label>
             {branches.length > 0 ? (
               <select
                 {...register("githubBranch")}
-                className="glass-input w-full px-4 py-3 appearance-none bg-transparent"
+                className="w-full bg-surface-container px-4 py-3 rounded-lg border border-outline-variant text-on-surface focus:border-primary-fixed focus:ring-1 focus:ring-primary-fixed transition-all appearance-none"
               >
                 {branches.map(b => (
-                  <option key={b} value={b} className="bg-slate-900 text-white">{b}</option>
+                  <option key={b} value={b} className="bg-surface-container text-on-surface">{b}</option>
                 ))}
               </select>
             ) : (
               <input
                 {...register("githubBranch")}
                 placeholder="main"
-                className="glass-input w-full px-4 py-3"
+                className="w-full bg-surface-container px-4 py-3 rounded-lg border border-outline-variant text-on-surface focus:border-primary-fixed focus:ring-1 focus:ring-primary-fixed transition-all"
               />
             )}
-            {errors.githubBranch && <p className="text-sm text-red-400">{errors.githubBranch.message}</p>}
+            {errors.githubBranch && <p className="text-sm text-error font-medium">{errors.githubBranch.message}</p>}
           </div>
 
           <button
             type="submit"
             disabled={isSubmitting}
-            className="glass-button w-full py-4 mt-8 flex items-center justify-center text-lg"
+            className="w-full py-4 mt-8 flex items-center justify-center text-lg bg-primary-container text-on-primary-fixed-variant rounded-xl font-bold hover:shadow-[0_0_20px_rgba(0,240,255,0.2)] active:scale-95 transition-all disabled:opacity-50 disabled:pointer-events-none"
           >
             {isSubmitting ? (
               <>

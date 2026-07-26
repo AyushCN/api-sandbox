@@ -4,7 +4,9 @@ import { useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 
-export default function VerifyPage() {
+import { Suspense } from "react";
+
+function VerifyContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const code = searchParams.get("code");
@@ -41,13 +43,13 @@ export default function VerifyPage() {
   }, [code]);
 
   return (
-    <div className="flex min-h-screen items-center justify-center p-4">
-      <div className="w-full max-w-md space-y-8 rounded-2xl bg-white/5 p-8 text-center shadow-xl backdrop-blur-lg border border-white/10">
-        <h2 className="text-3xl font-bold tracking-tight text-white">
+    <div className="flex items-start mt-20 justify-center p-4">
+      <div className="w-full max-w-md space-y-8 rounded-2xl bg-surface-container-lowest p-8 text-center shadow-xl border border-outline-variant">
+        <h2 className="text-3xl font-bold tracking-tight text-on-surface">
           Email Verification
         </h2>
         
-        <div className={`p-4 rounded-lg ${status === 'loading' ? 'bg-blue-500/20 text-blue-200' : status === 'success' ? 'bg-green-500/20 text-green-200' : 'bg-red-500/20 text-red-200'}`}>
+        <div className={`p-4 rounded-lg font-mono text-sm ${status === 'loading' ? 'bg-tertiary-fixed/10 text-tertiary-fixed' : status === 'success' ? 'bg-primary-fixed/10 text-primary-fixed' : 'bg-error/10 text-error'}`}>
           {message}
         </div>
 
@@ -55,7 +57,7 @@ export default function VerifyPage() {
           <div className="mt-6">
             <Link 
               href="/login" 
-              className="inline-flex w-full justify-center rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 transition-colors"
+              className="inline-flex w-full justify-center rounded-lg bg-primary-container text-on-primary-fixed-variant px-4 py-3 text-sm font-bold shadow-sm hover:shadow-[0_0_15px_rgba(0,240,255,0.2)] active:scale-95 transition-all"
             >
               Go to Login
             </Link>
@@ -63,5 +65,13 @@ export default function VerifyPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function VerifyPage() {
+  return (
+    <Suspense fallback={<div className="flex items-start mt-20 justify-center text-on-surface">Loading...</div>}>
+      <VerifyContent />
+    </Suspense>
   );
 }

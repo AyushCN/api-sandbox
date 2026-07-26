@@ -54,7 +54,6 @@ export default function EnvironmentDetail() {
         fontSize: 14,
         convertEol: true,
         cursorBlink: true,
-        padding: 16,
       });
 
       fitAddon = new FitAddon();

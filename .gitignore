@@ -34,3 +34,11 @@ out/
 tmp/
 coverage/
 .temp/
+
+# AI and Agent Specific
+.agents/
+.claude/
+.windsurf/
+skills-lock.json
+AGENTS.md
+CLAUDE.md

@@ -23,17 +23,25 @@ type CreateEnvironmentRequest struct {
 func SetupRoutes(router *gin.Engine) {
 	api := router.Group("/api")
 	{
-		api.GET("/environments", GetEnvironments)
-		api.POST("/environments", CreateEnvironment)
-		api.GET("/environments/:id", GetEnvironment)
-		api.DELETE("/environments/:id", DeleteEnvironment)
-		api.GET("/environments/:id/logs/stream", StreamLogs)
+		api.POST("/auth/register", Register)
+		api.POST("/auth/login", Login)
+
+		protected := api.Group("/environments")
+		protected.Use(AuthMiddleware())
+		{
+			protected.GET("", GetEnvironments)
+			protected.POST("", CreateEnvironment)
+			protected.GET("/:id", GetEnvironment)
+			protected.DELETE("/:id", DeleteEnvironment)
+			protected.GET("/:id/logs/stream", StreamLogs)
+		}
 	}
 }
 
 func GetEnvironments(c *gin.Context) {
+	userID, _ := c.Get("userId")
 	var environments []models.Environment
-	if err := db.DB.Order("created_at desc").Find(&environments).Error; err != nil {
+	if err := db.DB.Where("user_id = ?", userID).Order("created_at desc").Find(&environments).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch environments"})
 		return
 	}
@@ -51,7 +59,10 @@ func CreateEnvironment(c *gin.Context) {
 		req.GithubBranch = "main"
 	}
 
+	userID, _ := c.Get("userId")
+
 	env := models.Environment{
+		UserID:       userID.(string),
 		Name:         req.Name,
 		GitURL:       req.GitURL,
 		GithubBranch: req.GithubBranch,
@@ -83,8 +94,9 @@ func CreateEnvironment(c *gin.Context) {
 
 func GetEnvironment(c *gin.Context) {
 	id := c.Param("id")
+	userID, _ := c.Get("userId")
 	var env models.Environment
-	if err := db.DB.Preload("Logs").Preload("Metrics").First(&env, "id = ?", id).Error; err != nil {
+	if err := db.DB.Preload("Logs").Preload("Metrics").Where("user_id = ?", userID).First(&env, "id = ?", id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Environment not found"})
 		return
 	}
@@ -125,8 +137,9 @@ func StreamLogs(c *gin.Context) {
 
 func DeleteEnvironment(c *gin.Context) {
 	id := c.Param("id")
+	userID, _ := c.Get("userId")
 	var env models.Environment
-	if err := db.DB.First(&env, "id = ?", id).Error; err != nil {
+	if err := db.DB.Where("user_id = ?", userID).First(&env, "id = ?", id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Environment not found"})
 		return
 	}

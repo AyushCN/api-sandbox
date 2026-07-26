@@ -62,7 +62,7 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 	}
 
 	// 3. Update DB to RUNNING
-	publicURL := fmt.Sprintf("http://localhost:%d", port)
+	publicURL := fmt.Sprintf("http://%s.localhost", env.ID)
 	db.DB.Model(&env).Updates(map[string]interface{}{
 		"status":       models.StatusRunning,
 		"container_id": containerID,

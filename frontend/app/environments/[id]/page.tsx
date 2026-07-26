@@ -7,10 +7,10 @@ import toast from "react-hot-toast";
 import "xterm/css/xterm.css";
 import { Activity, Box, Clock, ExternalLink, GitBranch, Terminal as TerminalIcon, Loader2, Trash2 } from "lucide-react";
 
+import { fetchWithAuth } from "@/lib/auth";
+
 const fetcher = async (url: string) => {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error('Not found');
-  return res.json();
+  return fetchWithAuth(url);
 };
 
 const statusColors: Record<string, string> = {
@@ -106,7 +106,11 @@ export default function EnvironmentDetail() {
     if (!confirm("Are you sure you want to delete this sandbox? This cannot be undone.")) return;
     setIsDeleting(true);
     try {
-      const res = await fetch(`/api/environments/${id}`, { method: 'DELETE' });
+      const token = localStorage.getItem("token");
+      const res = await fetch(`/api/environments/${id}`, { 
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       if (!res.ok) throw new Error("Failed to delete sandbox");
       toast.success("Sandbox deleted successfully");
       router.push("/");

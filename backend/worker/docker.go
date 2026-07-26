@@ -108,6 +108,10 @@ func StartContainer(ctx context.Context, envID string, imageTag string) (string,
 		Name: fmt.Sprintf("api-sandbox-env-%s", envID),
 		Config: &docker.Config{
 			Image: imageTag,
+			Labels: map[string]string{
+				"traefik.enable": "true",
+				fmt.Sprintf("traefik.http.routers.env-%s.rule", envID): fmt.Sprintf("Host(`%s.localhost`)", envID),
+			},
 		},
 		HostConfig: &docker.HostConfig{
 			Memory:          512 * 1024 * 1024,

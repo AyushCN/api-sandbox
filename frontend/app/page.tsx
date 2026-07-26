@@ -6,7 +6,9 @@ import { Plus, Server, GitBranch, Activity, Clock, Box } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { motion } from "framer-motion";
 
-const fetcher = (url: string) => fetch(url).then((res) => res.json());
+import { fetchWithAuth } from "@/lib/auth";
+
+const fetcher = (url: string) => fetchWithAuth(url);
 
 interface Environment {
   id: string;

@@ -7,6 +7,7 @@ import * as z from "zod";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import { Code, Loader2 } from "lucide-react";
+import { fetchWithAuth } from "@/lib/auth";
 
 const schema = z.object({
   name: z.string().min(3, "Name must be at least 3 characters").max(50),
@@ -48,7 +49,10 @@ export default function UploadPage() {
       setIsFetchingBranches(true);
       try {
         const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/branches`);
-        if (!res.ok) throw new Error("Failed to fetch branches");
+        if (!res.ok) {
+          setBranches([]);
+          return;
+        }
         const data = await res.json();
         const branchNames = data.map((b: any) => b.name);
         setBranches(branchNames);
@@ -58,7 +62,7 @@ export default function UploadPage() {
         else if (branchNames.includes("master")) setValue("githubBranch", "master");
         else if (branchNames.length > 0) setValue("githubBranch", branchNames[0]);
       } catch (err) {
-        console.error(err);
+        // Silently fail and fallback to manual input if network request fails entirely
         setBranches([]);
       } finally {
         setIsFetchingBranches(false);
@@ -72,18 +76,13 @@ export default function UploadPage() {
   const onSubmit = async (data: FormData) => {
     setIsSubmitting(true);
     try {
-      const response = await fetch("/api/environments", {
+      const response = await fetchWithAuth("/api/environments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to create environment");
-      }
-
-      const env = await response.json();
+      const env = response;
       toast.success("Sandbox created! Building image...");
       router.push(`/environments/${env.id}`);
     } catch (error: any) {

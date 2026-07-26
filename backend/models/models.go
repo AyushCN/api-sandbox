@@ -17,8 +17,25 @@ const (
 	StatusFailed   EnvironmentStatus = "FAILED"
 )
 
+type User struct {
+	ID        string    `gorm:"type:text;primaryKey" json:"id"`
+	Email     string    `gorm:"type:text;unique;not null" json:"email"`
+	Password  string    `gorm:"type:text;not null" json:"-"` // never return password to client
+	CreatedAt time.Time `gorm:"default:current_timestamp" json:"createdAt"`
+	UpdatedAt time.Time `gorm:"default:current_timestamp" json:"updatedAt"`
+}
+
+func (u *User) BeforeCreate(tx *gorm.DB) (err error) {
+	if u.ID == "" {
+		u.ID = uuid.NewString()
+	}
+	return
+}
+
 type Environment struct {
 	ID           string            `gorm:"type:text;primaryKey" json:"id"`
+	UserID       string            `gorm:"type:text;not null" json:"userId"`
+	User         User              `json:"-"`
 	Name         string            `gorm:"type:text;not null" json:"name"`
 	GitURL       string            `gorm:"type:text;not null" json:"gitUrl"`
 	GithubBranch string            `gorm:"type:text;default:main;not null" json:"githubBranch"`

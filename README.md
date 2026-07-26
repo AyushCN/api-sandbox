@@ -1,87 +1,59 @@
-# API Sandbox
+# API Sandbox Orchestration Platform
 
-A production-grade, self-hosted platform that enables developers to deploy backend services in isolated environments and instantly generate shareable public API endpoints.
+A powerful, full-stack environment provisioning and sandboxing platform. This project allows users to deploy and manage Dockerized GitHub repositories on-demand through a sleek web dashboard, orchestrating the container lifecycle behind the scenes.
 
-This project is built as a unified Next.js 16 monorepo containing both the frontend and the backend API routes, interfacing natively with Docker via `dockerode` to spawn sandbox containers.
+## 🚀 Key Features Achieved
 
-## 🚀 Architecture & Tech Stack
+### Backend Orchestration (Go / Gin / Asynq)
+*   **Docker Engine Integration:** Directly interfaces with the Docker Daemon via `fsouza/go-dockerclient` to build images from tarballs and manage containers.
+*   **Dynamic Port Mapping:** Automatically binds internal exposed ports to host ports using `PublishAllPorts: true`, supporting any port (5000, 8080, 80) seamlessly.
+*   **Asynchronous Task Queue:** Uses `hibiken/asynq` with Redis to handle long-running Docker build tasks in the background without blocking the API.
+*   **Robust Container Lifecycle:** Handles everything from `git clone` (with branch fallbacks), tarball creation, image building, starting, and gracefully stopping/removing exited containers.
+*   **State Management:** Stores environment metadata, timestamps, and streaming log history securely in PostgreSQL via GORM.
 
-- **Framework:** Next.js 16 (App Router, React 19, TypeScript)
-- **Database & ORM:** PostgreSQL 16 managed via Prisma ORM
-- **Queue & Background Jobs:** Redis 7 with Bull (via a standalone Node.js worker)
-- **Containerization:** Docker & Dockerode (Node.js Docker API client)
-- **Validation:** Zod
-- **Styling:** Tailwind CSS (Coming in Phase 3)
+### Frontend Dashboard (Next.js / React / Tailwind)
+*   **Sleek Modern UI:** Built with dark mode, glassmorphism elements, and responsive layouts.
+*   **Live Terminal Output:** Integrates `xterm.js` to render Docker build logs in a native-feeling terminal window.
+*   **Real-time Log Polling:** Bypasses Next.js API proxy buffering bugs by utilizing highly reliable `useSWR` polling for real-time log appending.
+*   **Dynamic GitHub Branching:** Automatically fetches and displays available branches for a given GitHub repository using the public GitHub API before deployment.
+*   **Environment Management:** One-click deployment, status monitoring (Building, Running, Failed, Stopped), URL generation, and container deletion.
 
-## 🛠️ Local Development Setup
+## 🛠️ Tech Stack
 
-To run the API Sandbox locally, you will need **Node.js (v20+)** and **Docker Desktop / Docker Engine** installed on your host machine.
+*   **Go** (Backend API & Worker)
+*   **Gin** (HTTP Router)
+*   **GORM** (PostgreSQL ORM)
+*   **Asynq & Redis** (Background Job Queue)
+*   **Docker Engine API** (Containerization)
+*   **Next.js 14 & React** (Frontend Dashboard)
+*   **Tailwind CSS** (Styling)
+*   **xterm.js** (In-browser Terminal)
 
-### 1. Clone & Install Dependencies
+## 🏃 Getting Started
+
+### 1. Start Infrastructure Services
+Ensure you have Redis and PostgreSQL running.
 ```bash
-git clone <repository-url>
-cd api-sandbox
-npm install
+docker start api-sandbox-postgres-1 api-sandbox-redis-1
 ```
 
-### 2. Start the Infrastructure (Database & Redis)
-Ensure the Docker daemon is running on your machine, then spin up the PostgreSQL and Redis containers using Docker Compose:
+### 2. Run the Go Backend & Worker
 ```bash
-docker compose up -d
+cd backend
+go build -o server .
+./server
 ```
 
-### 3. Environment Variables
-Create a `.env.local` file in the root directory (this should already be generated with default connection strings if you ran the initial setup):
-```env
-DATABASE_URL="postgresql://postgres:postgres@localhost:5432/api_sandbox?schema=public"
-REDIS_URL="redis://localhost:6379"
-```
-
-### 4. Database Migrations
-Sync the Prisma schema with the local PostgreSQL database:
+### 3. Run the Next.js Frontend
+In a new terminal:
 ```bash
-npx prisma db push
-```
-
-### 5. Start the Application
-You need to run two separate processes for local development: the Next.js web server and the background queue worker.
-
-**Terminal 1 (Next.js Server):**
-```bash
+cd frontend
 npm run dev
 ```
-*The web server will be available at http://localhost:3000*
+Open `http://localhost:3000` in your browser.
 
-**Terminal 2 (Background Worker):**
-```bash
-npm run worker
-```
-*The worker process listens to the Redis queue, clones the requested GitHub repositories, builds the Docker images, and spawns the isolated containers.*
-
-## 🔌 API Endpoints
-
-### `GET /api/environments`
-Returns a list of all sandbox environments ordered by creation date.
-
-### `POST /api/environments`
-Submits a new sandbox environment build request.
-- **Payload:**
-  ```json
-  {
-    "name": "my-express-app",
-    "gitUrl": "https://github.com/expressjs/express",
-    "githubBranch": "master"
-  }
-  ```
-- **Action:** Creates a database record and pushes a job to the Redis queue. The background worker picks it up asynchronously.
-
-### `GET /api/environments/[id]`
-Retrieves a specific environment by its ID, including its most recent build logs and resource metrics.
-
-## ⚠️ Important Note on Docker Permissions
-The background worker requires direct access to the host machine's Docker daemon to spawn containers. It connects via the default UNIX socket `/var/run/docker.sock`. 
-If you encounter a `permission denied` error, ensure your current user is in the `docker` group, or run:
-```bash
-sudo chmod 666 /var/run/docker.sock
-```
-*(Only do this for local development!)*
+## 📝 Recent Fixes & Milestones
+*   Fixed container crashing invisibly by exposing Docker runtime exit codes.
+*   Fixed the `PublishAllPorts` mapping, completely eliminating hardcoded Port 3000/8080 constraints.
+*   Replaced buggy Server-Sent Events (SSE) with robust SWR polling for flawless real-time terminal log rendering.
+*   Implemented full cleanup lifecycle for deleted sandboxes to prevent orphaned Docker containers and free up system resources.

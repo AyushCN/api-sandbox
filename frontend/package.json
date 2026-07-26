@@ -10,10 +10,12 @@
     "worker": "tsx --env-file=.env.local worker.ts"
   },
   "dependencies": {
+    "@hookform/resolvers": "^5.5.3",
     "@prisma/adapter-pg": "^7.9.0",
     "@prisma/client": "^7.9.0",
     "@xyflow/react": "^12.11.2",
     "bull": "^4.16.5",
+    "date-fns": "^4.4.0",
     "dockerode": "^5.0.1",
     "framer-motion": "^12.42.2",
     "ioredis": "^5.11.1",

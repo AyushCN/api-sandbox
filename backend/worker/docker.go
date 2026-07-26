@@ -22,7 +22,7 @@ var dockerClient *docker.Client
 
 func InitDocker() {
 	var err error
-	dockerClient, err = docker.NewClientFromEnv()
+	dockerClient, err = docker.NewVersionedClientFromEnv("1.41")
 	if err != nil {
 		log.Fatalf("Failed to initialize docker client: %v", err)
 	}
@@ -65,8 +65,47 @@ func CloneAndBuildImage(ctx context.Context, envID string, gitURL string, branch
 		Level:         models.LogLevelInfo,
 	})
 
-	// Pre-build analysis: Check if Dockerfile exists and has an EXPOSE statement
+	// Pre-build analysis: Check if Dockerfile exists
 	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
+	dockerfileInfo, err := os.Stat(dockerfilePath)
+	hasDockerfile := err == nil && !dockerfileInfo.IsDir()
+
+	if !hasDockerfile {
+		// Use Nixpacks
+		db.DB.Create(&models.Log{
+			EnvironmentID: envID,
+			Message:       "No Dockerfile found. Generating build plan using Nixpacks...",
+			Level:         models.LogLevelInfo,
+		})
+
+		nixpacksPath := "nixpacks"
+		if home, err := os.UserHomeDir(); err == nil {
+			localBin := filepath.Join(home, ".local", "bin", "nixpacks")
+			if _, err := os.Stat(localBin); err == nil {
+				nixpacksPath = localBin
+			}
+		}
+
+		cmd := exec.CommandContext(ctx, nixpacksPath, "build", tmpDir, "--out", tmpDir, "--no-error-without-start")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return "", fmt.Errorf("nixpacks build failed: %s - %v", string(out), err)
+		}
+
+		db.DB.Create(&models.Log{
+			EnvironmentID: envID,
+			Message:       "Nixpacks build plan generated successfully.",
+			Level:         models.LogLevelInfo,
+		})
+
+		// Move .nixpacks/Dockerfile to root Dockerfile so we don't need to specify opts.Dockerfile
+		err = os.Rename(filepath.Join(tmpDir, ".nixpacks", "Dockerfile"), filepath.Join(tmpDir, "Dockerfile"))
+		if err != nil {
+			return "", fmt.Errorf("failed to move Nixpacks Dockerfile: %v", err)
+		}
+		dockerfilePath = filepath.Join(tmpDir, "Dockerfile")
+	}
+
 	if content, err := os.ReadFile(dockerfilePath); err == nil {
 		if !strings.Contains(strings.ToUpper(string(content)), "EXPOSE ") {
 			// Append EXPOSE 5000 as a fallback so PublishAllPorts works
@@ -93,6 +132,7 @@ func CloneAndBuildImage(ctx context.Context, envID string, gitURL string, branch
 		InputStream:  tarStream,
 		OutputStream: buf,
 		ContextDir:   "", // Root of the tarball
+		Version:      docker.BuilderBuildKit,
 	}
 
 	if err := dockerClient.BuildImage(opts); err != nil {
@@ -125,13 +165,31 @@ func StartContainer(ctx context.Context, envID string, imageTag string) (string,
 	// Pre-cleanup in case a zombie container with this name exists from a previous failed run
 	_ = CleanupContainer(ctx, fmt.Sprintf("api-sandbox-env-%s", envID))
 
+	// Inspect image to find the exposed port
+	imageInfo, err := dockerClient.InspectImage(imageTag)
+	var exposedPort string
+	if err == nil && imageInfo.Config != nil {
+		for port := range imageInfo.Config.ExposedPorts {
+			exposedPort = port.Port()
+			break
+		}
+	}
+	if exposedPort == "" {
+		exposedPort = "5000"
+	}
+
 	opts := docker.CreateContainerOptions{
 		Name: fmt.Sprintf("api-sandbox-env-%s", envID),
 		Config: &docker.Config{
 			Image: imageTag,
+			Env: []string{
+				fmt.Sprintf("PORT=%s", exposedPort),
+				"HOST=0.0.0.0",
+			},
 			Labels: map[string]string{
 				"traefik.enable": "true",
-				fmt.Sprintf("traefik.http.routers.env-%s.rule", envID): fmt.Sprintf("Host(`%s.localhost`)", envID),
+				fmt.Sprintf("traefik.http.routers.env-%s.rule", envID):                      fmt.Sprintf("Host(`%s.localhost`)", envID),
+				fmt.Sprintf("traefik.http.services.env-%s.loadbalancer.server.port", envID): exposedPort,
 			},
 		},
 		HostConfig: &docker.HostConfig{

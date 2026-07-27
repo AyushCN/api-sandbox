@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 
 	"github.com/api-sandbox/backend/db"
 	"github.com/api-sandbox/backend/models"
@@ -62,7 +63,16 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 	}
 
 	// 3. Update DB to RUNNING
-	publicURL := fmt.Sprintf("http://%s.localhost", env.ID)
+	domain := os.Getenv("DOMAIN")
+	if domain == "" {
+		domain = "localhost"
+	}
+	protocol := "https"
+	if domain == "localhost" {
+		protocol = "http"
+	}
+	
+	publicURL := fmt.Sprintf("%s://%s.%s", protocol, env.ID, domain)
 	db.DB.Model(&env).Updates(map[string]interface{}{
 		"status":       models.StatusRunning,
 		"container_id": containerID,

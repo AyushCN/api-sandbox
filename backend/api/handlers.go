@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/api-sandbox/backend/db"
@@ -25,7 +26,7 @@ func SetupRoutes(router *gin.Engine) {
 	api := router.Group("/api")
 	{
 		api.POST("/auth/register", RateLimitRegister(), Register)
-		api.POST("/auth/login", Login)
+		api.POST("/auth/login", RateLimitLogin(), Login)
 		api.GET("/auth/verify", VerifyEmail)
 		api.POST("/auth/forgot-password", RateLimitRegister(), ForgotPassword)
 		api.POST("/auth/reset-password", ResetPassword)
@@ -57,6 +58,11 @@ func CreateEnvironment(c *gin.Context) {
 	var req CreateEnvironmentRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid payload", "details": err.Error()})
+		return
+	}
+
+	if !strings.HasPrefix(req.GitURL, "https://github.com/") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Only https://github.com/ URLs are supported"})
 		return
 	}
 

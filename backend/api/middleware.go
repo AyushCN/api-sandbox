@@ -79,3 +79,30 @@ func RateLimitRegister() gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+func RateLimitLogin() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		clientIP := c.ClientIP()
+		key := fmt.Sprintf("login:%s", clientIP)
+
+		ctx := context.Background()
+		count, err := db.RedisClient.Incr(ctx, key).Result()
+		if err != nil {
+			fmt.Printf("Redis error during rate limiting: %v\n", err)
+			c.Next()
+			return
+		}
+
+		if count == 1 {
+			db.RedisClient.Expire(ctx, key, 1*time.Hour)
+		}
+
+		if count > 20 {
+			c.JSON(http.StatusTooManyRequests, gin.H{"error": "Too many login attempts. Try again in 1 hour."})
+			c.Abort()
+			return
+		}
+
+		c.Next()
+	}
+}

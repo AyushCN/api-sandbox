@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -32,9 +33,20 @@ func CloneAndBuildImage(ctx context.Context, envID string, gitURL string, branch
 	tmpDir := filepath.Join(os.TempDir(), "api-sandbox", envID)
 	imageTag := fmt.Sprintf("api-sandbox-%s", strings.ToLower(envID))
 
+	subDir := ""
+	gitURL = strings.TrimSuffix(gitURL, "/")
+
+	re := regexp.MustCompile(`^https://github\.com/([^/]+)/([^/]+)(?:/tree/([^/]+)/(.*))?$`)
+	matches := re.FindStringSubmatch(gitURL)
+	if len(matches) == 5 && matches[3] != "" {
+		gitURL = fmt.Sprintf("https://github.com/%s/%s", matches[1], strings.TrimSuffix(matches[2], ".git"))
+		branch = matches[3]
+		subDir = matches[4]
+	}
+
 	db.DB.Create(&models.Log{
 		EnvironmentID: envID,
-		Message:       fmt.Sprintf("Cloning repository %s (branch: %s)...", gitURL, branch),
+		Message:       fmt.Sprintf("Cloning repository %s (branch: %s, subdir: %s)...", gitURL, branch, subDir),
 		Level:         models.LogLevelInfo,
 	})
 
@@ -65,8 +77,36 @@ func CloneAndBuildImage(ctx context.Context, envID string, gitURL string, branch
 		Level:         models.LogLevelInfo,
 	})
 
-	// Pre-build analysis: Check if Dockerfile exists
-	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
+	// Set the build directory to the subdirectory if specified
+	buildDir := tmpDir
+	if subDir != "" {
+		buildDir = filepath.Clean(filepath.Join(tmpDir, subDir))
+		
+		// Prevent path traversal
+		if !strings.HasPrefix(buildDir, filepath.Clean(tmpDir)+string(os.PathSeparator)) && buildDir != filepath.Clean(tmpDir) {
+			errMsg := fmt.Sprintf("Invalid subdirectory path: %s", subDir)
+			db.DB.Create(&models.Log{
+				EnvironmentID: envID,
+				Message:       errMsg,
+				Level:         models.LogLevelError,
+			})
+			return "", fmt.Errorf(errMsg)
+		}
+
+		// Check if the subdirectory actually exists in the cloned repo
+		if info, err := os.Stat(buildDir); os.IsNotExist(err) || !info.IsDir() {
+			errMsg := fmt.Sprintf("Subdirectory '%s' does not exist in the repository.", subDir)
+			db.DB.Create(&models.Log{
+				EnvironmentID: envID,
+				Message:       errMsg,
+				Level:         models.LogLevelError,
+			})
+			return "", fmt.Errorf(errMsg)
+		}
+	}
+
+	// Pre-build analysis: Check if Dockerfile exists in the build directory
+	dockerfilePath := filepath.Join(buildDir, "Dockerfile")
 	dockerfileInfo, err := os.Stat(dockerfilePath)
 	hasDockerfile := err == nil && !dockerfileInfo.IsDir()
 
@@ -86,7 +126,7 @@ func CloneAndBuildImage(ctx context.Context, envID string, gitURL string, branch
 			}
 		}
 
-		cmd := exec.CommandContext(ctx, nixpacksPath, "build", tmpDir, "--out", tmpDir, "--no-error-without-start")
+		cmd := exec.CommandContext(ctx, nixpacksPath, "build", buildDir, "--out", buildDir, "--no-error-without-start")
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			return "", fmt.Errorf("nixpacks build failed: %s - %v", string(out), err)
@@ -99,11 +139,11 @@ func CloneAndBuildImage(ctx context.Context, envID string, gitURL string, branch
 		})
 
 		// Move .nixpacks/Dockerfile to root Dockerfile so we don't need to specify opts.Dockerfile
-		err = os.Rename(filepath.Join(tmpDir, ".nixpacks", "Dockerfile"), filepath.Join(tmpDir, "Dockerfile"))
+		err = os.Rename(filepath.Join(buildDir, ".nixpacks", "Dockerfile"), filepath.Join(buildDir, "Dockerfile"))
 		if err != nil {
 			return "", fmt.Errorf("failed to move Nixpacks Dockerfile: %v", err)
 		}
-		dockerfilePath = filepath.Join(tmpDir, "Dockerfile")
+		dockerfilePath = filepath.Join(buildDir, "Dockerfile")
 	}
 
 	if content, err := os.ReadFile(dockerfilePath); err == nil {
@@ -120,7 +160,7 @@ func CloneAndBuildImage(ctx context.Context, envID string, gitURL string, branch
 	}
 
 	// 2. Tar the directory for build context
-	tarStream, err := tarballDir(tmpDir)
+	tarStream, err := tarballDir(buildDir)
 	if err != nil {
 		return "", fmt.Errorf("failed to tar build context: %v", err)
 	}
@@ -178,6 +218,17 @@ func StartContainer(ctx context.Context, envID string, imageTag string) (string,
 		exposedPort = "5000"
 	}
 
+	domain := os.Getenv("DOMAIN")
+	if domain == "" {
+		domain = "localhost"
+	}
+	
+	labels := map[string]string{
+		"traefik.enable": "true",
+		fmt.Sprintf("traefik.http.routers.env-%s.rule", envID):                      fmt.Sprintf("Host(`%s.%s`)", envID, domain),
+		fmt.Sprintf("traefik.http.services.env-%s.loadbalancer.server.port", envID): exposedPort,
+	}
+
 	opts := docker.CreateContainerOptions{
 		Name: fmt.Sprintf("api-sandbox-env-%s", envID),
 		Config: &docker.Config{
@@ -186,11 +237,7 @@ func StartContainer(ctx context.Context, envID string, imageTag string) (string,
 				fmt.Sprintf("PORT=%s", exposedPort),
 				"HOST=0.0.0.0",
 			},
-			Labels: map[string]string{
-				"traefik.enable": "true",
-				fmt.Sprintf("traefik.http.routers.env-%s.rule", envID):                      fmt.Sprintf("Host(`%s.localhost`)", envID),
-				fmt.Sprintf("traefik.http.services.env-%s.loadbalancer.server.port", envID): exposedPort,
-			},
+			Labels: labels,
 		},
 		HostConfig: &docker.HostConfig{
 			Memory:          512 * 1024 * 1024,

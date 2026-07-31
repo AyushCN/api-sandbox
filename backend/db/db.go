@@ -40,7 +40,7 @@ func InitDB() {
 	}
 
 	// Auto Migrate the schemas
-	err = DB.AutoMigrate(&models.User{}, &models.Environment{}, &models.Log{}, &models.Metric{})
+	err = DB.AutoMigrate(&models.User{}, &models.Organization{}, &models.OrganizationMember{}, &models.Environment{}, &models.Log{}, &models.Metric{}, &models.AuditLog{})
 	if err != nil {
 		log.Fatalf("Failed to auto migrate database schemas: %v", err)
 	}

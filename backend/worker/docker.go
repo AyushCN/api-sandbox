@@ -196,7 +196,7 @@ func CloneAndBuildImage(ctx context.Context, envID string, gitURL string, branch
 	return imageTag, nil
 }
 
-func StartContainer(ctx context.Context, envID string, imageTag string, userID string) (string, int, error) {
+func StartContainer(ctx context.Context, envID string, imageTag string, orgID string) (string, int, error) {
 	db.DB.Create(&models.Log{
 		EnvironmentID: envID,
 		Message:       fmt.Sprintf("Starting container for image %s...", imageTag),
@@ -231,7 +231,7 @@ func StartContainer(ctx context.Context, envID string, imageTag string, userID s
 	}
 
 	// Network Isolation: Create a network for this user if it doesn't exist
-	networkName := fmt.Sprintf("api-sandbox-net-%s", userID)
+	networkName := fmt.Sprintf("api-sandbox-net-%s", orgID)
 	networks, err := dockerClient.ListNetworks()
 	var networkFound bool
 	var networkID string
@@ -292,7 +292,10 @@ func StartContainer(ctx context.Context, envID string, imageTag string, userID s
 			CPUShares:       1024,
 			PidsLimit:       &pidsLimit,
 			RestartPolicy:   docker.RestartOnFailure(3),
-			PublishAllPorts: true,
+			PublishAllPorts: false,
+			SecurityOpt:     []string{"no-new-privileges:true"},
+			CapDrop:         []string{"ALL"},
+			CapAdd:          []string{"NET_BIND_SERVICE", "CHOWN", "SETUID", "SETGID", "DAC_OVERRIDE"},
 		},
 		NetworkingConfig: &docker.NetworkingConfig{
 			EndpointsConfig: map[string]*docker.EndpointConfig{

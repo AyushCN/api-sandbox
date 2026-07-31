@@ -138,3 +138,31 @@ func RateLimitAPI() gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+func RateLimitPasswordReset() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		clientIP := c.ClientIP()
+		
+		key := fmt.Sprintf("password_reset_limit:%s", clientIP)
+
+		ctx := context.Background()
+		count, err := db.RedisClient.Incr(ctx, key).Result()
+		if err != nil {
+			fmt.Printf("Redis error during password reset rate limiting: %v\n", err)
+			c.Next()
+			return
+		}
+
+		if count == 1 {
+			db.RedisClient.Expire(ctx, key, 1*time.Hour)
+		}
+
+		if count > 5 {
+			c.JSON(http.StatusTooManyRequests, gin.H{"error": "Too many password reset attempts. Try again later."})
+			c.Abort()
+			return
+		}
+
+		c.Next()
+	}
+}

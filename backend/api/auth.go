@@ -164,6 +164,20 @@ func Register(c *gin.Context) {
 		return
 	}
 
+	// Create Personal Workspace Organization
+	orgName := fmt.Sprintf("%s's Workspace", user.Email)
+	org := models.Organization{
+		Name: orgName,
+	}
+	if err := db.DB.Create(&org).Error; err == nil {
+		// Add user as admin
+		db.DB.Create(&models.OrganizationMember{
+			OrganizationID: org.ID,
+			UserID:         user.ID,
+			Role:           models.RoleAdmin,
+		})
+	}
+
 	if err := sendVerificationEmail(req.Email, verificationCode); err != nil {
 		fmt.Printf("Failed to send verification email: %v\n", err)
 	}

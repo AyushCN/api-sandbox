@@ -32,8 +32,8 @@ func SetupRoutes(router *gin.Engine) {
 		api.POST("/auth/register", RateLimitRegister(), Register)
 		api.POST("/auth/login", RateLimitLogin(), Login)
 		api.GET("/auth/verify", VerifyEmail)
-		api.POST("/auth/forgot-password", RateLimitRegister(), ForgotPassword)
-		api.POST("/auth/reset-password", ResetPassword)
+		api.POST("/auth/forgot-password", RateLimitPasswordReset(), ForgotPassword)
+		api.POST("/auth/reset-password", RateLimitPasswordReset(), ResetPassword)
 
 		protected := api.Group("/environments")
 		protected.Use(AuthMiddleware(), RateLimitAPI())
@@ -96,10 +96,24 @@ func GetEnvironments(c *gin.Context) {
 
 	var environments []models.Environment
 	var err error
+
+	// Get User's Organizations
+	var orgMembers []models.OrganizationMember
+	db.DB.Where("user_id = ?", userID).Find(&orgMembers)
+	var orgIDs []string
+	for _, m := range orgMembers {
+		orgIDs = append(orgIDs, m.OrganizationID)
+	}
+
 	for attempt := 0; attempt < 3; attempt++ {
-		err = db.DB.WithContext(context.Background()).
-			Where("user_id = ?", userID).
-			Order("created_at desc").
+		query := db.DB.WithContext(context.Background())
+		if len(orgIDs) > 0 {
+			query = query.Where("organization_id IN ? OR user_id = ?", orgIDs, userID)
+		} else {
+			query = query.Where("user_id = ?", userID)
+		}
+
+		err = query.Order("created_at desc").
 			Offset(offset).
 			Limit(params.Limit).
 			Find(&environments).Error
@@ -173,18 +187,33 @@ func CreateEnvironment(c *gin.Context) {
 		return
 	}
 
+	// Fetch first organization of user to assign environment
+	var orgMember models.OrganizationMember
+	var orgID string
+	if err := db.DB.Where("user_id = ?", uid).First(&orgMember).Error; err == nil {
+		orgID = orgMember.OrganizationID
+	}
+
 	env := models.Environment{
-		UserID:       uid,
-		Name:         req.Name,
-		GitURL:       req.GitURL,
-		GithubBranch: req.GithubBranch,
-		Status:       models.StatusBuilding,
+		UserID:         uid,
+		OrganizationID: orgID,
+		Name:           req.Name,
+		GitURL:         req.GitURL,
+		GithubBranch:   req.GithubBranch,
+		Status:         models.StatusBuilding,
 	}
 
 	if err := db.DB.Create(&env).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create environment"})
 		return
 	}
+
+	db.DB.Create(&models.AuditLog{
+		UserID:    uid,
+		Action:    "CREATE_ENVIRONMENT",
+		Resource:  env.ID,
+		IPAddress: c.ClientIP(),
+	})
 
 	// Enqueue the build task
 	payload, err := json.Marshal(map[string]string{"environmentId": env.ID})
@@ -209,17 +238,31 @@ func GetEnvironment(c *gin.Context) {
 	userID, _ := c.Get("userId")
 	var env models.Environment
 	
+	// Get User's Organizations
+	var orgMembers []models.OrganizationMember
+	db.DB.Where("user_id = ?", userID).Find(&orgMembers)
+	var orgIDs []string
+	for _, m := range orgMembers {
+		orgIDs = append(orgIDs, m.OrganizationID)
+	}
+
 	var err error
 	for attempt := 0; attempt < 3; attempt++ {
-		err = db.DB.WithContext(context.Background()).
+		query := db.DB.WithContext(context.Background()).
 			Preload("Logs", func(db *gorm.DB) *gorm.DB {
 				return db.Order("timestamp desc").Limit(100)
 			}).
 			Preload("Metrics", func(db *gorm.DB) *gorm.DB {
 				return db.Order("timestamp desc").Limit(100)
-			}).
-			Where("user_id = ?", userID).
-			First(&env, "id = ?", id).Error
+			})
+
+		if len(orgIDs) > 0 {
+			query = query.Where("organization_id IN ? OR user_id = ?", orgIDs, userID)
+		} else {
+			query = query.Where("user_id = ?", userID)
+		}
+
+		err = query.First(&env, "id = ?", id).Error
 		
 		if err == nil {
 			break
@@ -243,6 +286,22 @@ func GetEnvironment(c *gin.Context) {
 
 func StreamLogs(c *gin.Context) {
 	envID := c.Param("id")
+	userID, _ := c.Get("userId")
+	orgIDs := getUserOrgIDs(userID)
+
+	// Verify access
+	var envCount int64
+	query := db.DB.Model(&models.Environment{}).Where("id = ?", envID)
+	if len(orgIDs) > 0 {
+		query = query.Where("organization_id IN ? OR user_id = ?", orgIDs, userID)
+	} else {
+		query = query.Where("user_id = ?", userID)
+	}
+	query.Count(&envCount)
+	if envCount == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Environment not found or access denied"})
+		return
+	}
 
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	c.Writer.Header().Set("Cache-Control", "no-cache")
@@ -276,8 +335,17 @@ func StreamLogs(c *gin.Context) {
 func DeleteEnvironment(c *gin.Context) {
 	id := c.Param("id")
 	userID, _ := c.Get("userId")
+	orgIDs := getUserOrgIDs(userID)
+
 	var env models.Environment
-	if err := db.DB.Where("user_id = ?", userID).First(&env, "id = ?", id).Error; err != nil {
+	query := db.DB
+	if len(orgIDs) > 0 {
+		query = query.Where("organization_id IN ? OR user_id = ?", orgIDs, userID)
+	} else {
+		query = query.Where("user_id = ?", userID)
+	}
+
+	if err := query.First(&env, "id = ?", id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Environment not found"})
 		return
 	}
@@ -295,15 +363,30 @@ func DeleteEnvironment(c *gin.Context) {
 		return
 	}
 
+	db.DB.Create(&models.AuditLog{
+		UserID:    fmt.Sprintf("%v", userID),
+		Action:    "DELETE_ENVIRONMENT",
+		Resource:  env.ID,
+		IPAddress: c.ClientIP(),
+	})
+
 	c.JSON(http.StatusOK, gin.H{"message": "Environment deleted successfully"})
 }
 
 func RestartEnvironment(c *gin.Context) {
 	id := c.Param("id")
 	userID, _ := c.Get("userId")
+	orgIDs := getUserOrgIDs(userID)
 	
 	var env models.Environment
-	if err := db.DB.Where("user_id = ?", userID).First(&env, "id = ?", id).Error; err != nil {
+	query := db.DB
+	if len(orgIDs) > 0 {
+		query = query.Where("organization_id IN ? OR user_id = ?", orgIDs, userID)
+	} else {
+		query = query.Where("user_id = ?", userID)
+	}
+
+	if err := query.First(&env, "id = ?", id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Environment not found"})
 		return
 	}
@@ -326,6 +409,13 @@ func RestartEnvironment(c *gin.Context) {
 		return
 	}
 
+	db.DB.Create(&models.AuditLog{
+		UserID:    fmt.Sprintf("%v", userID),
+		Action:    "RESTART_ENVIRONMENT",
+		Resource:  env.ID,
+		IPAddress: c.ClientIP(),
+	})
+
 	// Enqueue the build task again
 	payload, err := json.Marshal(map[string]string{"environmentId": env.ID})
 	if err != nil {
@@ -343,3 +433,13 @@ func RestartEnvironment(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Environment restart initiated"})
 }
 
+
+func getUserOrgIDs(userID interface{}) []string {
+	var orgMembers []models.OrganizationMember
+	db.DB.Where("user_id = ?", userID).Find(&orgMembers)
+	var orgIDs []string
+	for _, m := range orgMembers {
+		orgIDs = append(orgIDs, m.OrganizationID)
+	}
+	return orgIDs
+}

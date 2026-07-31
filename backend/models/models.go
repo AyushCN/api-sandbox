@@ -39,10 +39,50 @@ func (u *User) BeforeCreate(tx *gorm.DB) (err error) {
 	return
 }
 
+type OrganizationRole string
+
+const (
+	RoleAdmin  OrganizationRole = "ADMIN"
+	RoleMember OrganizationRole = "MEMBER"
+)
+
+type Organization struct {
+	ID        string    `gorm:"type:text;primaryKey" json:"id"`
+	Name      string    `gorm:"type:text;not null" json:"name"`
+	CreatedAt time.Time `gorm:"default:current_timestamp" json:"createdAt"`
+	UpdatedAt time.Time `gorm:"default:current_timestamp" json:"updatedAt"`
+}
+
+func (o *Organization) BeforeCreate(tx *gorm.DB) (err error) {
+	if o.ID == "" {
+		o.ID = uuid.NewString()
+	}
+	return
+}
+
+type OrganizationMember struct {
+	ID             string           `gorm:"type:text;primaryKey" json:"id"`
+	OrganizationID string           `gorm:"type:text;not null;index" json:"organizationId"`
+	Organization   Organization     `json:"-"`
+	UserID         string           `gorm:"type:text;not null;index" json:"userId"`
+	User           User             `json:"-"`
+	Role           OrganizationRole `gorm:"type:text;default:MEMBER;not null" json:"role"`
+	CreatedAt      time.Time        `gorm:"default:current_timestamp" json:"createdAt"`
+}
+
+func (m *OrganizationMember) BeforeCreate(tx *gorm.DB) (err error) {
+	if m.ID == "" {
+		m.ID = uuid.NewString()
+	}
+	return
+}
+
 type Environment struct {
-	ID           string            `gorm:"type:text;primaryKey" json:"id"`
-	UserID       string            `gorm:"type:text;not null" json:"userId"`
-	User         User              `json:"-"`
+	ID             string            `gorm:"type:text;primaryKey" json:"id"`
+	OrganizationID string            `gorm:"type:text;index" json:"organizationId"`
+	Organization   *Organization     `json:"-"`
+	UserID         string            `gorm:"type:text;not null" json:"userId"` // Keep for legacy/creator reference
+	User           User              `json:"-"`
 	Name         string            `gorm:"type:text;not null" json:"name"`
 	GitURL       string            `gorm:"type:text;not null" json:"gitUrl"`
 	GithubBranch string            `gorm:"type:text;default:main;not null" json:"githubBranch"`
@@ -104,6 +144,23 @@ type Metric struct {
 func (m *Metric) BeforeCreate(tx *gorm.DB) (err error) {
 	if m.ID == "" {
 		m.ID = uuid.NewString()
+	}
+	return
+}
+
+type AuditLog struct {
+	ID        string    `gorm:"type:text;primaryKey" json:"id"`
+	UserID    string    `gorm:"type:text;not null" json:"userId"`
+	User      User      `json:"-"`
+	Action    string    `gorm:"type:text;not null" json:"action"`
+	Resource  string    `gorm:"type:text" json:"resource"`
+	IPAddress string    `gorm:"type:text" json:"ipAddress"`
+	Timestamp time.Time `gorm:"default:current_timestamp" json:"timestamp"`
+}
+
+func (a *AuditLog) BeforeCreate(tx *gorm.DB) (err error) {
+	if a.ID == "" {
+		a.ID = uuid.NewString()
 	}
 	return
 }

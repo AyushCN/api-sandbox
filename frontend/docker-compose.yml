@@ -8,20 +8,19 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: api_sandbox
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
 
   traefik:
     image: traefik:v3.0
     container_name: traefik-proxy
     command:
-      - "--api.insecure=true"
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
       - "--entrypoints.web.address=:80"
@@ -29,7 +28,6 @@ services:
     ports:
       - "80:80"
       - "443:443"
-      - "8081:8080" # Dashboard
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
 

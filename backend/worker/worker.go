@@ -50,7 +50,11 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 	}
 
 	// 2. Start Container
-	containerID, port, err := StartContainer(ctx, env.ID, imageTag, env.UserID)
+	netID := env.OrganizationID
+	if netID == "" {
+		netID = env.UserID
+	}
+	containerID, port, err := StartContainer(ctx, env.ID, imageTag, netID)
 	if err != nil {
 		slog.Error("Start failed", "env_id", envID, "error", err)
 		db.DB.Model(&env).Update("status", models.StatusFailed)

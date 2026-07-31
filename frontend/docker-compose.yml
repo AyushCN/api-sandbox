@@ -19,6 +19,7 @@ services:
 
   traefik:
     image: traefik:v3.0
+    container_name: traefik-proxy
     command:
       - "--api.insecure=true"
       - "--providers.docker=true"

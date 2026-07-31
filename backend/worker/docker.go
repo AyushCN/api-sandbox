@@ -6,7 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,7 +25,8 @@ func InitDocker() {
 	var err error
 	dockerClient, err = docker.NewVersionedClientFromEnv("1.41")
 	if err != nil {
-		log.Fatalf("Failed to initialize docker client: %v", err)
+		slog.Error("Failed to initialize docker client", "error", err)
+		os.Exit(1)
 	}
 }
 
@@ -233,25 +234,43 @@ func StartContainer(ctx context.Context, envID string, imageTag string, userID s
 	networkName := fmt.Sprintf("api-sandbox-net-%s", userID)
 	networks, err := dockerClient.ListNetworks()
 	var networkFound bool
+	var networkID string
 	if err == nil {
 		for _, net := range networks {
 			if net.Name == networkName {
 				networkFound = true
+				networkID = net.ID
 				break
 			}
 		}
 	}
 
 	if !networkFound {
-		_, err := dockerClient.CreateNetwork(docker.CreateNetworkOptions{
+		net, err := dockerClient.CreateNetwork(docker.CreateNetworkOptions{
 			Name:           networkName,
 			Driver:         "bridge",
 			CheckDuplicate: true,
 			EnableIPv6:     false,
 		})
 		if err != nil && err != docker.ErrNetworkAlreadyExists {
-			log.Printf("Failed to create network %s: %v", networkName, err)
+			errMsg := fmt.Sprintf("Failed to create network %s: %v", networkName, err)
+			db.DB.Create(&models.Log{
+				EnvironmentID: envID,
+				Message:       errMsg,
+				Level:         models.LogLevelError,
+			})
+			return "", 0, fmt.Errorf(errMsg)
 		}
+		if net != nil {
+			networkID = net.ID
+		}
+	}
+
+	// Always ensure Traefik proxy is connected to this user's network for routing
+	if networkID != "" {
+		_ = dockerClient.ConnectNetwork(networkID, docker.NetworkConnectionOptions{
+			Container: "traefik-proxy",
+		})
 	}
 
 	pidsLimit := int64(256)

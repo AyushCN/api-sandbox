@@ -36,7 +36,7 @@ func SetupRoutes(router *gin.Engine) {
 		api.POST("/auth/reset-password", ResetPassword)
 
 		protected := api.Group("/environments")
-		protected.Use(AuthMiddleware())
+		protected.Use(AuthMiddleware(), RateLimitAPI())
 		{
 			protected.GET("", GetEnvironments)
 			protected.POST("", CreateEnvironment)
@@ -46,6 +46,34 @@ func SetupRoutes(router *gin.Engine) {
 			protected.GET("/:id/logs/stream", StreamLogs)
 		}
 	}
+	
+	router.GET("/metrics", PrometheusMetrics)
+}
+
+func PrometheusMetrics(c *gin.Context) {
+	c.Header("Content-Type", "text/plain; version=0.0.4")
+
+	var responseBuilder strings.Builder
+
+	// Database Metrics
+	sqlDB, err := db.DB.DB()
+	if err == nil {
+		stats := sqlDB.Stats()
+		responseBuilder.WriteString(fmt.Sprintf("db_connections_open %d\n", stats.OpenConnections))
+		responseBuilder.WriteString(fmt.Sprintf("db_connections_in_use %d\n", stats.InUse))
+		responseBuilder.WriteString(fmt.Sprintf("db_connections_idle %d\n", stats.Idle))
+	}
+
+	// Application Metrics
+	var totalEnvs int64
+	db.DB.Model(&models.Environment{}).Count(&totalEnvs)
+	responseBuilder.WriteString(fmt.Sprintf("total_environments %d\n", totalEnvs))
+
+	var activeEnvs int64
+	db.DB.Model(&models.Environment{}).Where("status = ?", models.StatusRunning).Count(&activeEnvs)
+	responseBuilder.WriteString(fmt.Sprintf("active_environments %d\n", activeEnvs))
+
+	c.String(http.StatusOK, responseBuilder.String())
 }
 
 type PaginationParams struct {

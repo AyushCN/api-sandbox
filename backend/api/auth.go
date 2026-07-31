@@ -13,8 +13,7 @@ import (
 	"github.com/api-sandbox/backend/models"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/sendgrid/sendgrid-go"
-	"github.com/sendgrid/sendgrid-go/helpers/mail"
+	"net/smtp"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -66,57 +65,69 @@ func generateVerificationCode() string {
 	return fmt.Sprintf("%06d", n.Int64())
 }
 
-func sendVerificationEmail(toEmail, verificationCode string) error {
-	apiKey := os.Getenv("SENDGRID_API_KEY")
-	verifyURL := fmt.Sprintf("http://localhost:3000/verify?code=%s", verificationCode)
+func sendEmail(toEmail, subject, body string) error {
+	smtpHost := os.Getenv("SMTP_HOST")
+	smtpPort := os.Getenv("SMTP_PORT")
+	smtpUser := os.Getenv("SMTP_USER")
+	smtpPass := os.Getenv("SMTP_PASS")
+	fromEmail := os.Getenv("SMTP_FROM")
 
-	if apiKey == "" {
-		fmt.Printf("\n========== MOCK EMAIL ==========\nTo: %s\nSubject: Verify your API Sandbox account\nLink: %s\n================================\n\n", toEmail, verifyURL)
+	if smtpHost == "" || smtpPort == "" {
+		if os.Getenv("GIN_MODE") == "release" {
+			return fmt.Errorf("SMTP configuration is missing in production")
+		}
+		fmt.Printf("\n========== MOCK EMAIL ==========\nTo: %s\nSubject: %s\nBody: %s\n================================\n\n", toEmail, subject, body)
 		return nil
 	}
+	
+	if fromEmail == "" {
+		fromEmail = "noreply@api-sandbox.com"
+	}
 
-	from := mail.NewEmail("API Sandbox", "noreply@api-sandbox.com")
-	to := mail.NewEmail("User", toEmail)
+	auth := smtp.PlainAuth("", smtpUser, smtpPass, smtpHost)
+	
+	msg := []byte("To: " + toEmail + "\r\n" +
+		"From: API Sandbox <" + fromEmail + ">\r\n" +
+		"Subject: " + subject + "\r\n" +
+		"Content-Type: text/html; charset=UTF-8\r\n\r\n" +
+		body + "\r\n")
+
+	err := smtp.SendMail(smtpHost+":"+smtpPort, auth, fromEmail, []string{toEmail}, msg)
+	if err != nil {
+		return fmt.Errorf("failed to send email: %v", err)
+	}
+	return nil
+}
+
+func sendVerificationEmail(toEmail, verificationCode string) error {
+	appURL := os.Getenv("APP_URL")
+	if appURL == "" {
+		appURL = "http://localhost:3000"
+	}
+	verifyURL := fmt.Sprintf("%s/verify?code=%s", appURL, verificationCode)
+	
 	subject := "Verify your API Sandbox account"
 	htmlContent := fmt.Sprintf(`
 		<p>Verify your email by clicking <a href="%s">this link</a></p>
 		<p>Or paste this code: %s</p>
 	`, verifyURL, verificationCode)
 
-	message := mail.NewSingleEmail(from, subject, to, "Verify your account", htmlContent)
-	client := sendgrid.NewSendClient(apiKey)
-	response, err := client.Send(message)
-
-	if err != nil || response.StatusCode >= 400 {
-		return fmt.Errorf("failed to send email: %v", err)
-	}
-	return nil
+	return sendEmail(toEmail, subject, htmlContent)
 }
 
 func sendPasswordResetEmail(toEmail, resetCode string) error {
-	apiKey := os.Getenv("SENDGRID_API_KEY")
-	resetURL := fmt.Sprintf("http://localhost:3000/reset-password?code=%s", resetCode)
-
-	if apiKey == "" {
-		fmt.Printf("\n========== MOCK PASSWORD RESET EMAIL ==========\nTo: %s\nSubject: Reset your API Sandbox password\nLink: %s\n===============================================\n\n", toEmail, resetURL)
-		return nil
+	appURL := os.Getenv("APP_URL")
+	if appURL == "" {
+		appURL = "http://localhost:3000"
 	}
+	resetURL := fmt.Sprintf("%s/reset-password?code=%s", appURL, resetCode)
 
-	from := mail.NewEmail("API Sandbox", "noreply@api-sandbox.com")
-	to := mail.NewEmail("User", toEmail)
 	subject := "Reset your API Sandbox password"
 	htmlContent := fmt.Sprintf(`
 		<p>Reset your password by clicking <a href="%s">this link</a></p>
 	`, resetURL)
 
-	message := mail.NewSingleEmail(from, subject, to, "Reset your password", htmlContent)
-	client := sendgrid.NewSendClient(apiKey)
-	response, err := client.Send(message)
-
-	if err != nil || response.StatusCode >= 400 {
-		return fmt.Errorf("failed to send email: %v", err)
-	}
-	return nil
+	return sendEmail(toEmail, subject, htmlContent)
 }
 
 func Register(c *gin.Context) {

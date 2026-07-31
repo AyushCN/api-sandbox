@@ -9,6 +9,7 @@
 # Go build artifacts
 backend/server
 backend/main
+backend/backend
 server
 main
 
@@ -17,6 +18,7 @@ main
 *.pid
 *.log
 test_*
+test-*/
 
 # Node modules
 node_modules/
@@ -42,6 +44,7 @@ out/
 tmp/
 coverage/
 .temp/
+backups/
 
 # AI and Agent Specific
 .agents/

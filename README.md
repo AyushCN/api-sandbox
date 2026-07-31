@@ -12,21 +12,23 @@ A powerful, full-stack environment provisioning and sandboxing platform. This pr
 *   **Strict Container Isolation:** Each user is assigned a dynamically generated, dedicated Docker bridge network (`api-sandbox-net-<userId>`). Containers are bound exclusively to this network, preventing lateral movement and inter-tenant communication.
 *   **Resource Limits:** Hard caps on memory (512MB), CPU quotas, and PIDs (max 256) are strictly enforced at the container level to protect host stability from fork bombs or memory leaks.
 *   **Path Traversal & SSRF Prevention:** Strict bounds-checking on subdirectory cloning and explicit enforcement of `https://github.com/` URLs.
-*   **Hardened Authentication:** JWT-based system enforcing 12-character complex passwords (symbols, numbers, cases). Includes active checks against missing `JWT_SECRET` keys.
-*   **Brute-Force Protection:** IP-based rate limiting on `/auth/register` and `/auth/login` endpoints powered by Redis.
+*   **Hardened Authentication & SMTP:** JWT-based system enforcing 12-character complex passwords. Verification and password resets utilize generic `net/smtp` to send real emails via any provider (SendGrid, SES, Mailgun).
+*   **Strict API Rate Limiting:** Powered by Redis, registration/login endpoints and all authenticated data-fetching endpoints (e.g. `/environments`) are heavily rate-limited (e.g., max 200 reqs/min) to prevent database exhaustion.
 *   **Resource Quotas:** Database-enforced deployment quotas (e.g., max 5 running sandboxes, max 10 builds per hour per user) to prevent platform abuse.
 *   **Strict Multi-Tenancy:** Robust data isolation where environments, logs, and metrics are strictly filtered and isolated by `UserID`.
 
 ### 🌐 Dynamic Reverse Proxy (Traefik)
-*   **Instant Routing:** Traefik natively hooks into the Docker socket to map wildcard subdomains instantly as containers spin up. Zero Nginx configuration needed!
+*   **Instant Routing with Isolation:** Traefik natively hooks into the Docker socket to map wildcard subdomains instantly. Crucially, the orchestrator dynamically attaches the Traefik proxy to each user's isolated network, guaranteeing secure traffic routing without bridging multi-tenant networks.
 *   **Production Domain Support:** Set the `DOMAIN` environment variable (e.g. `sandbox.yourcompany.com`) and the platform will dynamically provision `https://[env-id].sandbox.yourcompany.com` out of the box.
 
-### ⚙️ Backend Orchestration (Go / Gin / Asynq)
+### ⚙️ Backend Orchestration & Operability (Go)
 *   **BuildKit & Docker Engine API:** Interacts directly with the Docker Daemon via `fsouza/go-dockerclient` (API v1.41) to enable advanced BuildKit context generation.
-*   **Dynamic Port Mapping:** Automatically binds internal exposed ports to host ports using `PublishAllPorts: true`, supporting any port seamlessly.
 *   **Asynchronous Task Queue:** Uses `hibiken/asynq` with Redis to handle long-running git clones and Nixpack builds in the background.
 *   **Resilient Database Layer:** Built-in connection pooling (Max Open, Max Idle, Max Lifetime) to gracefully handle high concurrency without exhausting PostgreSQL connections.
 *   **Robust Error Handling:** Features exponential backoff retries (3 attempts) on transient database failures and strict limit-based pagination on heavy database queries.
+*   **Graceful Shutdown:** Implements OS signal trapping (`SIGTERM`/`SIGINT`) to cleanly drain HTTP requests and allow running container builds to finish before exiting, preventing zombie state.
+*   **Structured Logging & Metrics:** Uses Go 1.21 `log/slog` for fully parsable JSON structured logging, and exports vital health metrics (DB connections, active containers) via a `/metrics` Prometheus endpoint.
+*   **Automated Backups:** Includes a production-ready `backup.sh` cron script to perform `pg_dump`, gzip compression, and rolling 30-day automated uploads to an S3 bucket.
 
 ### 🎨 Frontend Dashboard (Next.js / Material Design 3)
 *   **Sleek Modern UI:** Built with dark mode, Material Design 3 tokens, glassmorphism elements, and smooth `framer-motion` animations.
@@ -74,4 +76,4 @@ Open `http://localhost:3000` in your browser.
 *   **Complete Nixpacks Overhaul:** Repos without Dockerfiles now automatically build! Subdirectory cloning properly scopes the build context to prevent host-level path traversal.
 *   **Traefik Integration:** Replaced manual proxy setup with a native Traefik container inside `docker-compose.yml` for seamless, instant URL routing.
 *   **Production Readiness Audit Fixes:** Implemented severe missing limits: Container Network Isolation, Container Memory/CPU limits, DB Connection Pooling, Error Handling with Exponential Backoff, and Endpoint Pagination.
-*   **Security Hardening Check:** Successfully validated and patched vectors for Path Traversal, SSRF, and Login Brute-forcing. Deployment quotas are fully active.
+*   **Operational Hardening:** Integrated Graceful Shutdown, API-wide Rate Limiting, `log/slog` structured JSON logging, a Prometheus `/metrics` endpoint, native SMTP email support, and an automated PostgreSQL S3 Backup script.

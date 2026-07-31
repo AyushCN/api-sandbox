@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 
 	"github.com/api-sandbox/backend/db"
@@ -23,7 +23,7 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 		return fmt.Errorf("missing environmentId: %w", asynq.SkipRetry)
 	}
 
-	log.Printf("Processing build job for environment %s", envID)
+	slog.Info("Processing build job", "environment_id", envID)
 
 	var env models.Environment
 	if err := db.DB.First(&env, "id = ?", envID).Error; err != nil {
@@ -32,14 +32,14 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 
 	// Idempotency: cleanup existing container if retrying
 	if env.ContainerID != nil && *env.ContainerID != "" {
-		log.Printf("Cleaning up existing container %s for retrying...", *env.ContainerID)
+		slog.Info("Cleaning up existing container", "container_id", *env.ContainerID)
 		_ = CleanupContainer(ctx, *env.ContainerID)
 	}
 
 	// 1. Clone & Build
 	imageTag, err := CloneAndBuildImage(ctx, env.ID, env.GitURL, env.GithubBranch)
 	if err != nil {
-		log.Printf("Build failed: %v", err)
+		slog.Error("Build failed", "env_id", envID, "error", err)
 		db.DB.Model(&env).Update("status", models.StatusFailed)
 		db.DB.Create(&models.Log{
 			EnvironmentID: env.ID,
@@ -52,7 +52,7 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 	// 2. Start Container
 	containerID, port, err := StartContainer(ctx, env.ID, imageTag, env.UserID)
 	if err != nil {
-		log.Printf("Start failed: %v", err)
+		slog.Error("Start failed", "env_id", envID, "error", err)
 		db.DB.Model(&env).Update("status", models.StatusFailed)
 		db.DB.Create(&models.Log{
 			EnvironmentID: env.ID,
@@ -80,6 +80,6 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 		"public_url":   publicURL,
 	})
 
-	log.Printf("Environment %s is now RUNNING on port %d", env.ID, port)
+	slog.Info("Environment is now RUNNING", "env_id", env.ID, "port", port)
 	return nil
 }

@@ -3,6 +3,7 @@ package db
 import (
 	"log"
 	"os"
+	"time"
 
 	"github.com/api-sandbox/backend/models"
 	"gorm.io/driver/postgres"
@@ -28,6 +29,14 @@ func InitDB() {
 	})
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
+	}
+
+	// Set up connection pool
+	sqlDB, err := DB.DB()
+	if err == nil {
+		sqlDB.SetMaxOpenConns(100)
+		sqlDB.SetMaxIdleConns(25)
+		sqlDB.SetConnMaxLifetime(time.Minute * 5)
 	}
 
 	// Auto Migrate the schemas

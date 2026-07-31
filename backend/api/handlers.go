@@ -1,9 +1,12 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -14,6 +17,7 @@ import (
 	"github.com/api-sandbox/backend/worker"
 	"github.com/gin-gonic/gin"
 	"github.com/hibiken/asynq"
+	"gorm.io/gorm"
 )
 
 type CreateEnvironmentRequest struct {
@@ -44,13 +48,47 @@ func SetupRoutes(router *gin.Engine) {
 	}
 }
 
+type PaginationParams struct {
+	Page  int `form:"page"`
+	Limit int `form:"limit"`
+}
+
 func GetEnvironments(c *gin.Context) {
 	userID, _ := c.Get("userId")
+	
+	var params PaginationParams
+	_ = c.ShouldBindQuery(&params)
+	if params.Page < 1 {
+		params.Page = 1
+	}
+	if params.Limit < 1 || params.Limit > 100 {
+		params.Limit = 20
+	}
+	offset := (params.Page - 1) * params.Limit
+
 	var environments []models.Environment
-	if err := db.DB.Where("user_id = ?", userID).Order("created_at desc").Find(&environments).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch environments"})
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		err = db.DB.WithContext(context.Background()).
+			Where("user_id = ?", userID).
+			Order("created_at desc").
+			Offset(offset).
+			Limit(params.Limit).
+			Find(&environments).Error
+			
+		if err == nil {
+			break
+		}
+		if attempt < 2 {
+			time.Sleep(100 * time.Millisecond * time.Duration(math.Pow(2, float64(attempt))))
+		}
+	}
+
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Database temporarily unavailable"})
 		return
 	}
+	
 	c.JSON(http.StatusOK, environments)
 }
 
@@ -142,10 +180,36 @@ func GetEnvironment(c *gin.Context) {
 	id := c.Param("id")
 	userID, _ := c.Get("userId")
 	var env models.Environment
-	if err := db.DB.Preload("Logs").Preload("Metrics").Where("user_id = ?", userID).First(&env, "id = ?", id).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Environment not found"})
+	
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		err = db.DB.WithContext(context.Background()).
+			Preload("Logs", func(db *gorm.DB) *gorm.DB {
+				return db.Order("timestamp desc").Limit(100)
+			}).
+			Preload("Metrics", func(db *gorm.DB) *gorm.DB {
+				return db.Order("timestamp desc").Limit(100)
+			}).
+			Where("user_id = ?", userID).
+			First(&env, "id = ?", id).Error
+		
+		if err == nil {
+			break
+		}
+		if attempt < 2 {
+			time.Sleep(100 * time.Millisecond * time.Duration(math.Pow(2, float64(attempt))))
+		}
+	}
+
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Environment not found"})
+		} else {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Database temporarily unavailable"})
+		}
 		return
 	}
+	
 	c.JSON(http.StatusOK, env)
 }
 

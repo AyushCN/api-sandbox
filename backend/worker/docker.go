@@ -195,7 +195,7 @@ func CloneAndBuildImage(ctx context.Context, envID string, gitURL string, branch
 	return imageTag, nil
 }
 
-func StartContainer(ctx context.Context, envID string, imageTag string) (string, int, error) {
+func StartContainer(ctx context.Context, envID string, imageTag string, userID string) (string, int, error) {
 	db.DB.Create(&models.Log{
 		EnvironmentID: envID,
 		Message:       fmt.Sprintf("Starting container for image %s...", imageTag),
@@ -229,6 +229,32 @@ func StartContainer(ctx context.Context, envID string, imageTag string) (string,
 		fmt.Sprintf("traefik.http.services.env-%s.loadbalancer.server.port", envID): exposedPort,
 	}
 
+	// Network Isolation: Create a network for this user if it doesn't exist
+	networkName := fmt.Sprintf("api-sandbox-net-%s", userID)
+	networks, err := dockerClient.ListNetworks()
+	var networkFound bool
+	if err == nil {
+		for _, net := range networks {
+			if net.Name == networkName {
+				networkFound = true
+				break
+			}
+		}
+	}
+
+	if !networkFound {
+		_, err := dockerClient.CreateNetwork(docker.CreateNetworkOptions{
+			Name:           networkName,
+			Driver:         "bridge",
+			CheckDuplicate: true,
+			EnableIPv6:     false,
+		})
+		if err != nil && err != docker.ErrNetworkAlreadyExists {
+			log.Printf("Failed to create network %s: %v", networkName, err)
+		}
+	}
+
+	pidsLimit := int64(256)
 	opts := docker.CreateContainerOptions{
 		Name: fmt.Sprintf("api-sandbox-env-%s", envID),
 		Config: &docker.Config{
@@ -241,8 +267,18 @@ func StartContainer(ctx context.Context, envID string, imageTag string) (string,
 		},
 		HostConfig: &docker.HostConfig{
 			Memory:          512 * 1024 * 1024,
-			CPUShares:       512,
+			MemorySwap:      -1,
+			CPUQuota:        100000,
+			CPUPeriod:       100000,
+			CPUShares:       1024,
+			PidsLimit:       &pidsLimit,
+			RestartPolicy:   docker.RestartOnFailure(3),
 			PublishAllPorts: true,
+		},
+		NetworkingConfig: &docker.NetworkingConfig{
+			EndpointsConfig: map[string]*docker.EndpointConfig{
+				networkName: {},
+			},
 		},
 	}
 

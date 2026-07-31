@@ -166,3 +166,4 @@ AggregateError:
  GET /login 200 in 15ms (next.js: 3ms, application-code: 12ms)
  GET /login 200 in 31ms (next.js: 3ms, application-code: 29ms)
  GET /login 200 in 30ms (next.js: 2ms, application-code: 28ms)
+[?25h

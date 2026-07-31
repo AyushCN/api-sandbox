@@ -50,7 +50,7 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 	}
 
 	// 2. Start Container
-	containerID, port, err := StartContainer(ctx, env.ID, imageTag)
+	containerID, port, err := StartContainer(ctx, env.ID, imageTag, env.UserID)
 	if err != nil {
 		log.Printf("Start failed: %v", err)
 		db.DB.Model(&env).Update("status", models.StatusFailed)

@@ -1,51 +1,61 @@
 # API Sandbox Orchestration Platform
 
-A powerful, full-stack environment provisioning and sandboxing platform. This project allows users to deploy and manage Dockerized GitHub repositories on-demand through a sleek web dashboard, orchestrating the container lifecycle behind the scenes.
+A powerful, full-stack environment provisioning and sandboxing platform. This project allows users to deploy and manage zero-config GitHub repositories on-demand through a sleek web dashboard, dynamically orchestrating the container lifecycle, networking, and reverse proxying behind the scenes.
 
-## 🚀 Key Features Achieved
+## 🚀 Key Features
 
-### Security & Multi-Tenancy (New!)
-*   **User Authentication:** Complete JWT-based registration and login system with securely hashed passwords using `bcrypt`.
-*   **Data Isolation:** Robust multi-tenant architecture where environments, logs, and metrics are strictly filtered and isolated by `UserID`.
-*   **Frontend Auth Context:** Secure Next.js routing with an `AuthProvider` that handles token lifecycles and automatically attaches Bearer tokens to all outbound `fetchWithAuth` requests.
+### 📦 Zero-Config Deployments (Nixpacks)
+*   **No Dockerfile Required:** Automatically detects the language (Node.js, Python, Go, Rust, etc.) and generates an optimized, cached build plan using **Nixpacks**.
+*   **Deep Subdirectory Support:** Users can deploy specific folders inside monorepos directly (e.g. `https://github.com/org/repo/tree/main/examples/api`).
 
-### Public URL Routing (New!)
-*   **Traefik Reverse Proxy:** Automatically scans new Docker containers for labels and instantly maps wildcard subdomains (`http://[env-id].localhost`) to the dynamically allocated exposed port of the container. No Nginx configuration required!
+### 🔒 Enterprise-Grade Security
+*   **Strict Container Isolation:** Each user is assigned a dynamically generated, dedicated Docker bridge network (`api-sandbox-net-<userId>`). Containers are bound exclusively to this network, preventing lateral movement and inter-tenant communication.
+*   **Resource Limits:** Hard caps on memory (512MB), CPU quotas, and PIDs (max 256) are strictly enforced at the container level to protect host stability from fork bombs or memory leaks.
+*   **Path Traversal & SSRF Prevention:** Strict bounds-checking on subdirectory cloning and explicit enforcement of `https://github.com/` URLs.
+*   **Hardened Authentication:** JWT-based system enforcing 12-character complex passwords (symbols, numbers, cases). Includes active checks against missing `JWT_SECRET` keys.
+*   **Brute-Force Protection:** IP-based rate limiting on `/auth/register` and `/auth/login` endpoints powered by Redis.
+*   **Resource Quotas:** Database-enforced deployment quotas (e.g., max 5 running sandboxes, max 10 builds per hour per user) to prevent platform abuse.
+*   **Strict Multi-Tenancy:** Robust data isolation where environments, logs, and metrics are strictly filtered and isolated by `UserID`.
 
-### Backend Orchestration (Go / Gin / Asynq)
-*   **Docker Engine Integration:** Directly interfaces with the Docker Daemon via `fsouza/go-dockerclient` to build images from tarballs and manage containers.
-*   **Dynamic Port Mapping:** Automatically binds internal exposed ports to host ports using `PublishAllPorts: true`, supporting any port (5000, 8080, 80) seamlessly.
-*   **Asynchronous Task Queue:** Uses `hibiken/asynq` with Redis to handle long-running Docker build tasks in the background without blocking the API.
-*   **Robust Container Lifecycle:** Handles everything from `git clone` (with branch fallbacks), tarball creation, image building, starting, and gracefully stopping/removing exited containers.
-*   **State Management:** Stores user data, environment metadata, timestamps, and streaming log history securely in PostgreSQL via GORM.
+### 🌐 Dynamic Reverse Proxy (Traefik)
+*   **Instant Routing:** Traefik natively hooks into the Docker socket to map wildcard subdomains instantly as containers spin up. Zero Nginx configuration needed!
+*   **Production Domain Support:** Set the `DOMAIN` environment variable (e.g. `sandbox.yourcompany.com`) and the platform will dynamically provision `https://[env-id].sandbox.yourcompany.com` out of the box.
 
-### Frontend Dashboard (Next.js / React / Tailwind)
-*   **Sleek Modern UI:** Built with dark mode, glassmorphism elements, and responsive layouts.
-*   **Live Terminal Output:** Integrates `xterm.js` to render Docker build logs in a native-feeling terminal window.
-*   **Real-time Log Polling:** Bypasses Next.js API proxy buffering bugs by utilizing highly reliable `useSWR` polling for real-time log appending.
-*   **Dynamic GitHub Branching:** Automatically fetches and displays available branches for a given GitHub repository using the public GitHub API before deployment (with silent failure fallbacks for API rate limits).
-*   **Environment Management:** One-click deployment, status monitoring (Building, Running, Failed, Stopped), URL generation, and container deletion.
+### ⚙️ Backend Orchestration (Go / Gin / Asynq)
+*   **BuildKit & Docker Engine API:** Interacts directly with the Docker Daemon via `fsouza/go-dockerclient` (API v1.41) to enable advanced BuildKit context generation.
+*   **Dynamic Port Mapping:** Automatically binds internal exposed ports to host ports using `PublishAllPorts: true`, supporting any port seamlessly.
+*   **Asynchronous Task Queue:** Uses `hibiken/asynq` with Redis to handle long-running git clones and Nixpack builds in the background.
+*   **Resilient Database Layer:** Built-in connection pooling (Max Open, Max Idle, Max Lifetime) to gracefully handle high concurrency without exhausting PostgreSQL connections.
+*   **Robust Error Handling:** Features exponential backoff retries (3 attempts) on transient database failures and strict limit-based pagination on heavy database queries.
+
+### 🎨 Frontend Dashboard (Next.js / Material Design 3)
+*   **Sleek Modern UI:** Built with dark mode, Material Design 3 tokens, glassmorphism elements, and smooth `framer-motion` animations.
+*   **Route Groups:** Clean Next.js app router architecture separating public auth pages from protected `/(main)/` dashboards.
+*   **Live Terminal Output:** Integrates `xterm.js` to render Docker build logs in a native-feeling terminal window using highly reliable SWR polling.
 
 ## 🛠️ Tech Stack
 
-*   **Go** (Backend API & Worker)
+*   **Go** (Backend API & Orchestration Worker)
 *   **Gin** (HTTP Router & JWT Middleware)
 *   **GORM** (PostgreSQL ORM)
-*   **Asynq & Redis** (Background Job Queue)
-*   **Docker Engine API & Traefik** (Containerization & Reverse Proxy)
+*   **Asynq & Redis** (Background Job Queue & Rate Limiting)
+*   **Docker Engine API & Traefik v3** (Containerization & Reverse Proxy)
+*   **Nixpacks** (Zero-config Build System)
 *   **Next.js 14 & React** (Frontend Dashboard & Auth Provider)
-*   **Tailwind CSS** (Styling)
+*   **Tailwind CSS & Framer Motion** (Styling & Animation)
 *   **xterm.js** (In-browser Terminal)
 
 ## 🏃 Getting Started
 
 ### 1. Start Infrastructure Services
-Ensure you have Redis, PostgreSQL, and Traefik running.
+The project uses Docker Compose to run PostgreSQL, Redis, and the Traefik proxy.
 ```bash
-docker start api-sandbox-postgres-1 api-sandbox-redis-1 traefik
+cd frontend
+docker compose up -d
 ```
 
 ### 2. Run the Go Backend & Worker
+Ensure you have the `DOMAIN` (optional) and `JWT_SECRET` environment variables set.
 ```bash
 cd backend
 go build -o server .
@@ -60,9 +70,8 @@ npm run dev
 ```
 Open `http://localhost:3000` in your browser.
 
-## 📝 Recent Fixes & Milestones
-*   **Phase 1 Completion:** Fully implemented Priority 1 (Auth, Ownership, and Public Routing) from the Evaluation specs.
-*   Fixed container crashing invisibly by exposing Docker runtime exit codes.
-*   Fixed the `PublishAllPorts` mapping, completely eliminating hardcoded Port 3000/8080 constraints.
-*   Replaced buggy Server-Sent Events (SSE) with robust SWR polling for flawless real-time terminal log rendering.
-*   Implemented full cleanup lifecycle for deleted sandboxes to prevent orphaned Docker containers and free up system resources.
+## 📝 Recent Milestones
+*   **Complete Nixpacks Overhaul:** Repos without Dockerfiles now automatically build! Subdirectory cloning properly scopes the build context to prevent host-level path traversal.
+*   **Traefik Integration:** Replaced manual proxy setup with a native Traefik container inside `docker-compose.yml` for seamless, instant URL routing.
+*   **Production Readiness Audit Fixes:** Implemented severe missing limits: Container Network Isolation, Container Memory/CPU limits, DB Connection Pooling, Error Handling with Exponential Backoff, and Endpoint Pagination.
+*   **Security Hardening Check:** Successfully validated and patched vectors for Path Traversal, SSRF, and Login Brute-forcing. Deployment quotas are fully active.

@@ -8,7 +8,15 @@
 
 # Go build artifacts
 backend/server
+backend/main
 server
+main
+
+# Test/Temp files
+*.txt
+*.pid
+*.log
+test_*
 
 # Node modules
 node_modules/

@@ -1,0 +1,4 @@
+- [x] Implement `RateLimitVerifyEmail` middleware in `backend/api/middleware.go`
+- [x] Register `RateLimitVerifyEmail` on `/auth/verify` route in `backend/api/handlers.go`
+- [x] Verify Go backend compiles successfully
+- [x] Test the email verification rate limit using curl to trigger 429 Too Many Requests

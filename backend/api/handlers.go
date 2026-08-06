@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -49,6 +50,7 @@ func SetupRoutes(router *gin.Engine) {
 			protected.POST("/:id/files/content", UpdateWorkspaceFileContent)
 			protected.POST("/:id/files/create", CreateWorkspaceFileOrFolder)
 			protected.POST("/:id/files/delete", DeleteWorkspaceFileOrFolder)
+			protected.GET("/:id/docker-logs", GetDockerLogs)
 		}
 	}
 	
@@ -450,4 +452,38 @@ func getUserOrgIDs(userID interface{}) []string {
 		orgIDs = append(orgIDs, m.OrganizationID)
 	}
 	return orgIDs
+}
+
+func GetDockerLogs(c *gin.Context) {
+	id := c.Param("id")
+	userID, _ := c.Get("userId")
+	orgIDs := getUserOrgIDs(userID)
+
+	var env models.Environment
+	query := db.DB
+	if len(orgIDs) > 0 {
+		query = query.Where("organization_id IN ? OR user_id = ?", orgIDs, userID)
+	} else {
+		query = query.Where("user_id = ?", userID)
+	}
+
+	if err := query.First(&env, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Environment not found"})
+		return
+	}
+
+	containerName := fmt.Sprintf("api-sandbox-env-%s", env.ID)
+	
+	// Fetch last 500 lines of logs from Docker
+	cmd := exec.CommandContext(c.Request.Context(), "docker", "logs", "--tail", "500", containerName)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// Log the error but return whatever output we got (or a friendly message if empty)
+		if len(output) == 0 {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch container logs or container is not running."})
+			return
+		}
+	}
+
+	c.String(http.StatusOK, string(output))
 }

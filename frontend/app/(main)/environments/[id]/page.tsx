@@ -9,7 +9,7 @@ import {
   Activity, Box, Clock, ExternalLink, GitBranch, 
   Terminal as TerminalIcon, Loader2, Trash2, RefreshCw,
   Folder, FolderOpen, File, ChevronRight, ChevronDown, 
-  Save, Code, Check, AlertCircle, FilePlus, FolderPlus
+  Save, Code, Check, AlertCircle, FilePlus, FolderPlus, ScrollText, X
 } from "lucide-react";
 
 import { fetchWithAuth } from "@/lib/auth";
@@ -129,6 +129,32 @@ export default function EnvironmentDetail() {
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lineNumbersRef = useRef<HTMLDivElement>(null);
+
+  // Docker Logs Modal state
+  const [isDockerLogsOpen, setIsDockerLogsOpen] = useState<boolean>(false);
+  const [dockerLogs, setDockerLogs] = useState<string>("");
+  const [isLoadingDockerLogs, setIsLoadingDockerLogs] = useState<boolean>(false);
+
+  const fetchDockerLogs = async () => {
+    setIsLoadingDockerLogs(true);
+    setIsDockerLogsOpen(true);
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(`/api/environments/${id}/docker-logs`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: "Failed to fetch logs" }));
+        throw new Error(data.error || "Failed to fetch container logs");
+      }
+      const text = await res.text();
+      setDockerLogs(text || "(No output yet. The container might still be starting.)");
+    } catch (e: any) {
+      setDockerLogs(`Error: ${e.message}`);
+    } finally {
+      setIsLoadingDockerLogs(false);
+    }
+  };
 
   const { data: env, error } = useSWR(`/api/environments/${id}`, fetcher, {
     refreshInterval: (data) => (data?.status === 'BUILDING' ? 1000 : 5000),
@@ -394,6 +420,7 @@ export default function EnvironmentDetail() {
   if (!env) return <div className="p-8 text-center text-white/50 animate-pulse">Loading environment details...</div>;
 
   return (
+    <>
     <div className="max-w-6xl mx-auto space-y-6">
       {/* Header Card */}
       <div className="glass-panel p-8">
@@ -514,6 +541,14 @@ export default function EnvironmentDetail() {
               <span>Files</span>
               <div className="flex items-center gap-1.5 normal-case">
                 <button
+                  onClick={fetchDockerLogs}
+                  className="flex items-center gap-1 px-2 py-0.5 rounded bg-blue-600/20 border border-blue-500/40 text-blue-400 hover:bg-blue-600/40 hover:text-blue-300 transition-all text-xs font-semibold tracking-normal normal-case"
+                  title="View App Logs"
+                >
+                  <ScrollText className="w-3.5 h-3.5" />
+                  App Logs
+                </button>
+                <button
                   onClick={() => handleCreateFileOrFolder(false)}
                   className="p-1 rounded text-white/40 hover:text-white hover:bg-white/5 transition-all"
                   title="New File"
@@ -619,5 +654,52 @@ export default function EnvironmentDetail() {
         </div>
       )}
     </div>
+
+      {/* Docker Logs Modal */}
+      {isDockerLogsOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.75)' }}>
+          <div className="w-full max-w-4xl max-h-[85vh] flex flex-col rounded-2xl border border-white/10 bg-slate-900 shadow-2xl overflow-hidden">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-5 py-3.5 bg-slate-950/80 border-b border-white/10 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <ScrollText className="w-5 h-5 text-blue-400" />
+                <h2 className="text-sm font-semibold text-white">Container App Logs</h2>
+                <span className="text-xs text-white/40 font-mono">api-sandbox-env-{id}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={fetchDockerLogs}
+                  disabled={isLoadingDockerLogs}
+                  className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-blue-600/20 border border-blue-500/30 text-blue-400 hover:bg-blue-600/30 transition-colors text-xs font-semibold disabled:opacity-50"
+                >
+                  {isLoadingDockerLogs ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                  Refresh
+                </button>
+                <button
+                  onClick={() => setIsDockerLogsOpen(false)}
+                  className="p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/10 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body - Log output */}
+            <div className="flex-1 overflow-y-auto bg-slate-950/90">
+              {isLoadingDockerLogs ? (
+                <div className="flex items-center justify-center h-48 gap-3 text-white/50">
+                  <Loader2 className="w-6 h-6 animate-spin text-blue-400" />
+                  <span className="text-sm">Fetching logs...</span>
+                </div>
+              ) : (
+                <pre className="p-5 text-xs leading-6 text-green-300/90 font-mono whitespace-pre-wrap break-all">
+                  {dockerLogs}
+                </pre>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

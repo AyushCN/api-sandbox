@@ -292,7 +292,7 @@ func StartContainer(ctx context.Context, envID string, imageTag string, orgID st
 			CPUShares:       1024,
 			PidsLimit:       &pidsLimit,
 			RestartPolicy:   docker.RestartOnFailure(3),
-			PublishAllPorts: false,
+			PublishAllPorts: true,
 			SecurityOpt:     []string{"no-new-privileges:true"},
 			CapDrop:         []string{"ALL"},
 			CapAdd:          []string{"NET_BIND_SERVICE", "CHOWN", "SETUID", "SETGID", "DAC_OVERRIDE"},

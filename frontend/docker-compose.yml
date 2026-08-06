@@ -18,13 +18,15 @@ services:
       - "127.0.0.1:6379:6379"
 
   traefik:
-    image: traefik:v3.0
+    image: traefik:latest
     container_name: traefik-proxy
     command:
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
       - "--entrypoints.web.address=:80"
       - "--entrypoints.websecure.address=:443"
+    environment:
+      - DOCKER_API_VERSION=1.41
     ports:
       - "80:80"
       - "443:443"

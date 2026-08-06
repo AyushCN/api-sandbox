@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -22,6 +23,8 @@ type CreateEnvironmentRequest struct {
 }
 
 func SetupRoutes(router *gin.Engine) {
+	router.Use(ProxyMiddleware())
+
 	api := router.Group("/api")
 	{
 		api.POST("/auth/register", RateLimitRegister(), Register)
@@ -29,9 +32,11 @@ func SetupRoutes(router *gin.Engine) {
 		api.GET("/auth/verify", VerifyEmail)
 		api.POST("/auth/forgot-password", RateLimitRegister(), ForgotPassword)
 		api.POST("/auth/reset-password", ResetPassword)
+		api.GET("/metrics", PrometheusMetrics)
+		api.Any("/proxy/:id/*path", DirectProxyHandler)
 
 		protected := api.Group("/environments")
-		protected.Use(AuthMiddleware())
+		protected.Use(AuthMiddleware(), RateLimitAPI())
 		{
 			protected.GET("", GetEnvironments)
 			protected.POST("", CreateEnvironment)
@@ -65,6 +70,12 @@ func CreateEnvironment(c *gin.Context) {
 
 	userID, _ := c.Get("userId")
 	uid := userID.(string)
+
+	slog.Info("environment_create_requested", 
+		slog.String("user_id", uid),
+		slog.String("git_url", req.GitURL),
+		slog.String("name", req.Name),
+	)
 
 	// Fetch user to get quota limits
 	var user models.User
@@ -195,5 +206,19 @@ func DeleteEnvironment(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Environment deleted successfully"})
+}
+
+func PrometheusMetrics(c *gin.Context) {
+	sqlDB, err := db.DB.DB()
+	if err != nil {
+		c.String(http.StatusInternalServerError, "Failed to get DB connection for metrics")
+		return
+	}
+	stats := sqlDB.Stats()
+	
+	c.String(http.StatusOK, 
+		fmt.Sprintf("db_connections_open %d\n", stats.OpenConnections) +
+		fmt.Sprintf("db_connections_in_use %d\n", stats.InUse),
+	)
 }
 

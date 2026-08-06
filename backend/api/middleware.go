@@ -79,3 +79,36 @@ func RateLimitRegister() gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+func RateLimitAPI() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userId, exists := c.Get("userId")
+		clientIP := c.ClientIP()
+		
+		var key string
+		if exists {
+			key = fmt.Sprintf("ratelimit:api:%v:%s", userId, clientIP)
+		} else {
+			key = fmt.Sprintf("ratelimit:api:guest:%s", clientIP)
+		}
+
+		ctx := context.Background()
+		count, err := db.RedisClient.Incr(ctx, key).Result()
+		if err != nil {
+			c.Next()
+			return
+		}
+
+		if count == 1 {
+			db.RedisClient.Expire(ctx, key, 1*time.Minute)
+		}
+
+		if count > 200 {
+			c.JSON(http.StatusTooManyRequests, gin.H{"error": "API Rate limit exceeded. Maximum 200 requests per minute."})
+			c.Abort()
+			return
+		}
+
+		c.Next()
+	}
+}

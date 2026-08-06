@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:14
+    environment:
+      POSTGRES_DB: api_sandbox
+      POSTGRES_USER: api_sandbox
+      POSTGRES_PASSWORD: api_sandbox
+    ports:
+      - "5432:5432"
+    networks:
+      - api-sandbox-net
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - api-sandbox-net
+
+  api:
+    build: ./backend
+    ports:
+      - "8080:8080"
+    environment:
+      - DATABASE_URL=host=postgres user=api_sandbox password=api_sandbox dbname=api_sandbox port=5432 sslmode=disable
+      - REDIS_URL=redis://redis:6379
+      - GIN_MODE=release
+      - JWT_SECRET=your_jwt_secret_here
+      - SMTP_HOST=
+      - SMTP_PORT=
+      - SMTP_USER=
+      - SMTP_PASS=
+      - SENDGRID_API_KEY=
+      - APP_URL=http://localhost
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - api-sandbox-net
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - api
+    networks:
+      - api-sandbox-net
+
+networks:
+  api-sandbox-net:
+    driver: bridge
+
+volumes:
+  pgdata:

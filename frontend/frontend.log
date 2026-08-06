@@ -1,0 +1,169 @@
+
+> api-sandbox@0.1.0 dev
+> next dev
+
+▲ Next.js 16.2.11 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://10.96.255.198:3000
+- Environments: .env.local, .env
+✓ Ready in 279ms
+⚠ `eslint` configuration in next.config.ts is no longer supported. See more info here: https://nextjs.org/docs/app/api-reference/cli/next#next-lint-options
+⚠ Invalid next.config.ts options detected: 
+⚠     Unrecognized key(s) in object: 'eslint'
+⚠ See more info here: https://nextjs.org/docs/messages/invalid-next-config
+
+ GET / 200 in 269ms (next.js: 130ms, application-code: 139ms)
+ GET /login 200 in 74ms (next.js: 37ms, application-code: 38ms)
+ GET /dashboard 200 in 161ms (next.js: 14ms, application-code: 147ms)
+ GET /environments/1e264d67-f630-43df-b7b4-2b25874b4a7d 200 in 303ms (next.js: 247ms, application-code: 56ms)
+ GET /dashboard 200 in 78ms (next.js: 29ms, application-code: 48ms)
+ GET /environments/1e264d67-f630-43df-b7b4-2b25874b4a7d 200 in 155ms (next.js: 30ms, application-code: 125ms)
+ GET /dashboard 200 in 101ms (next.js: 5ms, application-code: 96ms)
+Failed to proxy http://localhost:8080/api/environments AggregateError: 
+    at ignore-listed frames {
+  code: 'ECONNREFUSED',
+  [errors]: [
+    Error: connect ECONNREFUSED ::1:8080
+        at <unknown> (Error: connect ECONNREFUSED ::1:8080) {
+      errno: -111,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '::1',
+      port: 8080
+    },
+    Error: connect ECONNREFUSED 127.0.0.1:8080
+        at <unknown> (Error: connect ECONNREFUSED 127.0.0.1:8080) {
+      errno: -111,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 8080
+    }
+  ]
+}
+AggregateError: 
+    at ignore-listed frames {
+  code: 'ECONNREFUSED',
+  [errors]: [
+    Error: connect ECONNREFUSED ::1:8080
+        at <unknown> (Error: connect ECONNREFUSED ::1:8080) {
+      errno: -111,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '::1',
+      port: 8080
+    },
+    Error: connect ECONNREFUSED 127.0.0.1:8080
+        at <unknown> (Error: connect ECONNREFUSED 127.0.0.1:8080) {
+      errno: -111,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 8080
+    }
+  ]
+}
+Failed to proxy http://localhost:8080/api/environments/1e264d67-f630-43df-b7b4-2b25874b4a7d AggregateError: 
+    at ignore-listed frames {
+  code: 'ECONNREFUSED',
+  [errors]: [
+    Error: connect ECONNREFUSED ::1:8080
+        at <unknown> (Error: connect ECONNREFUSED ::1:8080) {
+      errno: -111,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '::1',
+      port: 8080
+    },
+    Error: connect ECONNREFUSED 127.0.0.1:8080
+        at <unknown> (Error: connect ECONNREFUSED 127.0.0.1:8080) {
+      errno: -111,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 8080
+    }
+  ]
+}
+AggregateError: 
+    at ignore-listed frames {
+  code: 'ECONNREFUSED',
+  [errors]: [
+    Error: connect ECONNREFUSED ::1:8080
+        at <unknown> (Error: connect ECONNREFUSED ::1:8080) {
+      errno: -111,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '::1',
+      port: 8080
+    },
+    Error: connect ECONNREFUSED 127.0.0.1:8080
+        at <unknown> (Error: connect ECONNREFUSED 127.0.0.1:8080) {
+      errno: -111,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 8080
+    }
+  ]
+}
+Failed to proxy http://localhost:8080/api/environments AggregateError: 
+    at ignore-listed frames {
+  code: 'ECONNREFUSED',
+  [errors]: [
+    Error: connect ECONNREFUSED ::1:8080
+        at <unknown> (Error: connect ECONNREFUSED ::1:8080) {
+      errno: -111,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '::1',
+      port: 8080
+    },
+    Error: connect ECONNREFUSED 127.0.0.1:8080
+        at <unknown> (Error: connect ECONNREFUSED 127.0.0.1:8080) {
+      errno: -111,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 8080
+    }
+  ]
+}
+AggregateError: 
+    at ignore-listed frames {
+  code: 'ECONNREFUSED',
+  [errors]: [
+    Error: connect ECONNREFUSED ::1:8080
+        at <unknown> (Error: connect ECONNREFUSED ::1:8080) {
+      errno: -111,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '::1',
+      port: 8080
+    },
+    Error: connect ECONNREFUSED 127.0.0.1:8080
+        at <unknown> (Error: connect ECONNREFUSED 127.0.0.1:8080) {
+      errno: -111,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 8080
+    }
+  ]
+}
+ GET /environments/1e264d67-f630-43df-b7b4-2b25874b4a7d 200 in 114ms (next.js: 50ms, application-code: 63ms)
+ GET / 200 in 47ms (next.js: 9ms, application-code: 38ms)
+ GET /login 200 in 27ms (next.js: 6ms, application-code: 21ms)
+ GET /dashboard 200 in 19ms (next.js: 1507µs, application-code: 17ms)
+ GET /dashboard 200 in 13ms (next.js: 1749µs, application-code: 11ms)
+ GET / 200 in 29ms (next.js: 1818µs, application-code: 27ms)
+ GET /login 200 in 20ms (next.js: 3ms, application-code: 18ms)
+ GET /dashboard 200 in 19ms (next.js: 1457µs, application-code: 18ms)
+ GET /upload 200 in 60ms (next.js: 47ms, application-code: 13ms)
+ GET /upload 200 in 75ms (next.js: 2ms, application-code: 73ms)
+ GET /login 200 in 13ms (next.js: 1528µs, application-code: 12ms)
+ GET /register 200 in 43ms (next.js: 28ms, application-code: 16ms)
+ GET /login 200 in 15ms (next.js: 3ms, application-code: 12ms)
+ GET /login 200 in 31ms (next.js: 3ms, application-code: 29ms)
+ GET /login 200 in 30ms (next.js: 2ms, application-code: 28ms)
+[?25h

@@ -1,8 +1,14 @@
 package main
 
 import (
+	"context"
 	"log"
+	"log/slog"
+	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/api-sandbox/backend/api"
 	"github.com/api-sandbox/backend/db"
@@ -70,8 +76,35 @@ func runAPI() {
 		port = "8080"
 	}
 
-	log.Printf("Starting API server on port %s", port)
-	if err := r.Run(":" + port); err != nil {
+	httpServer := &http.Server{
+		Addr:    ":" + port,
+		Handler: r,
+	}
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
+
+	go func() {
+		<-sigChan
+		slog.Info("Graceful shutdown initiated...")
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := httpServer.Shutdown(ctx); err != nil {
+			slog.Error("HTTP Server Shutdown error", slog.Any("err", err))
+		}
+		
+		sqlDB, err := db.DB.DB()
+		if err == nil {
+			sqlDB.Close()
+		}
+
+		os.Exit(0)
+	}()
+
+	slog.Info("Starting API server", slog.String("port", port))
+	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("Failed to run API server: %v", err)
 	}
 }

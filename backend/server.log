@@ -1,0 +1,8 @@
+
+2026/07/27 19:29:31 [35m/home/swordrookie/projects/api_sandbox_links/api-sandbox/backend/db/db.go:26
+[0m[31m[error] [0mfailed to initialize database, got error failed to connect to `user=postgres database=api_sandbox`:
+	127.0.0.1:5432 (localhost): dial error: dial tcp 127.0.0.1:5432: connect: connection refused
+	[::1]:5432 (localhost): dial error: dial tcp [::1]:5432: connect: connection refused
+2026/07/27 19:29:31 Failed to connect to database: failed to connect to `user=postgres database=api_sandbox`:
+	127.0.0.1:5432 (localhost): dial error: dial tcp 127.0.0.1:5432: connect: connection refused
+	[::1]:5432 (localhost): dial error: dial tcp [::1]:5432: connect: connection refused

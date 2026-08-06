@@ -53,3 +53,6 @@ backups/
 skills-lock.json
 AGENTS.md
 CLAUDE.md
+
+# Dynamic workspaces
+backend/workspaces/

@@ -6,19 +6,40 @@
 .env.production
 *.env
 
-# Go build artifacts
+# Go build artifacts & binaries
+backend/main
 backend/server
+backend/backend
+main
 server
+backend
+*.exe
+*.exe.test
+*.out
 
-# Node modules
+# Logs, PID, and temp text files
+*.log
+*.pid
+*.txt
+!README.md
+*.bak
+*.tmp
+tmp/
+.temp/
+coverage/
+
+# Test sub-repositories & scratch
+backend/test-flask/
+frontend/test-prisma.ts
+
+# Node modules & Next.js
 node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-
-# Next.js build output
 .next/
 out/
+*.tsbuildinfo
 
 # IDEs and Editors
 .vscode/
@@ -30,11 +51,6 @@ out/
 *.sw?
 .DS_Store
 
-# Temporary files
-tmp/
-coverage/
-.temp/
-
 # AI and Agent Specific
 .agents/
 .claude/
@@ -42,3 +58,4 @@ coverage/
 skills-lock.json
 AGENTS.md
 CLAUDE.md
+

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { LogoutButton } from "@/components/LogoutButton";
+import { UserAvatar } from "@/components/UserAvatar";
 
 export default function MainLayout({
   children,
@@ -14,10 +15,11 @@ export default function MainLayout({
             <span className="material-symbols-outlined text-primary text-3xl">token</span>
             <span className="font-bold tracking-tight text-xl text-primary">API Sandbox</span>
           </Link>
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-4">
             <Link href="/upload" className="text-sm font-bold tracking-wide text-on-surface-variant hover:text-primary transition-colors uppercase">
               New Sandbox
             </Link>
+            <UserAvatar />
             <LogoutButton />
           </div>
         </div>

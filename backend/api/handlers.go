@@ -18,6 +18,7 @@ import (
 	"github.com/api-sandbox/backend/worker"
 	"github.com/gin-gonic/gin"
 	"github.com/hibiken/asynq"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
@@ -51,6 +52,13 @@ func SetupRoutes(router *gin.Engine) {
 			protected.POST("/:id/files/create", CreateWorkspaceFileOrFolder)
 			protected.POST("/:id/files/delete", DeleteWorkspaceFileOrFolder)
 			protected.GET("/:id/docker-logs", GetDockerLogs)
+		}
+
+		userGroup := api.Group("/user")
+		userGroup.Use(AuthMiddleware(), RateLimitAPI())
+		{
+			userGroup.GET("/me", GetMe)
+			userGroup.PUT("/me/password", ChangePassword)
 		}
 	}
 	
@@ -486,4 +494,98 @@ func GetDockerLogs(c *gin.Context) {
 	}
 
 	c.String(http.StatusOK, string(output))
+}
+
+type MeResponse struct {
+	ID               string `json:"id"`
+	Email            string `json:"email"`
+	IsEmailVerified  bool   `json:"isEmailVerified"`
+	MaxEnvironments  int    `json:"maxEnvironments"`
+	MaxBuildsPerHour int    `json:"maxBuildsPerHour"`
+	CreatedAt        string `json:"createdAt"`
+	EnvCount         int64  `json:"envCount"`
+	OrgName          string `json:"orgName"`
+	OrgRole          string `json:"orgRole"`
+}
+
+func GetMe(c *gin.Context) {
+	userID, _ := c.Get("userId")
+
+	var user models.User
+	if err := db.DB.First(&user, "id = ?", userID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	// Get env count
+	var envCount int64
+	db.DB.Model(&models.Environment{}).Where("user_id = ?", userID).Count(&envCount)
+
+	// Get org membership
+	var orgMember models.OrganizationMember
+	orgName := ""
+	orgRole := ""
+	if err := db.DB.Preload("Organization").Where("user_id = ?", userID).First(&orgMember).Error; err == nil {
+		orgName = orgMember.Organization.Name
+		orgRole = string(orgMember.Role)
+	}
+
+	c.JSON(http.StatusOK, MeResponse{
+		ID:               user.ID,
+		Email:            user.Email,
+		IsEmailVerified:  user.IsEmailVerified,
+		MaxEnvironments:  user.MaxEnvironments,
+		MaxBuildsPerHour: user.MaxBuildsPerHour,
+		CreatedAt:        user.CreatedAt.Format(time.RFC3339),
+		EnvCount:         envCount,
+		OrgName:          orgName,
+		OrgRole:          orgRole,
+	})
+}
+
+type ChangePasswordRequest struct {
+	CurrentPassword string `json:"currentPassword" binding:"required"`
+	NewPassword     string `json:"newPassword" binding:"required,min=12"`
+}
+
+func ChangePassword(c *gin.Context) {
+	userID, _ := c.Get("userId")
+
+	var req ChangePasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var user models.User
+	if err := db.DB.First(&user, "id = ?", userID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	// Verify current password
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.CurrentPassword)); err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Current password is incorrect"})
+		return
+	}
+
+	// Validate new password strength
+	if err := ValidatePassword(req.NewPassword); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Hash and save
+	hashed, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
+		return
+	}
+
+	if err := db.DB.Model(&user).Update("password", string(hashed)).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update password"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Password changed successfully"})
 }

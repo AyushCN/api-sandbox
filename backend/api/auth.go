@@ -3,8 +3,10 @@ package api
 import (
 	"crypto/rand"
 	"fmt"
+	"log/slog"
 	"math/big"
 	"net/http"
+	"net/smtp"
 	"os"
 	"strings"
 	"time"
@@ -13,7 +15,6 @@ import (
 	"github.com/api-sandbox/backend/models"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
-	"net/smtp"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -179,7 +180,7 @@ func Register(c *gin.Context) {
 	}
 
 	if err := sendVerificationEmail(req.Email, verificationCode); err != nil {
-		fmt.Printf("Failed to send verification email: %v\n", err)
+		slog.Error("Failed to send verification email", "email", req.Email, "error", err)
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Registration successful. Check your email to verify."})
@@ -274,7 +275,7 @@ func ForgotPassword(c *gin.Context) {
 	})
 
 	if err := sendPasswordResetEmail(user.Email, resetCode); err != nil {
-		fmt.Printf("Failed to send reset email: %v\n", err)
+		slog.Error("Failed to send reset email", "email", user.Email, "error", err)
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "If that email is registered, we've sent a password reset link."})

@@ -1,7 +1,7 @@
 package db
 
 import (
-	"log"
+	"log/slog"
 	"os"
 	"time"
 
@@ -31,11 +31,12 @@ func InitDB() {
 		if err == nil {
 			break
 		}
-		log.Printf("Attempt %d/10: Database not ready yet (%v). Retrying in 2 seconds...", i, err)
+		slog.Warn("Database not ready yet", "attempt", i, "total_attempts", 10, "error", err)
 		time.Sleep(2 * time.Second)
 	}
 	if err != nil {
-		log.Fatalf("Failed to connect to database after 10 attempts: %v", err)
+		slog.Error("Failed to connect to database after 10 attempts", "error", err)
+		os.Exit(1)
 	}
 
 	// Set up connection pool
@@ -49,10 +50,11 @@ func InitDB() {
 	// Auto Migrate the schemas
 	err = DB.AutoMigrate(&models.User{}, &models.Organization{}, &models.OrganizationMember{}, &models.Environment{}, &models.Log{}, &models.Metric{}, &models.AuditLog{})
 	if err != nil {
-		log.Fatalf("Failed to auto migrate database schemas: %v", err)
+		slog.Error("Failed to auto migrate database schemas", "error", err)
+		os.Exit(1)
 	}
 
-	log.Println("Database connection established and schemas migrated.")
+	slog.Info("Database connection established and schemas migrated.")
 
 	redisUrl := os.Getenv("REDIS_URL")
 	if redisUrl == "" {
@@ -61,7 +63,8 @@ func InitDB() {
 	
 	opt, err := redis.ParseURL(redisUrl)
 	if err != nil {
-		log.Fatalf("Failed to parse Redis URI: %v", err)
+		slog.Error("Failed to parse Redis URI", "redis_url", redisUrl, "error", err)
+		os.Exit(1)
 	}
 
 	RedisClient = redis.NewClient(opt)

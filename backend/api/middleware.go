@@ -1,15 +1,16 @@
 package api
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
+	"github.com/api-sandbox/backend/db"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/api-sandbox/backend/db"
-	"context"
-	"time"
 )
 
 func AuthMiddleware() gin.HandlerFunc {
@@ -60,7 +61,7 @@ func RateLimitRegister() gin.HandlerFunc {
 		count, err := db.RedisClient.Incr(ctx, key).Result()
 		if err != nil {
 			// If Redis fails, log it but don't block registration
-			fmt.Printf("Redis error during rate limiting: %v\n", err)
+			slog.Error("Redis error during rate limiting", "error", err)
 			c.Next()
 			return
 		}
@@ -88,7 +89,7 @@ func RateLimitLogin() gin.HandlerFunc {
 		ctx := context.Background()
 		count, err := db.RedisClient.Incr(ctx, key).Result()
 		if err != nil {
-			fmt.Printf("Redis error during rate limiting: %v\n", err)
+			slog.Error("Redis error during rate limiting", "error", err)
 			c.Next()
 			return
 		}
@@ -120,7 +121,7 @@ func RateLimitAPI() gin.HandlerFunc {
 		ctx := context.Background()
 		count, err := db.RedisClient.Incr(ctx, key).Result()
 		if err != nil {
-			fmt.Printf("Redis error during API rate limiting: %v\n", err)
+			slog.Error("Redis error during API rate limiting", "error", err)
 			c.Next()
 			return
 		}
@@ -148,7 +149,7 @@ func RateLimitPasswordReset() gin.HandlerFunc {
 		ctx := context.Background()
 		count, err := db.RedisClient.Incr(ctx, key).Result()
 		if err != nil {
-			fmt.Printf("Redis error during password reset rate limiting: %v\n", err)
+			slog.Error("Redis error during password reset rate limiting", "error", err)
 			c.Next()
 			return
 		}
@@ -176,7 +177,7 @@ func RateLimitVerifyEmail() gin.HandlerFunc {
 		ctx := context.Background()
 		count, err := db.RedisClient.Incr(ctx, key).Result()
 		if err != nil {
-			fmt.Printf("Redis error during verify email rate limiting: %v\n", err)
+			slog.Error("Redis error during verify email rate limiting", "error", err)
 			c.Next()
 			return
 		}

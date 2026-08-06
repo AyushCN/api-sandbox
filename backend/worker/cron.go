@@ -2,7 +2,7 @@ package worker
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/api-sandbox/backend/db"
@@ -47,7 +47,7 @@ func HandleCleanupContainersTask(ctx context.Context, t *asynq.Task) error {
 
 	for _, env := range envs {
 		if env.ContainerID != nil && *env.ContainerID != "" {
-			log.Printf("Cron: Cleaning up expired container for environment %s", env.ID)
+			slog.Info("Cron: Cleaning up expired container", "env_id", env.ID)
 			_ = CleanupContainer(ctx, *env.ContainerID)
 		}
 

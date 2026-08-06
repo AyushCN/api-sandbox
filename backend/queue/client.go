@@ -1,7 +1,7 @@
 package queue
 
 import (
-	"log"
+	"log/slog"
 	"os"
 
 	"github.com/hibiken/asynq"
@@ -23,9 +23,10 @@ func InitQueue() {
 
 	opt, err := asynq.ParseRedisURI(redisUrl)
 	if err != nil {
-		log.Fatalf("Failed to parse Redis URI: %v", err)
+		slog.Error("Failed to parse Redis URI in InitQueue", "redis_url", redisUrl, "error", err)
+		os.Exit(1)
 	}
 
 	Client = asynq.NewClient(opt)
-	log.Println("Asynq client initialized.")
+	slog.Info("Asynq client initialized.")
 }

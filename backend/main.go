@@ -11,6 +11,7 @@ import (
 
 	"github.com/api-sandbox/backend/api"
 	"github.com/api-sandbox/backend/db"
+	"github.com/api-sandbox/backend/models"
 	"github.com/api-sandbox/backend/queue"
 	"github.com/api-sandbox/backend/worker"
 	"github.com/gin-gonic/gin"
@@ -28,6 +29,21 @@ func main() {
 
 	// Initialize singletons
 	db.InitDB()
+
+	// Recover environments stuck in BUILDING from previous runs
+	var stuckEnvs []models.Environment
+	if err := db.DB.Where("status = ?", "BUILDING").Find(&stuckEnvs).Error; err == nil && len(stuckEnvs) > 0 {
+		for _, env := range stuckEnvs {
+			db.DB.Create(&models.Log{
+				EnvironmentID: env.ID,
+				Message:       "Build failed: build process was interrupted due to server shutdown/restart.",
+				Level:         models.LogLevelError,
+			})
+			db.DB.Model(&env).Update("status", "FAILED")
+			slog.Info("Recovered stuck environment status to FAILED", "env_id", env.ID)
+		}
+	}
+
 	queue.InitQueue()
 	worker.InitDocker()
 

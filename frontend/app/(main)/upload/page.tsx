@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+// @ts-expect-error react-hook-form 7.83.0 react-server types bug
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";

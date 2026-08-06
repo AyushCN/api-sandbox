@@ -15,6 +15,8 @@ import (
 	"github.com/api-sandbox/backend/models"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/sendgrid/sendgrid-go"
+	"github.com/sendgrid/sendgrid-go/helpers/mail"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -66,37 +68,60 @@ func generateVerificationCode() string {
 	return fmt.Sprintf("%06d", n.Int64())
 }
 
-func sendEmail(toEmail, subject, body string) error {
-	smtpHost := os.Getenv("SMTP_HOST")
-	smtpPort := os.Getenv("SMTP_PORT")
-	smtpUser := os.Getenv("SMTP_USER")
-	smtpPass := os.Getenv("SMTP_PASS")
-	fromEmail := os.Getenv("SMTP_FROM")
-
-	if smtpHost == "" || smtpPort == "" {
-		if os.Getenv("GIN_MODE") == "release" {
-			return fmt.Errorf("SMTP configuration is missing in production")
-		}
-		fmt.Printf("\n========== MOCK EMAIL ==========\nTo: %s\nSubject: %s\nBody: %s\n================================\n\n", toEmail, subject, body)
-		return nil
+func sendViaSendGrid(apiKey, fromEmail, toEmail, subject, body string) error {
+	from := mail.NewEmail("API Sandbox", fromEmail)
+	to := mail.NewEmail("", toEmail)
+	message := mail.NewSingleEmail(from, subject, to, body, body)
+	client := sendgrid.NewSendClient(apiKey)
+	response, err := client.Send(message)
+	if err != nil {
+		return err
 	}
-	
-	if fromEmail == "" {
-		fromEmail = "noreply@api-sandbox.com"
+	if response.StatusCode >= 400 {
+		return fmt.Errorf("SendGrid returned status code %d: %s", response.StatusCode, response.Body)
 	}
+	return nil
+}
 
-	auth := smtp.PlainAuth("", smtpUser, smtpPass, smtpHost)
-	
+func sendViaSMTP(host, port, user, pass, fromEmail, toEmail, subject, body string) error {
+	auth := smtp.PlainAuth("", user, pass, host)
 	msg := []byte("To: " + toEmail + "\r\n" +
 		"From: API Sandbox <" + fromEmail + ">\r\n" +
 		"Subject: " + subject + "\r\n" +
 		"Content-Type: text/html; charset=UTF-8\r\n\r\n" +
 		body + "\r\n")
 
-	err := smtp.SendMail(smtpHost+":"+smtpPort, auth, fromEmail, []string{toEmail}, msg)
+	err := smtp.SendMail(host+":"+port, auth, fromEmail, []string{toEmail}, msg)
 	if err != nil {
-		return fmt.Errorf("failed to send email: %v", err)
+		return fmt.Errorf("failed to send email via SMTP: %v", err)
 	}
+	return nil
+}
+
+func sendEmail(toEmail, subject, body string) error {
+	fromEmail := os.Getenv("SMTP_FROM")
+	if fromEmail == "" {
+		fromEmail = "noreply@api-sandbox.com"
+	}
+
+	sendgridKey := os.Getenv("SENDGRID_API_KEY")
+	if sendgridKey != "" {
+		return sendViaSendGrid(sendgridKey, fromEmail, toEmail, subject, body)
+	}
+
+	smtpHost := os.Getenv("SMTP_HOST")
+	smtpPort := os.Getenv("SMTP_PORT")
+	if smtpHost != "" && smtpPort != "" {
+		smtpUser := os.Getenv("SMTP_USER")
+		smtpPass := os.Getenv("SMTP_PASS")
+		return sendViaSMTP(smtpHost, smtpPort, smtpUser, smtpPass, fromEmail, toEmail, subject, body)
+	}
+
+	if os.Getenv("GIN_MODE") == "release" {
+		return fmt.Errorf("email configuration (SendGrid or SMTP) is missing in production")
+	}
+
+	slog.Info("MOCK EMAIL", "to", toEmail, "subject", subject, "body", body)
 	return nil
 }
 

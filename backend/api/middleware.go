@@ -166,3 +166,31 @@ func RateLimitPasswordReset() gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+func RateLimitVerifyEmail() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		clientIP := c.ClientIP()
+		
+		key := fmt.Sprintf("verify_email_limit:%s", clientIP)
+
+		ctx := context.Background()
+		count, err := db.RedisClient.Incr(ctx, key).Result()
+		if err != nil {
+			fmt.Printf("Redis error during verify email rate limiting: %v\n", err)
+			c.Next()
+			return
+		}
+
+		if count == 1 {
+			db.RedisClient.Expire(ctx, key, 10*time.Minute)
+		}
+
+		if count > 10 {
+			c.JSON(http.StatusTooManyRequests, gin.H{"error": "Too many email verification attempts. Try again in 10 minutes."})
+			c.Abort()
+			return
+		}
+
+		c.Next()
+	}
+}

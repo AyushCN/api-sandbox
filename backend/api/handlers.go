@@ -31,7 +31,7 @@ func SetupRoutes(router *gin.Engine) {
 	{
 		api.POST("/auth/register", RateLimitRegister(), Register)
 		api.POST("/auth/login", RateLimitLogin(), Login)
-		api.GET("/auth/verify", VerifyEmail)
+		api.GET("/auth/verify", RateLimitVerifyEmail(), VerifyEmail)
 		api.POST("/auth/forgot-password", RateLimitPasswordReset(), ForgotPassword)
 		api.POST("/auth/reset-password", RateLimitPasswordReset(), ResetPassword)
 

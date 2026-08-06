@@ -421,81 +421,74 @@ export default function EnvironmentDetail() {
 
   return (
     <>
-    <div className="max-w-6xl mx-auto space-y-6">
+    <div className="space-y-4">
       {/* Header Card */}
-      <div className="glass-panel p-8">
-        <div className="flex flex-col md:flex-row md:items-start justify-between gap-6">
-          <div className="space-y-4">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center ring-1 ring-primary/20">
-                <Box className="w-6 h-6 text-primary" />
-              </div>
-              <div>
-                <h1 className="text-3xl font-bold text-white tracking-tight">{env.name}</h1>
-                <div className="flex items-center mt-2 text-white/60 text-sm">
-                  <Clock className="w-4 h-4 mr-1.5" />
-                  ID: <span className="font-mono ml-1 text-white/80">{env.id}</span>
-                </div>
-              </div>
+      <div className="bg-surface-container-lowest border border-outline-variant rounded-xl px-6 py-4">
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          {/* Left: icon + name + meta */}
+          <div className="flex items-center gap-4 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-primary-fixed/10 border border-primary-fixed/20 flex items-center justify-center shrink-0">
+              <Box className="w-5 h-5 text-primary-fixed" />
             </div>
-            
-            <div className="flex flex-wrap gap-4 mt-4">
-              <div className="flex items-center text-sm bg-white/5 px-3 py-1.5 rounded-lg border border-white/10">
-                <GitBranch className="w-4 h-4 mr-2 text-white/50" />
-                <a href={env.gitUrl} target="_blank" rel="noreferrer" className="hover:text-primary transition-colors">
-                  {env.gitUrl.replace('https://github.com/', '')}
-                </a>
-                <span className="mx-2 text-white/20">/</span>
-                <span className="text-white/80">{env.githubBranch}</span>
+            <div className="min-w-0">
+              <h1 className="text-xl font-bold text-on-surface tracking-tight truncate">{env.name}</h1>
+              <div className="flex items-center gap-3 mt-1 flex-wrap">
+                <div className="flex items-center gap-1.5 text-xs text-on-surface-variant/70 font-mono">
+                  <GitBranch className="w-3.5 h-3.5" />
+                  <a href={env.gitUrl} target="_blank" rel="noreferrer" className="hover:text-primary-fixed transition-colors truncate max-w-[200px]">
+                    {env.gitUrl.replace('https://github.com/', '')}
+                  </a>
+                  <span className="text-outline-variant">·</span>
+                  <span className="font-bold text-on-surface">{env.githubBranch}</span>
+                </div>
+                <div className="flex items-center gap-1 text-[10px] text-on-surface-variant/50 font-mono">
+                  <Clock className="w-3 h-3" />
+                  <span>{env.id.slice(0, 8)}...</span>
+                </div>
               </div>
             </div>
           </div>
 
-          <div className="flex flex-col items-end gap-4">
-            <div className={`px-4 py-2 rounded-full border text-sm font-semibold tracking-wide flex items-center gap-2 ${statusColors[env.status] || statusColors.IDLE}`}>
-              {env.status === 'BUILDING' && <Loader2 className="w-4 h-4 animate-spin" />}
+          {/* Right: status + actions */}
+          <div className="flex items-center gap-3 shrink-0 flex-wrap">
+            <div className={`px-3 py-1.5 rounded-full border text-xs font-bold tracking-wider uppercase flex items-center gap-2 ${statusColors[env.status] || statusColors.IDLE}`}>
+              {env.status === 'BUILDING' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              {env.status === 'RUNNING' && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_6px_#34d399]" />}
               {env.status}
             </div>
-            <div className="flex flex-wrap gap-2">
-              {env.publicUrl && (
-                <a 
-                  href={env.publicUrl} 
-                  target="_blank" 
-                  rel="noreferrer"
-                  className="glass-button px-5 py-2.5 flex items-center gap-2 text-sm"
-                >
-                  Open App <ExternalLink className="w-4 h-4" />
-                </a>
-              )}
-              <button
-                onClick={handleRestart}
-                disabled={isRestarting || env.status === 'BUILDING'}
-                className="px-5 py-2.5 rounded-lg border border-primary/30 bg-primary/10 text-primary hover:bg-primary/20 flex items-center gap-2 transition-colors disabled:opacity-50 text-sm"
-              >
-                {isRestarting ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                Restart
-              </button>
-              <button
-                onClick={handleDelete}
-                disabled={isDeleting}
-                className="px-5 py-2.5 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20 flex items-center gap-2 transition-colors disabled:opacity-50 text-sm"
-              >
-                {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-                Delete
-              </button>
-            </div>
+            {env.publicUrl && (
+              <a href={env.publicUrl} target="_blank" rel="noreferrer" className="px-4 py-1.5 rounded-lg border border-outline-variant text-on-surface-variant hover:text-on-surface hover:border-primary-fixed/30 flex items-center gap-1.5 text-xs font-semibold transition-colors">
+                Open App <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+            )}
+            <button
+              onClick={handleRestart}
+              disabled={isRestarting || env.status === 'BUILDING'}
+              className="px-4 py-1.5 rounded-lg border border-primary-fixed/30 bg-primary-fixed/5 text-primary-fixed hover:bg-primary-fixed/15 flex items-center gap-1.5 transition-colors disabled:opacity-50 text-xs font-semibold"
+            >
+              {isRestarting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+              Restart
+            </button>
+            <button
+              onClick={handleDelete}
+              disabled={isDeleting}
+              className="px-4 py-1.5 rounded-lg border border-red-500/30 bg-red-500/5 text-red-400 hover:bg-red-500/15 flex items-center gap-1.5 transition-colors disabled:opacity-50 text-xs font-semibold"
+            >
+              {isDeleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+              Delete
+            </button>
           </div>
         </div>
       </div>
 
       {/* Tabs Header */}
-      <div className="flex border-b border-white/10 gap-6">
+      <div className="flex border-b border-outline-variant gap-6">
         <button
           onClick={() => setActiveTab("logs")}
           className={`pb-3 text-sm font-medium transition-all relative ${
             activeTab === "logs" 
-              ? "text-primary border-b-2 border-primary" 
-              : "text-white/60 hover:text-white"
+              ? "text-primary-fixed border-b-2 border-primary-fixed" 
+              : "text-on-surface-variant hover:text-on-surface"
           }`}
         >
           <span className="flex items-center gap-2">
@@ -507,8 +500,8 @@ export default function EnvironmentDetail() {
           onClick={() => setActiveTab("workspace")}
           className={`pb-3 text-sm font-medium transition-all relative ${
             activeTab === "workspace" 
-              ? "text-primary border-b-2 border-primary" 
-              : "text-white/60 hover:text-white"
+              ? "text-primary-fixed border-b-2 border-primary-fixed" 
+              : "text-on-surface-variant hover:text-on-surface"
           }`}
         >
           <span className="flex items-center gap-2">
@@ -520,24 +513,24 @@ export default function EnvironmentDetail() {
 
       {/* Logs View */}
       {activeTab === "logs" && (
-        <div className="glass-panel overflow-hidden flex flex-col">
-          <div className="bg-slate-950/50 border-b border-white/10 px-4 py-3 flex items-center gap-2">
-            <TerminalIcon className="w-5 h-5 text-white/50" />
-            <h3 className="font-medium text-white/80">Build Logs & Output</h3>
+        <div className="bg-surface-container-lowest border border-outline-variant rounded-xl overflow-hidden flex flex-col" style={{ height: 'calc(100vh - 260px)', minHeight: '420px' }}>
+          <div className="bg-surface-container/60 border-b border-outline-variant px-4 py-3 flex items-center gap-2">
+            <TerminalIcon className="w-4 h-4 text-on-surface-variant/50" />
+            <h3 className="font-medium text-on-surface-variant text-sm">Build Logs & Output</h3>
           </div>
           <div 
             ref={terminalRef} 
-            className="h-[500px] w-full bg-[#0f172a] rounded-b-xl overflow-hidden p-2"
+            className="flex-1 w-full bg-[#0a0e17] overflow-hidden p-2"
           />
         </div>
       )}
 
       {/* Code Workspace View */}
       {activeTab === "workspace" && (
-        <div className="glass-panel overflow-hidden grid grid-cols-12 h-[600px]">
+        <div className="bg-surface-container-lowest border border-outline-variant rounded-xl overflow-hidden grid grid-cols-12" style={{ height: 'calc(100vh - 260px)', minHeight: '500px' }}>
           {/* File Explorer Sidebar */}
-          <div className="col-span-3 border-r border-white/10 bg-slate-950/30 flex flex-col h-full">
-            <div className="px-4 py-2.5 border-b border-white/10 flex items-center justify-between font-medium text-white/70 text-xs tracking-wider uppercase">
+          <div className="col-span-3 border-r border-outline-variant bg-surface-container/40 flex flex-col h-full">
+            <div className="px-4 py-2.5 border-b border-outline-variant flex items-center justify-between font-medium text-on-surface-variant text-xs tracking-wider uppercase">
               <span>Files</span>
               <div className="flex items-center gap-1.5 normal-case">
                 <button

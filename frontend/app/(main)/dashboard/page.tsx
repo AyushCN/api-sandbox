@@ -2,7 +2,11 @@
 
 import useSWR from "swr";
 import Link from "next/link";
-import { Plus, Server, GitBranch, Activity, Clock, Box } from "lucide-react";
+import { 
+  Plus, Server, GitBranch, Clock, Box, 
+  ExternalLink, Activity, Zap, XCircle, 
+  PauseCircle, Loader2, ArrowRight, LayoutDashboard
+} from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { motion } from "framer-motion";
 
@@ -20,103 +24,161 @@ interface Environment {
   createdAt: string;
 }
 
-const statusColors: Record<string, string> = {
-  IDLE: "text-gray-400 bg-gray-400/10",
-  BUILDING: "text-blue-400 bg-blue-400/10 animate-pulse",
-  RUNNING: "text-emerald-400 bg-emerald-400/10",
-  STOPPED: "text-orange-400 bg-orange-400/10",
-  FAILED: "text-red-400 bg-red-400/10",
+const statusConfig: Record<string, { color: string; dot: string; label: string }> = {
+  IDLE:     { color: "text-gray-400 bg-gray-400/10 border-gray-400/20",    dot: "bg-gray-400",    label: "Idle" },
+  BUILDING: { color: "text-blue-400 bg-blue-400/10 border-blue-400/20",    dot: "bg-blue-400 animate-bounce",  label: "Building" },
+  RUNNING:  { color: "text-emerald-400 bg-emerald-400/10 border-emerald-400/20", dot: "bg-emerald-400 animate-pulse shadow-[0_0_6px_#34d399]", label: "Running" },
+  STOPPED:  { color: "text-orange-400 bg-orange-400/10 border-orange-400/20", dot: "bg-orange-400", label: "Stopped" },
+  FAILED:   { color: "text-red-400 bg-red-400/10 border-red-400/20",        dot: "bg-red-400",     label: "Failed" },
 };
+
+function StatusBadge({ status }: { status: string }) {
+  const cfg = statusConfig[status] ?? statusConfig.IDLE;
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold tracking-widest uppercase border ${cfg.color}`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
+      {cfg.label}
+    </span>
+  );
+}
+
+function StatCard({ label, value, icon: Icon, color }: { label: string; value: number; icon: any; color: string }) {
+  return (
+    <div className={`flex items-center gap-4 bg-surface-container-lowest border border-outline-variant rounded-xl px-5 py-4 relative overflow-hidden group hover:border-primary-fixed/30 transition-colors`}>
+      <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${color} shrink-0`}>
+        <Icon className="w-5 h-5" />
+      </div>
+      <div>
+        <p className="text-2xl font-bold text-on-surface">{value}</p>
+        <p className="text-xs text-on-surface-variant font-medium">{label}</p>
+      </div>
+      <div className={`absolute inset-0 bg-gradient-to-br ${color.replace('bg-', 'from-').replace('/20', '/5')} to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none`} />
+    </div>
+  );
+}
 
 export default function Dashboard() {
   const { data: environments, error, isLoading } = useSWR<Environment[]>("/api/environments", fetcher, {
     refreshInterval: 3000,
   });
 
+  const stats = {
+    total:    environments?.length ?? 0,
+    running:  environments?.filter(e => e.status === "RUNNING").length ?? 0,
+    building: environments?.filter(e => e.status === "BUILDING").length ?? 0,
+    failed:   environments?.filter(e => e.status === "FAILED").length ?? 0,
+  };
+
   return (
-    <div className="max-w-6xl mx-auto space-y-8">
+    <div className="space-y-8">
+
+      {/* Page Header */}
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-4xl font-bold tracking-tight text-on-surface mb-2">Deployments</h1>
-          <p className="text-on-surface-variant text-lg">Manage and monitor your API sandbox environments.</p>
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-primary-fixed/10 border border-primary-fixed/20 flex items-center justify-center">
+            <LayoutDashboard className="w-5 h-5 text-primary-fixed" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-on-surface">Deployments</h1>
+            <p className="text-on-surface-variant text-sm">Manage and monitor your sandbox environments</p>
+          </div>
         </div>
-        <Link 
-          href="/upload" 
-          className="bg-primary-container text-on-primary-fixed-variant px-6 py-3 rounded-lg font-bold flex items-center gap-2 hover:shadow-[0_0_15px_rgba(0,240,255,0.2)] active:scale-95 transition-all"
+        <Link
+          href="/upload"
+          className="flex items-center gap-2 bg-primary-container text-on-primary-fixed-variant px-5 py-2.5 rounded-xl font-bold text-sm hover:shadow-[0_0_20px_rgba(0,240,255,0.25)] active:scale-95 transition-all"
         >
-          <span className="material-symbols-outlined text-[20px]">add</span>
+          <Plus className="w-4 h-4" />
           New Sandbox
         </Link>
       </div>
 
+      {/* Stats Bar */}
+      {!isLoading && !error && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatCard label="Total Sandboxes" value={stats.total}    icon={Server}   color="bg-primary-fixed/10 text-primary-fixed" />
+          <StatCard label="Running"         value={stats.running}  icon={Activity} color="bg-emerald-400/10 text-emerald-400" />
+          <StatCard label="Building"        value={stats.building} icon={Zap}      color="bg-blue-400/10 text-blue-400" />
+          <StatCard label="Failed"          value={stats.failed}   icon={XCircle}  color="bg-red-400/10 text-red-400" />
+        </div>
+      )}
+
+      {/* Environments Grid */}
       {isLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="glass-panel h-48 animate-pulse bg-white/5" />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="bg-surface-container-lowest border border-outline-variant rounded-xl h-52 animate-pulse" />
           ))}
         </div>
       ) : error ? (
-        <div className="bg-error-container/10 border border-error/20 p-8 rounded-xl text-center text-error">
-          Failed to load environments. Ensure the backend is running.
+        <div className="bg-error-container/10 border border-error/20 p-10 rounded-xl text-center">
+          <XCircle className="w-10 h-10 text-error mx-auto mb-3" />
+          <p className="text-error font-semibold">Failed to load environments</p>
+          <p className="text-on-surface-variant text-sm mt-1">Ensure the backend is running.</p>
         </div>
       ) : environments?.length === 0 ? (
-        <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-16 text-center flex flex-col items-center justify-center border-dashed">
-          <span className="material-symbols-outlined text-[48px] text-on-surface-variant/50 mb-4">inventory_2</span>
+        <div className="bg-surface-container-lowest border border-outline-variant border-dashed rounded-xl py-24 text-center flex flex-col items-center">
+          <div className="w-16 h-16 rounded-2xl bg-primary-fixed/5 border border-primary-fixed/10 flex items-center justify-center mb-5">
+            <Server className="w-8 h-8 text-on-surface-variant/30" />
+          </div>
           <h3 className="text-xl font-bold text-on-surface mb-2">No deployments yet</h3>
-          <p className="text-on-surface-variant mb-8">Create your first sandbox environment to get started.</p>
-          <Link href="/upload" className="bg-primary-container text-on-primary-fixed-variant px-8 py-3 rounded-lg font-bold hover:shadow-[0_0_15px_rgba(0,240,255,0.2)] active:scale-95 transition-all">
+          <p className="text-on-surface-variant mb-8 max-w-xs">Create your first sandbox environment to start deploying.</p>
+          <Link href="/upload" className="bg-primary-container text-on-primary-fixed-variant px-8 py-3 rounded-xl font-bold hover:shadow-[0_0_20px_rgba(0,240,255,0.2)] active:scale-95 transition-all">
             Deploy Now
           </Link>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
           {environments?.map((env, idx) => (
-            <motion.div 
+            <motion.div
               key={env.id}
-              initial={{ opacity: 0, y: 20 }}
+              initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: idx * 0.05 }}
+              transition={{ delay: idx * 0.04, duration: 0.35 }}
             >
-              <Link href={`/environments/${env.id}`} className="block group">
-                <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-6 h-full transition-all duration-300 hover:border-primary-fixed hover:shadow-[0_0_20px_rgba(0,240,255,0.1)] relative overflow-hidden">
-                  <div className="absolute inset-0 bg-gradient-to-br from-primary-fixed/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                  <div className="flex justify-between items-start mb-4 relative z-10">
-                    <h3 className="font-bold text-lg text-on-surface group-hover:text-primary-fixed transition-colors truncate pr-4">
-                      {env.name}
-                    </h3>
-                    <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-sm text-[10px] font-bold tracking-widest uppercase border ${
-                      env.status === 'RUNNING' ? 'border-primary-fixed/20 text-primary-fixed bg-primary-fixed/10' :
-                      env.status === 'IDLE' || env.status === 'STOPPED' ? 'border-secondary-fixed/20 text-secondary-fixed bg-secondary-fixed/10' :
-                      env.status === 'BUILDING' ? 'border-tertiary-fixed/20 text-tertiary-fixed bg-tertiary-fixed/10' :
-                      'border-error/20 text-error bg-error/10'
-                    }`}>
-                      {env.status === 'RUNNING' && <span className="w-1.5 h-1.5 rounded-full bg-primary-fixed animate-pulse shadow-[0_0_5px_#00f0ff]"></span>}
-                      {env.status === 'BUILDING' && <span className="w-1.5 h-1.5 rounded-full bg-tertiary-fixed animate-bounce"></span>}
-                      {env.status}
-                    </span>
-                  </div>
+              <Link href={`/environments/${env.id}`} className="block group h-full">
+                <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-5 h-full flex flex-col gap-4 transition-all duration-300 hover:border-primary-fixed/40 hover:shadow-[0_0_24px_rgba(0,240,255,0.08)] relative overflow-hidden">
                   
-                  <div className="space-y-3 mb-6 relative z-10">
-                    <div className="flex items-center text-sm text-on-surface-variant font-mono">
-                      <span className="material-symbols-outlined text-[16px] mr-2 text-on-surface-variant/50">account_tree</span>
-                      <span className="truncate">{env.gitUrl.replace('https://github.com/', '')}</span>
-                      <span className="mx-2 text-outline-variant">•</span>
-                      <span className="font-bold text-on-surface">{env.githubBranch}</span>
+                  {/* Hover glow */}
+                  <div className="absolute inset-0 bg-gradient-to-br from-primary-fixed/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+                  
+                  {/* Card Header */}
+                  <div className="flex items-start justify-between gap-3 relative z-10">
+                    <div className="w-9 h-9 rounded-lg bg-primary-fixed/10 border border-primary-fixed/20 flex items-center justify-center shrink-0">
+                      <Box className="w-4 h-4 text-primary-fixed" />
                     </div>
-                    {env.publicUrl && (
-                      <div className="flex items-center text-sm text-primary-fixed-dim hover:text-primary-fixed transition-colors font-mono">
-                        <span className="material-symbols-outlined text-[16px] mr-2">public</span>
-                        <span className="truncate hover:underline flex items-center gap-1">{env.publicUrl} <span className="material-symbols-outlined text-[14px]">open_in_new</span></span>
-                      </div>
-                    )}
+                    <StatusBadge status={env.status} />
                   </div>
 
-                  <div className="flex items-center justify-between text-[11px] font-bold text-on-surface-variant tracking-wider uppercase pt-4 border-t border-outline-variant/50 relative z-10">
-                    <div className="flex items-center">
-                      <span className="material-symbols-outlined text-[14px] mr-1.5">schedule</span>
+                  {/* Name + Repo */}
+                  <div className="relative z-10 flex-1 min-w-0">
+                    <h3 className="font-bold text-base text-on-surface group-hover:text-primary-fixed transition-colors truncate mb-1.5">
+                      {env.name}
+                    </h3>
+                    <div className="flex items-center gap-1.5 text-xs text-on-surface-variant font-mono">
+                      <GitBranch className="w-3.5 h-3.5 shrink-0 text-on-surface-variant/50" />
+                      <span className="truncate">{env.gitUrl.replace("https://github.com/", "")}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-xs text-on-surface-variant mt-1">
+                      <span className="text-on-surface-variant/40">on</span>
+                      <span className="font-bold text-on-surface">{env.githubBranch}</span>
+                    </div>
+                  </div>
+
+                  {/* Public URL */}
+                  {env.publicUrl && (
+                    <div className="relative z-10 flex items-center gap-1.5 text-xs text-primary-fixed-dim hover:text-primary-fixed transition-colors font-mono truncate">
+                      <ExternalLink className="w-3 h-3 shrink-0" />
+                      <span className="truncate">{env.publicUrl}</span>
+                    </div>
+                  )}
+
+                  {/* Footer */}
+                  <div className="relative z-10 flex items-center justify-between text-[10px] font-bold text-on-surface-variant tracking-wider uppercase pt-3 border-t border-outline-variant/50">
+                    <div className="flex items-center gap-1">
+                      <Clock className="w-3 h-3" />
                       {formatDistanceToNow(new Date(env.createdAt), { addSuffix: true })}
                     </div>
-                    <span className="material-symbols-outlined opacity-0 group-hover:opacity-100 transition-opacity text-primary-fixed">arrow_forward</span>
+                    <ArrowRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 text-primary-fixed transition-all group-hover:translate-x-0.5 duration-200" />
                   </div>
                 </div>
               </Link>

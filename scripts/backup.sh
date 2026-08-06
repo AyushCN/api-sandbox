@@ -4,10 +4,10 @@
 set -e
 
 # Configuration
-DB_CONTAINER="api-sandbox-postgres-1"
-DB_USER="postgres"
-DB_NAME="api_sandbox"
-BACKUP_DIR="/var/backups/api_sandbox"
+DB_CONTAINER=${DB_CONTAINER:-"frontend-postgres-1"}
+DB_USER=${DB_USER:-"postgres"}
+DB_NAME=${DB_NAME:-"api_sandbox"}
+BACKUP_DIR=${BACKUP_DIR:-"$HOME/backups/api_sandbox"}
 DATE=$(date +%Y%m%d_%H%M%S)
 S3_BUCKET=${S3_BACKUP_BUCKET:-"s3://api-sandbox-backups"}
 RETENTION_DAYS=30

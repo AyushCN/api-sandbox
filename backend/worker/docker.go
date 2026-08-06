@@ -31,7 +31,13 @@ func InitDocker() {
 }
 
 func CloneAndBuildImage(ctx context.Context, envID string, gitURL string, branch string) (string, error) {
-	tmpDir := filepath.Join(os.TempDir(), "api-sandbox", envID)
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("failed to get working directory: %v", err)
+	}
+	workspacesRoot := filepath.Join(wd, "workspaces")
+	_ = os.MkdirAll(workspacesRoot, 0755)
+	tmpDir := filepath.Join(workspacesRoot, envID)
 	imageTag := fmt.Sprintf("api-sandbox-%s", strings.ToLower(envID))
 
 	subDir := ""
@@ -67,10 +73,10 @@ func CloneAndBuildImage(ctx context.Context, envID string, gitURL string, branch
 		
 		cmd = exec.CommandContext(ctx, "git", "clone", "--depth", "1", gitURL, tmpDir)
 		if out2, err2 := cmd.CombinedOutput(); err2 != nil {
+			_ = os.RemoveAll(tmpDir)
 			return "", fmt.Errorf("git clone failed: %s - %v", string(out2), err2)
 		}
 	}
-	defer os.RemoveAll(tmpDir) // Cleanup
 
 	db.DB.Create(&models.Log{
 		EnvironmentID: envID,
@@ -273,6 +279,12 @@ func StartContainer(ctx context.Context, envID string, imageTag string, orgID st
 		})
 	}
 
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to get working directory: %v", err)
+	}
+	workspaceDir := filepath.Join(wd, "workspaces", envID)
+
 	pidsLimit := int64(256)
 	opts := docker.CreateContainerOptions{
 		Name: fmt.Sprintf("api-sandbox-env-%s", envID),
@@ -296,6 +308,10 @@ func StartContainer(ctx context.Context, envID string, imageTag string, orgID st
 			SecurityOpt:     []string{"no-new-privileges:true"},
 			CapDrop:         []string{"ALL"},
 			CapAdd:          []string{"NET_BIND_SERVICE", "CHOWN", "SETUID", "SETGID", "DAC_OVERRIDE"},
+			Binds: []string{
+				fmt.Sprintf("%s:/app", workspaceDir),
+				"/app/node_modules",
+			},
 		},
 		NetworkingConfig: &docker.NetworkingConfig{
 			EndpointsConfig: map[string]*docker.EndpointConfig{
@@ -383,4 +399,33 @@ func tarballDir(src string) (io.Reader, error) {
 		return nil, err
 	}
 	return buf, nil
+}
+
+func CleanupWorkspace(envID string) error {
+	wd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	workspaceDir := filepath.Join(wd, "workspaces", envID)
+	return os.RemoveAll(workspaceDir)
+}
+
+func RestartContainer(ctx context.Context, containerID string) error {
+	return dockerClient.RestartContainer(containerID, 2)
+}
+
+func GetContainerPort(containerID string) (int, error) {
+	inspect, err := dockerClient.InspectContainer(containerID)
+	if err != nil {
+		return 0, err
+	}
+	var assignedPort int
+	for _, bindings := range inspect.NetworkSettings.Ports {
+		if len(bindings) > 0 {
+			port, _ := strconv.Atoi(bindings[0].HostPort)
+			assignedPort = port
+			break
+		}
+	}
+	return assignedPort, nil
 }

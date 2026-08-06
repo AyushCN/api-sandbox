@@ -44,6 +44,11 @@ func SetupRoutes(router *gin.Engine) {
 			protected.POST("/:id/restart", RestartEnvironment)
 			protected.DELETE("/:id", DeleteEnvironment)
 			protected.GET("/:id/logs/stream", StreamLogs)
+			protected.GET("/:id/files", GetWorkspaceFiles)
+			protected.GET("/:id/files/content", GetWorkspaceFileContent)
+			protected.POST("/:id/files/content", UpdateWorkspaceFileContent)
+			protected.POST("/:id/files/create", CreateWorkspaceFileOrFolder)
+			protected.POST("/:id/files/delete", DeleteWorkspaceFileOrFolder)
 		}
 	}
 	
@@ -356,6 +361,9 @@ func DeleteEnvironment(c *gin.Context) {
 	}
 	// Also attempt to cleanup by predictable name, in case it was created but ContainerID wasn't saved
 	_ = worker.CleanupContainer(c.Request.Context(), fmt.Sprintf("api-sandbox-env-%s", env.ID))
+
+	// Cleanup workspace folder on host
+	_ = worker.CleanupWorkspace(env.ID)
 
 	// Delete from database
 	if err := db.DB.Delete(&env).Error; err != nil {

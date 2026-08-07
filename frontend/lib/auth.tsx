@@ -79,11 +79,14 @@ export function useAuth() {
 
 export const fetchWithAuth = async (url: string, options: RequestInit = {}) => {
   // Always include credentials so the browser sends the HttpOnly cookie
-  const res = await fetch(url, { ...options, credentials: "true" as RequestCredentials });
+  const res = await fetch(url, { ...options, credentials: "include" });
   
   if (res.status === 401) {
     if (typeof window !== "undefined") {
-      window.location.href = "/login";
+      const publicPaths = ["/login", "/register", "/forgot-password", "/reset-password", "/verify", "/"];
+      if (!publicPaths.includes(window.location.pathname)) {
+        window.location.href = "/login";
+      }
     }
     throw new Error("Unauthorized");
   }

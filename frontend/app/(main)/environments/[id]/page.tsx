@@ -9,7 +9,7 @@ import {
   Activity, Box, Clock, ExternalLink, GitBranch, 
   Terminal as TerminalIcon, Loader2, Trash2, RefreshCw,
   Folder, FolderOpen, File, ChevronRight, ChevronDown, 
-  Save, Code, Check, AlertCircle, FilePlus, FolderPlus, ScrollText, X
+  Save, Code, Check, AlertCircle, FilePlus, FolderPlus, ScrollText, X, Users
 } from "lucide-react";
 
 import { fetchWithAuth } from "@/lib/auth";
@@ -118,7 +118,7 @@ export default function EnvironmentDetail() {
   const xtermRef = useRef<any>(null);
   
   // Tab control
-  const [activeTab, setActiveTab] = useState<"logs" | "workspace">("logs");
+  const [activeTab, setActiveTab] = useState<"logs" | "workspace" | "collaborators">("logs");
   
   // File explorer states
   const [selectedFilePath, setSelectedFilePath] = useState<string>("");
@@ -126,6 +126,7 @@ export default function EnvironmentDetail() {
   const [originalFileContent, setOriginalFileContent] = useState<string>("");
   const [isLoadingFile, setIsLoadingFile] = useState<boolean>(false);
   const [isSavingFile, setIsSavingFile] = useState<boolean>(false);
+  const [isEditingFile, setIsEditingFile] = useState<boolean>(false);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lineNumbersRef = useRef<HTMLDivElement>(null);
@@ -134,6 +135,12 @@ export default function EnvironmentDetail() {
   const [isDockerLogsOpen, setIsDockerLogsOpen] = useState<boolean>(false);
   const [dockerLogs, setDockerLogs] = useState<string>("");
   const [isLoadingDockerLogs, setIsLoadingDockerLogs] = useState<boolean>(false);
+
+  // Invite Modal state
+  const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
+  const [inviteIdentifier, setInviteIdentifier] = useState("");
+  const [inviteRole, setInviteRole] = useState("COLLABORATOR");
+  const [isInviting, setIsInviting] = useState(false);
 
   const fetchDockerLogs = async () => {
     setIsLoadingDockerLogs(true);
@@ -156,6 +163,41 @@ export default function EnvironmentDetail() {
     }
   };
 
+  const handleInvite = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inviteIdentifier.trim() || !env?.projectId) return;
+    setIsInviting(true);
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(`/api/projects/${env.projectId}/invite`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          identifier: inviteIdentifier.trim(),
+          role: inviteRole
+        })
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to invite collaborator");
+      }
+
+      toast.success("Collaborator invited successfully!");
+      setIsInviteModalOpen(false);
+      setInviteIdentifier("");
+      setInviteRole("COLLABORATOR");
+      mutate(`/api/projects/${env.projectId}`);
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setIsInviting(false);
+    }
+  };
+
   const { data: env, error } = useSWR(`/api/environments/${id}`, fetcher, {
     refreshInterval: (data) => (data?.status === 'BUILDING' ? 1000 : 5000),
   });
@@ -164,6 +206,34 @@ export default function EnvironmentDetail() {
     activeTab === "workspace" ? `/api/environments/${id}/files` : null,
     fetcher
   );
+
+  const { data: project } = useSWR(
+    activeTab === "collaborators" && env?.projectId ? `/api/projects/${env.projectId}` : null,
+    fetcher
+  );
+
+  const { data: currentUser } = useSWR("/api/user/me", fetcher);
+
+  const handleRemoveCollaborator = async (userId: string) => {
+    if (!env?.projectId) return;
+    if (!confirm("Are you sure you want to remove this collaborator?")) return;
+    
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(`/api/projects/${env.projectId}/collaborators/${userId}`, {
+        method: "DELETE",
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to remove collaborator");
+      }
+      toast.success("Collaborator removed successfully");
+      mutate(`/api/projects/${env.projectId}`);
+    } catch (e: any) {
+      toast.error(e.message);
+    }
+  };
 
   // Sync scroll for line numbers in textarea
   const handleScroll = () => {
@@ -187,6 +257,7 @@ export default function EnvironmentDetail() {
         const data = await res.json();
         setFileContent(data.content);
         setOriginalFileContent(data.content);
+        setIsEditingFile(false);
       } catch (e: any) {
         toast.error(e.message);
         setSelectedFilePath("");
@@ -218,6 +289,7 @@ export default function EnvironmentDetail() {
       
       toast.success("File saved and container reloaded!");
       setOriginalFileContent(fileContent);
+      setIsEditingFile(false);
       
       // Clear logs to reflect container restart log sequence
       if (xtermRef.current) {
@@ -336,7 +408,7 @@ export default function EnvironmentDetail() {
 
       if (env?.logs) {
         env.logs.forEach((l: any) => {
-          let msg = l.message.replace(/\n$/, '');
+          const msg = l.message.replace(/\n$/, '');
           term.writeln(`[${l.level.toUpperCase()}] ${msg}`);
         });
         term._logCount = env.logs.length;
@@ -366,7 +438,7 @@ export default function EnvironmentDetail() {
     if (env.logs.length > currentLength) {
       const newLogs = env.logs.slice(currentLength);
       newLogs.forEach((l: any) => {
-        let msg = l.message.replace(/\n$/, '');
+        const msg = l.message.replace(/\n$/, '');
         term.writeln(`[${l.level.toUpperCase()}] ${msg}`);
       });
       term._logCount = env.logs.length;
@@ -456,7 +528,7 @@ export default function EnvironmentDetail() {
               {env.status === 'RUNNING' && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_6px_#34d399]" />}
               {env.status}
             </div>
-            {env.publicUrl && (
+            {env.publicUrl && env.status === 'RUNNING' && (
               <a href={env.publicUrl} target="_blank" rel="noreferrer" className="px-4 py-1.5 rounded-lg border border-outline-variant text-on-surface-variant hover:text-on-surface hover:border-primary-fixed/30 flex items-center gap-1.5 text-xs font-semibold transition-colors">
                 Open App <ExternalLink className="w-3.5 h-3.5" />
               </a>
@@ -509,6 +581,19 @@ export default function EnvironmentDetail() {
             Code Workspace
           </span>
         </button>
+        <button
+          onClick={() => setActiveTab("collaborators")}
+          className={`pb-3 text-sm font-medium transition-all relative ${
+            activeTab === "collaborators" 
+              ? "text-primary-fixed border-b-2 border-primary-fixed" 
+              : "text-on-surface-variant hover:text-on-surface"
+          }`}
+        >
+          <span className="flex items-center gap-2">
+            <Users className="w-4 h-4" />
+            Collaborators
+          </span>
+        </button>
       </div>
 
       {/* Logs View */}
@@ -522,6 +607,69 @@ export default function EnvironmentDetail() {
             ref={terminalRef} 
             className="flex-1 w-full bg-[#0a0e17] overflow-hidden p-2"
           />
+        </div>
+      )}
+
+      {/* Collaborators View */}
+      {activeTab === "collaborators" && (
+        <div className="bg-surface-container-lowest border border-outline-variant rounded-xl overflow-hidden flex flex-col" style={{ height: 'calc(100vh - 260px)', minHeight: '420px' }}>
+          <div className="bg-surface-container/60 border-b border-outline-variant px-4 py-3 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Users className="w-4 h-4 text-on-surface-variant/50" />
+              <h3 className="font-medium text-on-surface-variant text-sm">Project Collaborators</h3>
+            </div>
+            <button
+              onClick={() => setIsInviteModalOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary-fixed/10 border border-primary-fixed/20 text-primary-fixed hover:bg-primary-fixed/20 transition-colors text-xs font-semibold"
+            >
+              <Users className="w-3.5 h-3.5" />
+              Invite Collaborator
+            </button>
+          </div>
+          <div className="flex-1 w-full bg-[#0a0e17] overflow-y-auto p-6">
+            {!project ? (
+              <div className="flex justify-center items-center h-full text-white/50 animate-pulse">Loading collaborators...</div>
+            ) : (
+              <div className="max-w-3xl mx-auto space-y-4">
+                {project.collaborators?.map((collab: any) => {
+                  const isMe = currentUser && currentUser.id === collab.userId;
+                  const myCollab = project.collaborators.find((c: any) => c.userId === currentUser?.id);
+                  const iAmAdminOrOwner = myCollab && (myCollab.role === 'ADMIN' || myCollab.role === 'OWNER');
+                  const canRemove = isMe || (iAmAdminOrOwner && collab.role !== 'OWNER');
+
+                  return (
+                    <div key={collab.id} className="flex items-center justify-between p-4 rounded-xl bg-surface-container border border-outline-variant">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold">
+                          {collab.user?.email?.[0]?.toUpperCase() || '?'}
+                        </div>
+                        <div>
+                          <div className="font-semibold text-white flex items-center gap-2">
+                            {collab.user?.email || 'Unknown User'}
+                            {isMe && <span className="text-[10px] bg-primary-fixed/20 text-primary-fixed px-1.5 py-0.5 rounded font-bold uppercase">You</span>}
+                            {!collab.acceptedAt && <span className="text-[10px] bg-orange-500/20 text-orange-400 px-1.5 py-0.5 rounded font-bold uppercase">Pending Invite</span>}
+                          </div>
+                          <div className="text-xs text-white/50">Role: {collab.role}</div>
+                        </div>
+                      </div>
+                      {canRemove && (
+                        <button
+                          onClick={() => handleRemoveCollaborator(collab.userId)}
+                          className="w-8 h-8 rounded-lg flex items-center justify-center text-error hover:bg-error/10 transition-colors"
+                          title={isMe ? "Leave Project" : "Remove Collaborator"}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+                {(!project.collaborators || project.collaborators.length === 0) && (
+                  <div className="text-center text-white/40">No collaborators found.</div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -591,18 +739,30 @@ export default function EnvironmentDetail() {
                       </span>
                     )}
                   </div>
-                  <button
-                    onClick={handleSaveFile}
-                    disabled={isSavingFile || !hasUnsavedChanges}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-primary/10 border border-primary/30 text-primary hover:bg-primary/20 disabled:opacity-30 disabled:hover:bg-primary/10 transition-colors text-xs font-semibold"
-                  >
-                    {isSavingFile ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <div className="flex gap-2">
+                    {!isEditingFile ? (
+                      <button
+                        onClick={() => setIsEditingFile(true)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-white/20 text-white/80 hover:bg-white/10 transition-colors text-xs font-semibold"
+                      >
+                        <Code className="w-3.5 h-3.5" />
+                        Edit File
+                      </button>
                     ) : (
-                      <Save className="w-3.5 h-3.5" />
+                      <button
+                        onClick={handleSaveFile}
+                        disabled={isSavingFile || !hasUnsavedChanges}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-primary/10 border border-primary/30 text-primary hover:bg-primary/20 disabled:opacity-30 disabled:hover:bg-primary/10 transition-colors text-xs font-semibold"
+                      >
+                        {isSavingFile ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Save className="w-3.5 h-3.5" />
+                        )}
+                        Save & Apply
+                      </button>
                     )}
-                    Save & Apply
-                  </button>
+                  </div>
                 </div>
 
                 {/* Editor Workspace Input Area */}
@@ -630,7 +790,8 @@ export default function EnvironmentDetail() {
                     value={fileContent}
                     onChange={(e) => setFileContent(e.target.value)}
                     spellCheck="false"
-                    className="flex-1 resize-none bg-transparent py-4 px-3 text-white/90 outline-none overflow-y-auto text-sm leading-6 select-text selection:bg-primary/30 selection:text-white"
+                    readOnly={!isEditingFile}
+                    className={`flex-1 resize-none py-4 px-3 text-white/90 outline-none overflow-y-auto text-sm leading-6 select-text selection:bg-primary/30 selection:text-white ${!isEditingFile ? 'bg-transparent cursor-text' : 'bg-slate-900/50'}`}
                   />
                 </div>
               </>
@@ -690,6 +851,62 @@ export default function EnvironmentDetail() {
                 </pre>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Invite Collaborator Modal */}
+      {isInviteModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.75)' }}>
+          <div className="w-full max-w-md bg-surface-container-lowest rounded-2xl border border-outline-variant shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-outline-variant bg-surface-container/30">
+              <h3 className="font-semibold text-on-surface">Invite Collaborator</h3>
+              <button onClick={() => setIsInviteModalOpen(false)} className="text-on-surface-variant hover:text-on-surface">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={handleInvite} className="p-5 space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-on-surface-variant mb-1.5">Email or Username</label>
+                <input
+                  type="text"
+                  required
+                  value={inviteIdentifier}
+                  onChange={(e) => setInviteIdentifier(e.target.value)}
+                  placeholder="e.g. user@example.com or username"
+                  className="w-full bg-surface-container border border-outline-variant rounded-lg px-3 py-2 text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:border-primary-fixed/50"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-on-surface-variant mb-1.5">Role</label>
+                <select
+                  value={inviteRole}
+                  onChange={(e) => setInviteRole(e.target.value)}
+                  className="w-full bg-surface-container border border-outline-variant rounded-lg px-3 py-2 text-sm text-on-surface focus:outline-none focus:border-primary-fixed/50 appearance-none"
+                >
+                  <option value="ADMIN">Admin</option>
+                  <option value="COLLABORATOR">Collaborator</option>
+                  <option value="VIEWER">Viewer</option>
+                </select>
+              </div>
+              <div className="pt-2 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setIsInviteModalOpen(false)}
+                  className="px-4 py-2 text-sm font-medium text-on-surface-variant hover:text-on-surface"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isInviting || !inviteIdentifier.trim()}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary-fixed text-on-primary-fixed hover:bg-primary-fixed/90 font-medium text-sm transition-colors disabled:opacity-50"
+                >
+                  {isInviting && <Loader2 className="w-4 h-4 animate-spin" />}
+                  Send Invite
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

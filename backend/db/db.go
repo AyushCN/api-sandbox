@@ -48,10 +48,70 @@ func InitDB() {
 	}
 
 	// Auto Migrate the schemas
-	err = DB.AutoMigrate(&models.User{}, &models.Organization{}, &models.OrganizationMember{}, &models.Environment{}, &models.Log{}, &models.Metric{}, &models.AuditLog{})
+	err = DB.AutoMigrate(
+		&models.User{}, 
+		&models.Organization{}, 
+		&models.OrganizationMember{}, 
+		&models.Project{}, 
+		&models.ProjectCollaborator{}, 
+		&models.Environment{}, 
+		&models.EnvironmentMember{}, 
+		&models.Log{}, 
+		&models.Metric{}, 
+		&models.AuditLog{},
+	)
 	if err != nil {
 		slog.Error("Failed to auto migrate database schemas", "error", err)
 		os.Exit(1)
+	}
+
+	// Migration: Create default projects for environments that only have OrganizationID
+	var envsWithoutProject []models.Environment
+	DB.Where("project_id = '' OR project_id IS NULL").Find(&envsWithoutProject)
+	
+	if len(envsWithoutProject) > 0 {
+		slog.Info("Migrating existing environments to Project model...", "count", len(envsWithoutProject))
+		for _, env := range envsWithoutProject {
+			if env.OrganizationID == "" {
+				continue // Can't migrate without org
+			}
+			
+			// Find or create a default project for this org
+			var project models.Project
+			err := DB.Where("owner_organization_id = ? AND name = ?", env.OrganizationID, "Default Workspace").First(&project).Error
+			
+			if err != nil {
+				// Create the project
+				project = models.Project{
+					Name:                "Default Workspace",
+					Description:         "Auto-migrated default project",
+					OwnerOrganizationID: env.OrganizationID,
+					CreatedByUserID:     env.UserID,
+				}
+				DB.Create(&project)
+				
+				// Add the creator as OWNER
+				DB.Create(&models.ProjectCollaborator{
+					ProjectID:       project.ID,
+					UserID:          env.UserID,
+					Role:            models.ProjectRoleOwner,
+					InvitedByUserID: env.UserID,
+				})
+			}
+			
+			// Assign environment to project
+			env.ProjectID = project.ID
+			DB.Save(&env)
+		}
+		slog.Info("Migration complete.")
+	}
+
+	// Migration: Auto-accept all existing collaborators so users don't lose access
+	err = DB.Exec("UPDATE project_collaborators SET accepted_at = CURRENT_TIMESTAMP WHERE accepted_at IS NULL").Error
+	if err != nil {
+		slog.Error("Failed to auto-accept existing collaborators", "error", err)
+	} else {
+		slog.Info("Migrated existing collaborators to accepted status.")
 	}
 
 	slog.Info("Database connection established and schemas migrated.")

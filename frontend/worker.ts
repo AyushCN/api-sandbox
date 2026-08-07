@@ -8,7 +8,7 @@ buildQueue.process(async (job) => {
   const { environmentId } = job.data;
   console.log(`Processing build job for environment ${environmentId}`);
 
-  let environment = await prisma.environment.findUnique({ where: { id: environmentId } });
+  const environment = await prisma.environment.findUnique({ where: { id: environmentId } });
   if (!environment) {
     throw new Error(`Environment ${environmentId} not found`);
   }

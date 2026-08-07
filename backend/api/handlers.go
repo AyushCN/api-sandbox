@@ -26,6 +26,8 @@ type CreateEnvironmentRequest struct {
 	Name         string `json:"name" binding:"required"`
 	GitURL       string `json:"gitUrl" binding:"required,url"`
 	GithubBranch string `json:"githubBranch"`
+	DatabaseUrl  string `json:"databaseUrl"`
+	ProjectID    string `json:"projectId"` // Now uses projectId
 }
 
 func SetupRoutes(router *gin.Engine) {
@@ -36,6 +38,27 @@ func SetupRoutes(router *gin.Engine) {
 		api.GET("/auth/verify", RateLimitVerifyEmail(), VerifyEmail)
 		api.POST("/auth/forgot-password", RateLimitPasswordReset(), ForgotPassword)
 		api.POST("/auth/reset-password", RateLimitPasswordReset(), ResetPassword)
+
+		projects := api.Group("/projects")
+		projects.Use(AuthMiddleware(), RateLimitAPI())
+		{
+			projects.GET("", GetUserProjects)
+			projects.POST("", CreateProject)
+			
+			projectDetail := projects.Group("/:projectId")
+			
+			// Non-authorized project endpoints (requires token only)
+			projectDetail.POST("/invites/accept", AcceptProjectInvite)
+			projectDetail.POST("/invites/decline", DeclineProjectInvite)
+			
+			// Authorized project endpoints
+			projectDetail.Use(AuthorizeProjectAccess(models.ProjectRoleViewer))
+			{
+				projectDetail.GET("", GetProject)
+				projectDetail.POST("/invite", AuthorizeProjectAccess(models.ProjectRoleAdmin), InviteToProject)
+				projectDetail.DELETE("/collaborators/:userId", RemoveCollaborator)
+			}
+		}
 
 		protected := api.Group("/environments")
 		protected.Use(AuthMiddleware(), RateLimitAPI())
@@ -58,7 +81,10 @@ func SetupRoutes(router *gin.Engine) {
 		userGroup.Use(AuthMiddleware(), RateLimitAPI())
 		{
 			userGroup.GET("/me", GetMe)
+			userGroup.PUT("/me", UpdateMe)
+			userGroup.GET("/activity", GetUserActivity)
 			userGroup.PUT("/me/password", ChangePassword)
+			userGroup.GET("/invites", GetUserInvites)
 		}
 	}
 	
@@ -112,22 +138,26 @@ func GetEnvironments(c *gin.Context) {
 	var environments []models.Environment
 	var err error
 
-	// Get User's Organizations
-	var orgMembers []models.OrganizationMember
-	db.DB.Where("user_id = ?", userID).Find(&orgMembers)
-	var orgIDs []string
-	for _, m := range orgMembers {
-		orgIDs = append(orgIDs, m.OrganizationID)
+	// Get User's Projects
+	var projectCollabs []models.ProjectCollaborator
+	db.DB.Where("user_id = ?", userID).Find(&projectCollabs)
+	var projectIDs []string
+	for _, pc := range projectCollabs {
+		projectIDs = append(projectIDs, pc.ProjectID)
 	}
 
 	for attempt := 0; attempt < 3; attempt++ {
 		query := db.DB.WithContext(context.Background())
-		if len(orgIDs) > 0 {
-			query = query.Where("organization_id IN ? OR user_id = ?", orgIDs, userID)
-		} else {
-			query = query.Where("user_id = ?", userID)
+		
+		conditions := []string{"user_id = ?"}
+		args := []interface{}{userID}
+
+		if len(projectIDs) > 0 {
+			conditions = append(conditions, "project_id IN ?")
+			args = append(args, projectIDs)
 		}
 
+		query = query.Where(strings.Join(conditions, " OR "), args...)
 		err = query.Order("created_at desc").
 			Offset(offset).
 			Limit(params.Limit).
@@ -202,26 +232,71 @@ func CreateEnvironment(c *gin.Context) {
 		return
 	}
 
-	// Fetch first organization of user to assign environment
-	var orgMember models.OrganizationMember
-	var orgID string
-	if err := db.DB.Where("user_id = ?", uid).First(&orgMember).Error; err == nil {
-		orgID = orgMember.OrganizationID
+	// Find project to assign to
+	var projectID string
+	if req.ProjectID != "" {
+		// Verify access
+		var collab models.ProjectCollaborator
+		if err := db.DB.Where("project_id = ? AND user_id = ?", req.ProjectID, uid).First(&collab).Error; err != nil {
+			c.JSON(http.StatusForbidden, gin.H{"error": "You do not have access to this project"})
+			return
+		}
+		if collab.Role == models.ProjectRoleViewer {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Viewers cannot create environments"})
+			return
+		}
+		projectID = req.ProjectID
+	} else {
+		// Fallback for legacy frontend: use first available project, or create one
+		var collab models.ProjectCollaborator
+		if err := db.DB.Where("user_id = ?", uid).First(&collab).Error; err == nil {
+			projectID = collab.ProjectID
+		} else {
+			// No projects exist, create a default one (legacy behavior fallback)
+			var orgMember models.OrganizationMember
+			if err := db.DB.Where("user_id = ?", uid).First(&orgMember).Error; err == nil {
+				defaultProject := models.Project{
+					Name: "Default Workspace",
+					OwnerOrganizationID: orgMember.OrganizationID,
+					CreatedByUserID: uid,
+				}
+				db.DB.Create(&defaultProject)
+				db.DB.Create(&models.ProjectCollaborator{
+					ProjectID: defaultProject.ID,
+					UserID: uid,
+					Role: models.ProjectRoleOwner,
+				})
+				projectID = defaultProject.ID
+			}
+		}
+	}
+
+	var dbUrlPtr *string
+	if req.DatabaseUrl != "" {
+		dbUrlPtr = &req.DatabaseUrl
 	}
 
 	env := models.Environment{
-		UserID:         uid,
-		OrganizationID: orgID,
-		Name:           req.Name,
-		GitURL:         req.GitURL,
-		GithubBranch:   req.GithubBranch,
-		Status:         models.StatusBuilding,
+		UserID:            uid,
+		ProjectID:         projectID,
+		Name:              req.Name,
+		GitURL:            req.GitURL,
+		GithubBranch:      req.GithubBranch,
+		Status:            models.StatusBuilding,
+		UserProvidedDBURL: dbUrlPtr,
 	}
 
 	if err := db.DB.Create(&env).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create environment"})
 		return
 	}
+
+	// Add creator as ADMIN
+	db.DB.Create(&models.EnvironmentMember{
+		EnvironmentID: env.ID,
+		UserID:        uid,
+		Role:          models.EnvRoleAdmin,
+	})
 
 	db.DB.Create(&models.AuditLog{
 		UserID:    uid,
@@ -253,12 +328,12 @@ func GetEnvironment(c *gin.Context) {
 	userID, _ := c.Get("userId")
 	var env models.Environment
 	
-	// Get User's Organizations
-	var orgMembers []models.OrganizationMember
-	db.DB.Where("user_id = ?", userID).Find(&orgMembers)
-	var orgIDs []string
-	for _, m := range orgMembers {
-		orgIDs = append(orgIDs, m.OrganizationID)
+	// Get User's Projects
+	var projectCollabs []models.ProjectCollaborator
+	db.DB.Where("user_id = ?", userID).Find(&projectCollabs)
+	var projectIDs []string
+	for _, c := range projectCollabs {
+		projectIDs = append(projectIDs, c.ProjectID)
 	}
 
 	var err error
@@ -271,11 +346,15 @@ func GetEnvironment(c *gin.Context) {
 				return db.Order("timestamp desc").Limit(100)
 			})
 
-		if len(orgIDs) > 0 {
-			query = query.Where("organization_id IN ? OR user_id = ?", orgIDs, userID)
-		} else {
-			query = query.Where("user_id = ?", userID)
+		conditions := []string{"user_id = ?"}
+		args := []interface{}{userID}
+
+		if len(projectIDs) > 0 {
+			conditions = append(conditions, "project_id IN ?")
+			args = append(args, projectIDs)
 		}
+
+		query = query.Where(strings.Join(conditions, " OR "), args...)
 
 		err = query.First(&env, "id = ?", id).Error
 		
@@ -299,16 +378,26 @@ func GetEnvironment(c *gin.Context) {
 	c.JSON(http.StatusOK, env)
 }
 
+func getUserProjectIDs(userID interface{}) []string {
+	var collabs []models.ProjectCollaborator
+	db.DB.Where("user_id = ?", userID).Find(&collabs)
+	var projectIDs []string
+	for _, c := range collabs {
+		projectIDs = append(projectIDs, c.ProjectID)
+	}
+	return projectIDs
+}
+
 func StreamLogs(c *gin.Context) {
 	envID := c.Param("id")
 	userID, _ := c.Get("userId")
-	orgIDs := getUserOrgIDs(userID)
+	projectIDs := getUserProjectIDs(userID)
 
 	// Verify access
 	var envCount int64
 	query := db.DB.Model(&models.Environment{}).Where("id = ?", envID)
-	if len(orgIDs) > 0 {
-		query = query.Where("organization_id IN ? OR user_id = ?", orgIDs, userID)
+	if len(projectIDs) > 0 {
+		query = query.Where("project_id IN ? OR user_id = ?", projectIDs, userID)
 	} else {
 		query = query.Where("user_id = ?", userID)
 	}
@@ -350,12 +439,12 @@ func StreamLogs(c *gin.Context) {
 func DeleteEnvironment(c *gin.Context) {
 	id := c.Param("id")
 	userID, _ := c.Get("userId")
-	orgIDs := getUserOrgIDs(userID)
+	projectIDs := getUserProjectIDs(userID)
 
 	var env models.Environment
 	query := db.DB
-	if len(orgIDs) > 0 {
-		query = query.Where("organization_id IN ? OR user_id = ?", orgIDs, userID)
+	if len(projectIDs) > 0 {
+		query = query.Where("project_id IN ? OR user_id = ?", projectIDs, userID)
 	} else {
 		query = query.Where("user_id = ?", userID)
 	}
@@ -394,12 +483,12 @@ func DeleteEnvironment(c *gin.Context) {
 func RestartEnvironment(c *gin.Context) {
 	id := c.Param("id")
 	userID, _ := c.Get("userId")
-	orgIDs := getUserOrgIDs(userID)
+	projectIDs := getUserProjectIDs(userID)
 	
 	var env models.Environment
 	query := db.DB
-	if len(orgIDs) > 0 {
-		query = query.Where("organization_id IN ? OR user_id = ?", orgIDs, userID)
+	if len(projectIDs) > 0 {
+		query = query.Where("project_id IN ? OR user_id = ?", projectIDs, userID)
 	} else {
 		query = query.Where("user_id = ?", userID)
 	}
@@ -452,25 +541,15 @@ func RestartEnvironment(c *gin.Context) {
 }
 
 
-func getUserOrgIDs(userID interface{}) []string {
-	var orgMembers []models.OrganizationMember
-	db.DB.Where("user_id = ?", userID).Find(&orgMembers)
-	var orgIDs []string
-	for _, m := range orgMembers {
-		orgIDs = append(orgIDs, m.OrganizationID)
-	}
-	return orgIDs
-}
-
 func GetDockerLogs(c *gin.Context) {
 	id := c.Param("id")
 	userID, _ := c.Get("userId")
-	orgIDs := getUserOrgIDs(userID)
+	projectIDs := getUserProjectIDs(userID)
 
 	var env models.Environment
 	query := db.DB
-	if len(orgIDs) > 0 {
-		query = query.Where("organization_id IN ? OR user_id = ?", orgIDs, userID)
+	if len(projectIDs) > 0 {
+		query = query.Where("project_id IN ? OR user_id = ?", projectIDs, userID)
 	} else {
 		query = query.Where("user_id = ?", userID)
 	}
@@ -502,6 +581,12 @@ type MeResponse struct {
 	IsEmailVerified  bool   `json:"isEmailVerified"`
 	MaxEnvironments  int    `json:"maxEnvironments"`
 	MaxBuildsPerHour int    `json:"maxBuildsPerHour"`
+	Bio              string `json:"bio"`
+	Pronouns         string `json:"pronouns"`
+	Location         string `json:"location"`
+	Website          string `json:"website"`
+	Twitter          string `json:"twitter"`
+	Github           string `json:"github"`
 	CreatedAt        string `json:"createdAt"`
 	EnvCount         int64  `json:"envCount"`
 	OrgName          string `json:"orgName"`
@@ -536,11 +621,63 @@ func GetMe(c *gin.Context) {
 		IsEmailVerified:  user.IsEmailVerified,
 		MaxEnvironments:  user.MaxEnvironments,
 		MaxBuildsPerHour: user.MaxBuildsPerHour,
+		Bio:              user.Bio,
+		Pronouns:         user.Pronouns,
+		Location:         user.Location,
+		Website:          user.Website,
+		Twitter:          user.Twitter,
+		Github:           user.Github,
 		CreatedAt:        user.CreatedAt.Format(time.RFC3339),
 		EnvCount:         envCount,
 		OrgName:          orgName,
 		OrgRole:          orgRole,
 	})
+}
+
+type UpdateMeRequest struct {
+	Bio      string `json:"bio"`
+	Pronouns string `json:"pronouns"`
+	Location string `json:"location"`
+	Website  string `json:"website"`
+	Twitter  string `json:"twitter"`
+	Github   string `json:"github"`
+}
+
+func UpdateMe(c *gin.Context) {
+	userID, _ := c.Get("userId")
+
+	var req UpdateMeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid payload"})
+		return
+	}
+
+	var user models.User
+	if err := db.DB.First(&user, "id = ?", userID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	user.Bio = req.Bio
+	user.Pronouns = req.Pronouns
+	user.Location = req.Location
+	user.Website = req.Website
+	user.Twitter = req.Twitter
+	user.Github = req.Github
+
+	if err := db.DB.Save(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update profile"})
+		return
+	}
+
+	// Create an audit log for profile update
+	db.DB.Create(&models.AuditLog{
+		UserID:    user.ID,
+		Action:    "UPDATE_PROFILE",
+		IPAddress: c.ClientIP(),
+	})
+
+	c.JSON(http.StatusOK, gin.H{"message": "Profile updated successfully"})
 }
 
 type ChangePasswordRequest struct {
@@ -589,3 +726,22 @@ func ChangePassword(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Password changed successfully"})
 }
+
+func GetUserActivity(c *gin.Context) {
+	userID, _ := c.Get("userId")
+
+	var activities []models.AuditLog
+	
+	// Get last 365 days of activity
+	oneYearAgo := time.Now().AddDate(-1, 0, 0)
+
+	if err := db.DB.Where("user_id = ? AND timestamp >= ?", userID, oneYearAgo).
+		Order("timestamp desc").
+		Find(&activities).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch user activity"})
+		return
+	}
+
+	c.JSON(http.StatusOK, activities)
+}
+

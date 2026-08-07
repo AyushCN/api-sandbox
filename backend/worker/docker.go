@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/api-sandbox/backend/db"
 	"github.com/api-sandbox/backend/models"
@@ -97,7 +99,7 @@ func CloneAndBuildImage(ctx context.Context, envID string, gitURL string, branch
 				Message:       errMsg,
 				Level:         models.LogLevelError,
 			})
-			return "", fmt.Errorf(errMsg)
+			return "", fmt.Errorf("%s", errMsg)
 		}
 
 		// Check if the subdirectory actually exists in the cloned repo
@@ -108,7 +110,7 @@ func CloneAndBuildImage(ctx context.Context, envID string, gitURL string, branch
 				Message:       errMsg,
 				Level:         models.LogLevelError,
 			})
-			return "", fmt.Errorf(errMsg)
+			return "", fmt.Errorf("%s", errMsg)
 		}
 	}
 
@@ -202,7 +204,7 @@ func CloneAndBuildImage(ctx context.Context, envID string, gitURL string, branch
 	return imageTag, nil
 }
 
-func StartContainer(ctx context.Context, envID string, imageTag string, orgID string) (string, int, error) {
+func StartContainer(ctx context.Context, envID string, imageTag string, orgID string, dbURL string) (string, int, error) {
 	db.DB.Create(&models.Log{
 		EnvironmentID: envID,
 		Message:       fmt.Sprintf("Starting container for image %s...", imageTag),
@@ -234,6 +236,14 @@ func StartContainer(ctx context.Context, envID string, imageTag string, orgID st
 		"traefik.enable": "true",
 		fmt.Sprintf("traefik.http.routers.env-%s.rule", envID):                      fmt.Sprintf("Host(`%s.%s`)", envID, domain),
 		fmt.Sprintf("traefik.http.services.env-%s.loadbalancer.server.port", envID): exposedPort,
+		"traefik.docker.network": fmt.Sprintf("api-sandbox-net-%s", orgID),
+	}
+
+	if domain != "localhost" {
+		labels[fmt.Sprintf("traefik.http.routers.env-%s.entrypoints", envID)] = "websecure"
+		labels[fmt.Sprintf("traefik.http.routers.env-%s.tls.certresolver", envID)] = "myresolver"
+	} else {
+		labels[fmt.Sprintf("traefik.http.routers.env-%s.entrypoints", envID)] = "web"
 	}
 
 	// Network Isolation: Create a network for this user if it doesn't exist
@@ -265,7 +275,7 @@ func StartContainer(ctx context.Context, envID string, imageTag string, orgID st
 				Message:       errMsg,
 				Level:         models.LogLevelError,
 			})
-			return "", 0, fmt.Errorf(errMsg)
+			return "", 0, fmt.Errorf("%s", errMsg)
 		}
 		if net != nil {
 			networkID = net.ID
@@ -290,10 +300,29 @@ func StartContainer(ctx context.Context, envID string, imageTag string, orgID st
 		Name: fmt.Sprintf("api-sandbox-env-%s", envID),
 		Config: &docker.Config{
 			Image: imageTag,
-			Env: []string{
-				fmt.Sprintf("PORT=%s", exposedPort),
-				"HOST=0.0.0.0",
-			},
+			Env: func() []string {
+				e := []string{fmt.Sprintf("PORT=%s", exposedPort), "HOST=0.0.0.0"}
+				if dbURL != "" {
+					e = append(e, fmt.Sprintf("DATABASE_URL=%s", dbURL), fmt.Sprintf("MONGO_URI=%s", dbURL))
+					if u, err := url.Parse(dbURL); err == nil {
+						e = append(e, fmt.Sprintf("DB_HOST=%s", u.Hostname()))
+						if u.Port() != "" {
+							e = append(e, fmt.Sprintf("DB_PORT=%s", u.Port()))
+						}
+						if u.User != nil {
+							e = append(e, fmt.Sprintf("DB_USER=%s", u.User.Username()))
+							if p, ok := u.User.Password(); ok {
+								e = append(e, fmt.Sprintf("DB_PASSWORD=%s", p))
+							}
+						}
+						dbName := strings.TrimPrefix(u.Path, "/")
+						if dbName != "" {
+							e = append(e, fmt.Sprintf("DB_NAME=%s", dbName))
+						}
+					}
+				}
+				return e
+			}(),
 			Labels: labels,
 		},
 		HostConfig: &docker.HostConfig{
@@ -428,4 +457,178 @@ func GetContainerPort(containerID string) (int, error) {
 		}
 	}
 	return assignedPort, nil
+}
+
+func StartSidecarDatabase(ctx context.Context, envID string, orgID string, dbType DBType) (string, error) {
+	if dbType == DBTypeNone {
+		return "", nil
+	}
+
+	networkName := fmt.Sprintf("api-sandbox-net-%s", orgID)
+	networks, err := dockerClient.ListNetworks()
+	var networkFound bool
+	if err == nil {
+		for _, net := range networks {
+			if net.Name == networkName {
+				networkFound = true
+				break
+			}
+		}
+	}
+
+	if !networkFound {
+		_, _ = dockerClient.CreateNetwork(docker.CreateNetworkOptions{
+			Name:           networkName,
+			Driver:         "bridge",
+			CheckDuplicate: true,
+			EnableIPv6:     false,
+		})
+	}
+
+	containerName := fmt.Sprintf("api-sandbox-db-%s", envID)
+	_ = CleanupContainer(ctx, containerName)
+
+	var image, dbURL string
+	var env []string
+
+	switch dbType {
+	case DBTypeMySQL:
+		image = "mysql:8.0"
+		env = []string{
+			"MYSQL_ROOT_PASSWORD=rootpass123",
+			"MYSQL_DATABASE=myapp",
+			"MYSQL_USER=appuser",
+			"MYSQL_PASSWORD=apppassword",
+		}
+		dbURL = fmt.Sprintf("mysql://appuser:apppassword@%s:3306/myapp", containerName)
+	case DBTypePostgres:
+		image = "postgres:15"
+		env = []string{
+			"POSTGRES_DB=myapp",
+			"POSTGRES_USER=appuser",
+			"POSTGRES_PASSWORD=apppassword",
+		}
+		dbURL = fmt.Sprintf("postgresql://appuser:apppassword@%s:5432/myapp", containerName)
+	case DBTypeMongo:
+		image = "mongo:6.0"
+		env = []string{
+			"MONGO_INITDB_DATABASE=myapp",
+			"MONGO_INITDB_ROOT_USERNAME=admin",
+			"MONGO_INITDB_ROOT_PASSWORD=adminpass",
+		}
+		dbURL = fmt.Sprintf("mongodb://admin:adminpass@%s:27017/myapp?authSource=admin", containerName)
+	}
+
+	db.DB.Create(&models.Log{
+		EnvironmentID: envID,
+		Message:       fmt.Sprintf("Pulling %s database image (this may take a minute on first run)...", string(dbType)),
+		Level:         models.LogLevelInfo,
+	})
+
+	pullOpts := docker.PullImageOptions{
+		Repository: image,
+	}
+	_ = dockerClient.PullImage(pullOpts, docker.AuthConfiguration{})
+
+	db.DB.Create(&models.Log{
+		EnvironmentID: envID,
+		Message:       fmt.Sprintf("Starting sidecar database container (%s)...", containerName),
+		Level:         models.LogLevelInfo,
+	})
+
+	opts := docker.CreateContainerOptions{
+		Name: containerName,
+		Config: &docker.Config{
+			Image: image,
+			Env:   env,
+		},
+		HostConfig: &docker.HostConfig{
+			Memory: 256 * 1024 * 1024, // 256MB for DB
+		},
+		NetworkingConfig: &docker.NetworkingConfig{
+			EndpointsConfig: map[string]*docker.EndpointConfig{
+				networkName: {},
+			},
+		},
+	}
+
+	container, err := dockerClient.CreateContainer(opts)
+	if err != nil {
+		return "", fmt.Errorf("failed to create db container: %v", err)
+	}
+
+	if err := dockerClient.StartContainer(container.ID, nil); err != nil {
+		return "", fmt.Errorf("failed to start db container: %v", err)
+	}
+
+	db.DB.Create(&models.Log{
+		EnvironmentID: envID,
+		Message:       "Waiting for database to initialize and accept connections...",
+		Level:         models.LogLevelInfo,
+	})
+
+	err = waitForDatabaseReady(ctx, container.ID, dbType, envID)
+	if err != nil {
+		return "", fmt.Errorf("database readiness check failed: %v", err)
+	}
+
+	return dbURL, nil
+}
+
+func waitForDatabaseReady(ctx context.Context, containerID string, dbType DBType, envID string) error {
+	var cmd []string
+	switch dbType {
+	case DBTypeMySQL:
+		cmd = []string{"mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpass123"}
+	case DBTypePostgres:
+		cmd = []string{"pg_isready", "-U", "appuser", "-d", "myapp"}
+	case DBTypeMongo:
+		cmd = []string{"mongosh", "--quiet", "--eval", "db.adminCommand('ping')"}
+	default:
+		return nil
+	}
+
+	timeout := time.After(120 * time.Second)
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timeout:
+			return fmt.Errorf("timed out waiting for %s database to be ready", string(dbType))
+		case <-ticker.C:
+			execOpts := docker.CreateExecOptions{
+				Container:    containerID,
+				AttachStdout: true,
+				AttachStderr: true,
+				Cmd:          cmd,
+			}
+			exec, err := dockerClient.CreateExec(execOpts)
+			if err != nil {
+				continue
+			}
+
+			var stdout, stderr bytes.Buffer
+			startOpts := docker.StartExecOptions{
+				OutputStream: &stdout,
+				ErrorStream:  &stderr,
+			}
+			err = dockerClient.StartExec(exec.ID, startOpts)
+			if err != nil {
+				continue
+			}
+
+			inspect, err := dockerClient.InspectExec(exec.ID)
+			if err == nil && inspect.ExitCode == 0 {
+				db.DB.Create(&models.Log{
+					EnvironmentID: envID,
+					Message:       fmt.Sprintf("Database %s is fully initialized and ready.", string(dbType)),
+					Level:         models.LogLevelInfo,
+				})
+				return nil
+			}
+		}
+	}
 }

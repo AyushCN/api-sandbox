@@ -186,6 +186,7 @@ func Register(c *gin.Context) {
 	}
 
 	if err := db.DB.Create(&user).Error; err != nil {
+		slog.Error("Failed to create user", "email", req.Email, "error", err)
 		c.JSON(http.StatusConflict, gin.H{"error": "User already exists"})
 		return
 	}

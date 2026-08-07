@@ -1,6 +1,7 @@
 "use client";
+import React, { useState } from "react";
 
-import useSWR from "swr";
+import useSWR, { mutate } from "swr";
 import Link from "next/link";
 import { 
   Plus, Server, GitBranch, Clock, Box, 
@@ -11,6 +12,7 @@ import { formatDistanceToNow } from "date-fns";
 import { motion } from "framer-motion";
 
 import { fetchWithAuth } from "@/lib/auth";
+import toast from "react-hot-toast";
 
 const fetcher = (url: string) => fetchWithAuth(url);
 
@@ -22,6 +24,17 @@ interface Environment {
   status: string;
   publicUrl: string | null;
   createdAt: string;
+}
+
+interface ProjectCollaborator {
+  id: string;
+  projectId: string;
+  role: string;
+  project: {
+    id: string;
+    name: string;
+    description: string;
+  };
 }
 
 const statusConfig: Record<string, { color: string; dot: string; label: string }> = {
@@ -69,6 +82,32 @@ export default function Dashboard() {
     failed:   environments?.filter(e => e.status === "FAILED").length ?? 0,
   };
 
+  const { data: invites, mutate: mutateInvites } = useSWR<ProjectCollaborator[]>("/api/user/invites", fetcher);
+  const [isProcessingInvite, setIsProcessingInvite] = useState<string | null>(null);
+
+  const handleInviteAction = async (projectId: string, action: 'accept' | 'decline') => {
+    setIsProcessingInvite(projectId);
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(`/api/projects/${projectId}/invites/${action}`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error(`Failed to ${action} invite`);
+      
+      toast.success(`Invite ${action}ed successfully`);
+      mutateInvites();
+      if (action === 'accept') {
+        // Refresh environments to show new project's sandboxes
+        mutate("/api/environments");
+      }
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setIsProcessingInvite(null);
+    }
+  };
+
   return (
     <div className="space-y-8">
 
@@ -91,6 +130,43 @@ export default function Dashboard() {
           New Sandbox
         </Link>
       </div>
+
+      {/* Pending Invites Section */}
+      {invites && invites.length > 0 && (
+        <div className="bg-primary-fixed/5 border border-primary-fixed/20 rounded-xl overflow-hidden mb-8">
+          <div className="bg-primary-fixed/10 px-5 py-3 border-b border-primary-fixed/20 flex items-center gap-2">
+            <Zap className="w-4 h-4 text-primary-fixed" />
+            <h2 className="font-bold text-primary-fixed text-sm">Pending Project Invites</h2>
+          </div>
+          <div className="divide-y divide-outline-variant/30">
+            {invites.map(invite => (
+              <div key={invite.id} className="p-5 flex items-center justify-between">
+                <div>
+                  <h3 className="font-bold text-on-surface text-lg">{invite.project.name}</h3>
+                  <p className="text-sm text-on-surface-variant mt-1">You have been invited to join this project as a <strong>{invite.role}</strong>.</p>
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => handleInviteAction(invite.projectId, 'decline')}
+                    disabled={isProcessingInvite === invite.projectId}
+                    className="px-4 py-2 rounded-lg font-semibold text-sm border border-error/30 text-error hover:bg-error/10 disabled:opacity-50 transition-colors"
+                  >
+                    Decline
+                  </button>
+                  <button
+                    onClick={() => handleInviteAction(invite.projectId, 'accept')}
+                    disabled={isProcessingInvite === invite.projectId}
+                    className="px-4 py-2 rounded-lg font-semibold text-sm bg-primary-fixed text-on-primary-fixed hover:bg-primary-fixed/90 disabled:opacity-50 transition-colors flex items-center gap-2"
+                  >
+                    {isProcessingInvite === invite.projectId && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                    Accept Invite
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Stats Bar */}
       {!isLoading && !error && (

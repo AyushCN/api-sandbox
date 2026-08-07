@@ -48,7 +48,7 @@ const InteractiveNetworkCanvas = () => {
 
             // Update and draw connections
             for (let i = 0; i < nodes.length; i++) {
-                let n1 = nodes[i];
+                const n1 = nodes[i];
                 n1.x += n1.vx;
                 n1.y += n1.vy;
 
@@ -63,8 +63,8 @@ const InteractiveNetworkCanvas = () => {
 
                 // Connect nodes to each other
                 for (let j = i + 1; j < nodes.length; j++) {
-                    let n2 = nodes[j];
-                    let dist = Math.hypot(n1.x - n2.x, n1.y - n2.y);
+                    const n2 = nodes[j];
+                    const dist = Math.hypot(n1.x - n2.x, n1.y - n2.y);
                     if (dist < 150) {
                         ctx.beginPath();
                         ctx.moveTo(n1.x, n1.y);

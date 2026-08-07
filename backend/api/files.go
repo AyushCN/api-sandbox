@@ -71,12 +71,12 @@ func buildFileTree(rootDir, currentDir string) ([]*FileNode, error) {
 
 func checkWorkspaceAccess(c *gin.Context, envID string) (*models.Environment, error) {
 	userID, _ := c.Get("userId")
-	orgIDs := getUserOrgIDs(userID)
+	projectIDs := getUserProjectIDs(userID)
 
 	var env models.Environment
 	query := db.DB.Preload("User")
-	if len(orgIDs) > 0 {
-		query = query.Where("organization_id IN ? OR user_id = ?", orgIDs, userID)
+	if len(projectIDs) > 0 {
+		query = query.Where("project_id IN ? OR user_id = ?", projectIDs, userID)
 	} else {
 		query = query.Where("user_id = ?", userID)
 	}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"github.com/api-sandbox/backend/db"
 	"github.com/api-sandbox/backend/models"
@@ -49,12 +50,53 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 		return err
 	}
 
+
+	// 1.5 Database Provisioning
+	var dbURL string
+	if env.UserProvidedDBURL != nil && *env.UserProvidedDBURL != "" {
+		dbURL = *env.UserProvidedDBURL
+		db.DB.Create(&models.Log{
+			EnvironmentID: env.ID,
+			Message:       "Using user-provided DATABASE_URL",
+			Level:         models.LogLevelInfo,
+		})
+	} else {
+		wd, _ := os.Getwd()
+		workspaceDir := filepath.Join(wd, "workspaces", env.ID)
+		
+		dbType, _ := DetectDatabaseRequirements(workspaceDir)
+		if dbType != DBTypeNone {
+			db.DB.Create(&models.Log{
+				EnvironmentID: env.ID,
+				Message:       fmt.Sprintf("Auto-detected database requirement: %s", string(dbType)),
+				Level:         models.LogLevelInfo,
+			})
+			
+			netID := env.OrganizationID
+			if netID == "" {
+				netID = env.UserID
+			}
+			
+			url, err := StartSidecarDatabase(ctx, env.ID, netID, dbType)
+			if err != nil {
+				slog.Error("Failed to start sidecar db", "env_id", envID, "error", err)
+				db.DB.Create(&models.Log{
+					EnvironmentID: env.ID,
+					Message:       fmt.Sprintf("Failed to provision database: %v", err),
+					Level:         models.LogLevelError,
+				})
+			} else {
+				dbURL = url
+			}
+		}
+	}
+
 	// 2. Start Container
 	netID := env.OrganizationID
 	if netID == "" {
 		netID = env.UserID
 	}
-	containerID, port, err := StartContainer(ctx, env.ID, imageTag, netID)
+	containerID, port, err := StartContainer(ctx, env.ID, imageTag, netID, dbURL)
 	if err != nil {
 		slog.Error("Start failed", "env_id", envID, "error", err)
 		db.DB.Model(&env).Update("status", models.StatusFailed)

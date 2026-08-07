@@ -134,11 +134,11 @@ func GetWorkspaceFileContent(c *gin.Context) {
 	}
 
 	// Prevent path traversal
-	cleanPath := filepath.Clean(filePath)
-	if strings.HasPrefix(cleanPath, "..") || filepath.IsAbs(cleanPath) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path parameter"})
+	if err := ValidateWorkspacePath(filePath); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	cleanPath := filepath.Clean(filePath)
 
 	wd, err := os.Getwd()
 	if err != nil {
@@ -179,11 +179,11 @@ func UpdateWorkspaceFileContent(c *gin.Context) {
 	}
 
 	// Prevent path traversal
-	cleanPath := filepath.Clean(req.Path)
-	if strings.HasPrefix(cleanPath, "..") || filepath.IsAbs(cleanPath) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path"})
+	if err := ValidateWorkspacePath(req.Path); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	cleanPath := filepath.Clean(req.Path)
 
 	wd, err := os.Getwd()
 	if err != nil {
@@ -249,11 +249,11 @@ func CreateWorkspaceFileOrFolder(c *gin.Context) {
 	}
 
 	// Prevent path traversal
-	cleanPath := filepath.Clean(req.Path)
-	if strings.HasPrefix(cleanPath, "..") || filepath.IsAbs(cleanPath) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path"})
+	if err := ValidateWorkspacePath(req.Path); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	cleanPath := filepath.Clean(req.Path)
 
 	wd, err := os.Getwd()
 	if err != nil {

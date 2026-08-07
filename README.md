@@ -8,9 +8,9 @@ A powerful, full-stack environment provisioning and sandboxing platform. This pr
 *   **No Dockerfile Required:** Automatically detects the language (Node.js, Python, Go, Rust, etc.) and generates an optimized, cached build plan using **Nixpacks**.
 *   **Deep Subdirectory Support:** Users can deploy specific folders inside monorepos directly (e.g. `https://github.com/org/repo/tree/main/examples/api`).
 
-### 🔒 Enterprise-Grade Security
+### 🔒 Security Features
 *   **Strict Container Isolation:** Each user workspace is assigned a dynamically generated, dedicated Docker bridge network (`api-sandbox-net-<orgId>`). Containers are bound exclusively to this network, preventing lateral movement and inter-tenant communication.
-*   **Kernel-Level Hardening:** Sandboxes are deployed with `no-new-privileges:true` and `CapDrop: ALL` to completely neuter privilege escalation and breakout vectors.
+*   **Container Hardening:** Sandboxes are deployed with `no-new-privileges:true` and `CapDrop: ALL` to neuter privilege escalation and breakout vectors. Database credentials injected into containers as environment variables are securely scoped strictly to that specific environment's isolated database, minimizing the blast radius of any compromise.
 *   **Host Network Protection:** Core platform services (PostgreSQL, Redis) are bound strictly to `127.0.0.1` on the host, preventing sandbox containers from exploiting the default Docker gateway to access internal databases.
 *   **Resource Limits:** Hard caps on memory (512MB), CPU quotas, and PIDs (max 256) are strictly enforced at the container level to protect host stability from fork bombs or memory leaks.
 *   **Path Traversal & SSRF Prevention:** Strict bounds-checking on subdirectory cloning and explicit enforcement of `https://github.com/` URLs.
@@ -18,7 +18,7 @@ A powerful, full-stack environment provisioning and sandboxing platform. This pr
 *   **Strict API Rate Limiting:** Powered by Redis, registration/login endpoints, password reset flows, and all authenticated data-fetching endpoints (e.g. `/environments`) are heavily rate-limited (e.g., max 200 reqs/min) to prevent database exhaustion.
 *   **Resource Quotas:** Database-enforced deployment quotas (e.g., max 5 running sandboxes, max 10 builds per hour per user) to prevent platform abuse.
 *   **Organizations & Teams:** Built-in multi-tenancy grouping. Workspaces are isolated by `OrganizationID`. Teammates can be invited to an Organization, automatically sharing access to the same dashboard, logs, and internal Docker networks for seamless microservice composition.
-*   **Comprehensive Audit Logging:** High-impact mutations (Environment Create/Delete/Restart) are immutably logged with `UserID`, `Action`, `Resource`, and `IPAddress` for SOC2 compliance and operational visibility.
+*   **Comprehensive Audit Logging:** High-impact mutations (Environment Create/Delete/Restart) are immutably logged with `UserID`, `Action`, `Resource`, and `IPAddress` for operational visibility.
 
 ### 🌐 Dynamic Reverse Proxy (Traefik)
 *   **Instant Routing with Isolation:** Traefik natively hooks into the Docker socket to map wildcard subdomains instantly. Crucially, the orchestrator dynamically attaches the Traefik proxy to each user's isolated network, guaranteeing secure traffic routing without bridging multi-tenant networks.

@@ -4,57 +4,66 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 
 interface AuthContextType {
-  token: string | null;
-  login: (token: string) => void;
+  isAuthenticated: boolean;
+  login: () => void;
   logout: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [token, setToken] = useState<string | null>(null);
+  // Instead of storing the token, we just track if the user is authenticated
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const router = useRouter();
   const pathname = usePathname();
 
   useEffect(() => {
-    const storedToken = localStorage.getItem("token");
-    if (storedToken) {
-      setToken(storedToken);
-      if (
-        pathname === "/login" || 
-        pathname === "/register" ||
-        pathname === "/forgot-password" ||
-        pathname === "/reset-password" ||
-        pathname === "/verify"
-      ) {
-        router.push("/dashboard");
-      }
-    } else if (
-      pathname !== "/" &&
-      pathname !== "/login" && 
-      pathname !== "/register" &&
-      pathname !== "/forgot-password" &&
-      pathname !== "/reset-password" &&
-      pathname !== "/verify"
-    ) {
-      router.push("/login");
-    }
+    // Check if the backend recognizes our cookie session by hitting /api/user/me
+    fetchWithAuth("/api/user/me")
+      .then(() => {
+        setIsAuthenticated(true);
+        if (
+          pathname === "/login" || 
+          pathname === "/register" ||
+          pathname === "/forgot-password" ||
+          pathname === "/reset-password" ||
+          pathname === "/verify"
+        ) {
+          router.push("/dashboard");
+        }
+      })
+      .catch(() => {
+        setIsAuthenticated(false);
+        if (
+          pathname !== "/" &&
+          pathname !== "/login" && 
+          pathname !== "/register" &&
+          pathname !== "/forgot-password" &&
+          pathname !== "/reset-password" &&
+          pathname !== "/verify"
+        ) {
+          router.push("/login");
+        }
+      });
   }, [pathname, router]);
 
-  const login = (newToken: string) => {
-    localStorage.setItem("token", newToken);
-    setToken(newToken);
+  const login = () => {
+    setIsAuthenticated(true);
     router.push("/dashboard");
   };
 
-  const logout = () => {
-    localStorage.removeItem("token");
-    setToken(null);
+  const logout = async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch (e) {
+      // Ignore
+    }
+    setIsAuthenticated(false);
     router.push("/login");
   };
 
   return (
-    <AuthContext.Provider value={{ token, login, logout }}>
+    <AuthContext.Provider value={{ isAuthenticated, login, logout }}>
       {children}
     </AuthContext.Provider>
   );
@@ -69,18 +78,13 @@ export function useAuth() {
 }
 
 export const fetchWithAuth = async (url: string, options: RequestInit = {}) => {
-  const token = localStorage.getItem("token");
-  
-  const headers = new Headers(options.headers);
-  if (token) {
-    headers.set("Authorization", `Bearer ${token}`);
-  }
-
-  const res = await fetch(url, { ...options, headers });
+  // Always include credentials so the browser sends the HttpOnly cookie
+  const res = await fetch(url, { ...options, credentials: "true" as RequestCredentials });
   
   if (res.status === 401) {
-    localStorage.removeItem("token");
-    window.location.href = "/login";
+    if (typeof window !== "undefined") {
+      window.location.href = "/login";
+    }
     throw new Error("Unauthorized");
   }
   

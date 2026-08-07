@@ -44,13 +44,13 @@ func SetupRoutes(router *gin.Engine) {
 		{
 			projects.GET("", GetUserProjects)
 			projects.POST("", CreateProject)
-			
+
 			projectDetail := projects.Group("/:projectId")
-			
+
 			// Non-authorized project endpoints (requires token only)
 			projectDetail.POST("/invites/accept", AcceptProjectInvite)
 			projectDetail.POST("/invites/decline", DeclineProjectInvite)
-			
+
 			// Authorized project endpoints
 			projectDetail.Use(AuthorizeProjectAccess(models.ProjectRoleViewer))
 			{
@@ -87,7 +87,7 @@ func SetupRoutes(router *gin.Engine) {
 			userGroup.GET("/invites", GetUserInvites)
 		}
 	}
-	
+
 	router.GET("/metrics", PrometheusMetrics)
 }
 
@@ -122,9 +122,31 @@ type PaginationParams struct {
 	Limit int `form:"limit"`
 }
 
+func applyEnvironmentScope(query *gorm.DB, userID interface{}) *gorm.DB {
+	projectIDs := getUserProjectIDs(userID)
+	if len(projectIDs) > 0 {
+		return query.Where("project_id IN ? OR user_id = ?", projectIDs, userID)
+	}
+	return query.Where("user_id = ?", userID)
+}
+
+func executeWithRetry(maxAttempts int, initialBackoff time.Duration, fn func() error) error {
+	var err error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		err = fn()
+		if err == nil {
+			return nil
+		}
+		if attempt < maxAttempts-1 {
+			time.Sleep(initialBackoff * time.Duration(math.Pow(2, float64(attempt))))
+		}
+	}
+	return err
+}
+
 func GetEnvironments(c *gin.Context) {
 	userID, _ := c.Get("userId")
-	
+
 	var params PaginationParams
 	_ = c.ShouldBindQuery(&params)
 	if params.Page < 1 {
@@ -138,44 +160,19 @@ func GetEnvironments(c *gin.Context) {
 	var environments []models.Environment
 	var err error
 
-	// Get User's Projects
-	var projectCollabs []models.ProjectCollaborator
-	db.DB.Where("user_id = ?", userID).Find(&projectCollabs)
-	var projectIDs []string
-	for _, pc := range projectCollabs {
-		projectIDs = append(projectIDs, pc.ProjectID)
-	}
-
-	for attempt := 0; attempt < 3; attempt++ {
-		query := db.DB.WithContext(context.Background())
-		
-		conditions := []string{"user_id = ?"}
-		args := []interface{}{userID}
-
-		if len(projectIDs) > 0 {
-			conditions = append(conditions, "project_id IN ?")
-			args = append(args, projectIDs)
-		}
-
-		query = query.Where(strings.Join(conditions, " OR "), args...)
-		err = query.Order("created_at desc").
+	err = executeWithRetry(3, 100*time.Millisecond, func() error {
+		query := applyEnvironmentScope(db.DB.WithContext(context.Background()), userID)
+		return query.Order("created_at desc").
 			Offset(offset).
 			Limit(params.Limit).
 			Find(&environments).Error
-			
-		if err == nil {
-			break
-		}
-		if attempt < 2 {
-			time.Sleep(100 * time.Millisecond * time.Duration(math.Pow(2, float64(attempt))))
-		}
-	}
+	})
 
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Database temporarily unavailable"})
 		return
 	}
-	
+
 	c.JSON(http.StatusOK, environments)
 }
 
@@ -256,15 +253,15 @@ func CreateEnvironment(c *gin.Context) {
 			var orgMember models.OrganizationMember
 			if err := db.DB.Where("user_id = ?", uid).First(&orgMember).Error; err == nil {
 				defaultProject := models.Project{
-					Name: "Default Workspace",
+					Name:                "Default Workspace",
 					OwnerOrganizationID: orgMember.OrganizationID,
-					CreatedByUserID: uid,
+					CreatedByUserID:     uid,
 				}
 				db.DB.Create(&defaultProject)
 				db.DB.Create(&models.ProjectCollaborator{
 					ProjectID: defaultProject.ID,
-					UserID: uid,
-					Role: models.ProjectRoleOwner,
+					UserID:    uid,
+					Role:      models.ProjectRoleOwner,
 				})
 				projectID = defaultProject.ID
 			}
@@ -327,18 +324,9 @@ func GetEnvironment(c *gin.Context) {
 	id := c.Param("id")
 	userID, _ := c.Get("userId")
 	var env models.Environment
-	
-	// Get User's Projects
-	var projectCollabs []models.ProjectCollaborator
-	db.DB.Where("user_id = ?", userID).Find(&projectCollabs)
-	var projectIDs []string
-	for _, c := range projectCollabs {
-		projectIDs = append(projectIDs, c.ProjectID)
-	}
 
-	var err error
-	for attempt := 0; attempt < 3; attempt++ {
-		query := db.DB.WithContext(context.Background()).
+	err := executeWithRetry(3, 100*time.Millisecond, func() error {
+		query := applyEnvironmentScope(db.DB.WithContext(context.Background()), userID).
 			Preload("Logs", func(db *gorm.DB) *gorm.DB {
 				return db.Order("timestamp desc").Limit(100)
 			}).
@@ -346,25 +334,8 @@ func GetEnvironment(c *gin.Context) {
 				return db.Order("timestamp desc").Limit(100)
 			})
 
-		conditions := []string{"user_id = ?"}
-		args := []interface{}{userID}
-
-		if len(projectIDs) > 0 {
-			conditions = append(conditions, "project_id IN ?")
-			args = append(args, projectIDs)
-		}
-
-		query = query.Where(strings.Join(conditions, " OR "), args...)
-
-		err = query.First(&env, "id = ?", id).Error
-		
-		if err == nil {
-			break
-		}
-		if attempt < 2 {
-			time.Sleep(100 * time.Millisecond * time.Duration(math.Pow(2, float64(attempt))))
-		}
-	}
+		return query.First(&env, "id = ?", id).Error
+	})
 
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -374,7 +345,7 @@ func GetEnvironment(c *gin.Context) {
 		}
 		return
 	}
-	
+
 	c.JSON(http.StatusOK, env)
 }
 
@@ -391,16 +362,9 @@ func getUserProjectIDs(userID interface{}) []string {
 func StreamLogs(c *gin.Context) {
 	envID := c.Param("id")
 	userID, _ := c.Get("userId")
-	projectIDs := getUserProjectIDs(userID)
-
 	// Verify access
 	var envCount int64
-	query := db.DB.Model(&models.Environment{}).Where("id = ?", envID)
-	if len(projectIDs) > 0 {
-		query = query.Where("project_id IN ? OR user_id = ?", projectIDs, userID)
-	} else {
-		query = query.Where("user_id = ?", userID)
-	}
+	query := applyEnvironmentScope(db.DB.Model(&models.Environment{}), userID).Where("id = ?", envID)
 	query.Count(&envCount)
 	if envCount == 0 {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Environment not found or access denied"})
@@ -439,15 +403,8 @@ func StreamLogs(c *gin.Context) {
 func DeleteEnvironment(c *gin.Context) {
 	id := c.Param("id")
 	userID, _ := c.Get("userId")
-	projectIDs := getUserProjectIDs(userID)
-
 	var env models.Environment
-	query := db.DB
-	if len(projectIDs) > 0 {
-		query = query.Where("project_id IN ? OR user_id = ?", projectIDs, userID)
-	} else {
-		query = query.Where("user_id = ?", userID)
-	}
+	query := applyEnvironmentScope(db.DB, userID)
 
 	if err := query.First(&env, "id = ?", id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Environment not found"})
@@ -484,7 +441,7 @@ func RestartEnvironment(c *gin.Context) {
 	id := c.Param("id")
 	userID, _ := c.Get("userId")
 	projectIDs := getUserProjectIDs(userID)
-	
+
 	var env models.Environment
 	query := db.DB
 	if len(projectIDs) > 0 {
@@ -540,19 +497,11 @@ func RestartEnvironment(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Environment restart initiated"})
 }
 
-
 func GetDockerLogs(c *gin.Context) {
 	id := c.Param("id")
 	userID, _ := c.Get("userId")
-	projectIDs := getUserProjectIDs(userID)
-
 	var env models.Environment
-	query := db.DB
-	if len(projectIDs) > 0 {
-		query = query.Where("project_id IN ? OR user_id = ?", projectIDs, userID)
-	} else {
-		query = query.Where("user_id = ?", userID)
-	}
+	query := applyEnvironmentScope(db.DB, userID)
 
 	if err := query.First(&env, "id = ?", id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Environment not found"})
@@ -560,7 +509,7 @@ func GetDockerLogs(c *gin.Context) {
 	}
 
 	containerName := fmt.Sprintf("api-sandbox-env-%s", env.ID)
-	
+
 	// Fetch last 500 lines of logs from Docker
 	cmd := exec.CommandContext(c.Request.Context(), "docker", "logs", "--tail", "500", containerName)
 	output, err := cmd.CombinedOutput()
@@ -731,7 +680,7 @@ func GetUserActivity(c *gin.Context) {
 	userID, _ := c.Get("userId")
 
 	var activities []models.AuditLog
-	
+
 	// Get last 365 days of activity
 	oneYearAgo := time.Now().AddDate(-1, 0, 0)
 
@@ -744,4 +693,3 @@ func GetUserActivity(c *gin.Context) {
 
 	c.JSON(http.StatusOK, activities)
 }
-

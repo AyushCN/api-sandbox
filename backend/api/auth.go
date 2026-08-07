@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"fmt"
 	"log/slog"
-	"math/big"
 	"net/http"
 	"net/smtp"
 	"os"
@@ -19,8 +18,6 @@ import (
 	"github.com/sendgrid/sendgrid-go/helpers/mail"
 	"golang.org/x/crypto/bcrypt"
 )
-
-
 
 func getJWTSecret() string {
 	secret := os.Getenv("JWT_SECRET")
@@ -64,8 +61,12 @@ func ValidatePassword(password string) error {
 }
 
 func generateVerificationCode() string {
-	n, _ := rand.Int(rand.Reader, big.NewInt(1000000))
-	return fmt.Sprintf("%06d", n.Int64())
+	b := make([]byte, 16)
+	_, err := rand.Read(b)
+	if err != nil {
+		panic("crypto/rand failed")
+	}
+	return fmt.Sprintf("%x", b)
 }
 
 func sendViaSendGrid(apiKey, fromEmail, toEmail, subject, body string) error {
@@ -131,7 +132,7 @@ func sendVerificationEmail(toEmail, verificationCode string) error {
 		appURL = "http://localhost:3000"
 	}
 	verifyURL := fmt.Sprintf("%s/verify?code=%s", appURL, verificationCode)
-	
+
 	subject := "Verify your API Sandbox account"
 	htmlContent := fmt.Sprintf(`
 		<p>Verify your email by clicking <a href="%s">this link</a></p>
@@ -246,7 +247,15 @@ func Login(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"token": tokenString})
+	// Set HttpOnly cookie
+	c.SetCookie("token", tokenString, int(72*time.Hour/time.Second), "/", "", false, true)
+
+	c.JSON(http.StatusOK, gin.H{"message": "Login successful"})
+}
+
+func Logout(c *gin.Context) {
+	c.SetCookie("token", "", -1, "/", "", false, true)
+	c.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
 }
 
 func VerifyEmail(c *gin.Context) {

@@ -151,7 +151,7 @@ export default function LoginPage() {
             toast.success("Welcome back!");
             setShowLoader(true);
             setTimeout(() => {
-                login(data.token);
+                login();
             }, 1500); // Simulate the beautiful loader animation for a bit before navigating
         } catch (err: any) {
             setError(err.message);

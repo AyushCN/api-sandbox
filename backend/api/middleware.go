@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/api-sandbox/backend/db"
@@ -16,19 +15,11 @@ import (
 
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Authorization header missing"})
+		tokenString, err := c.Cookie("token")
+		if err != nil || tokenString == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: missing token"})
 			return
 		}
-
-		parts := strings.Split(authHeader, " ")
-		if len(parts) != 2 || parts[0] != "Bearer" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid token format"})
-			return
-		}
-
-		tokenString := parts[1]
 
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
@@ -116,7 +107,7 @@ func RateLimitAPI() gin.HandlerFunc {
 			userID = "anonymous"
 		}
 		clientIP := c.ClientIP()
-		
+
 		key := fmt.Sprintf("api_limit:%v:%s", userID, clientIP)
 
 		ctx := context.Background()
@@ -144,7 +135,7 @@ func RateLimitAPI() gin.HandlerFunc {
 func RateLimitPasswordReset() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		clientIP := c.ClientIP()
-		
+
 		key := fmt.Sprintf("password_reset_limit:%s", clientIP)
 
 		ctx := context.Background()
@@ -172,7 +163,7 @@ func RateLimitPasswordReset() gin.HandlerFunc {
 func RateLimitVerifyEmail() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		clientIP := c.ClientIP()
-		
+
 		key := fmt.Sprintf("verify_email_limit:%s", clientIP)
 
 		ctx := context.Background()
@@ -210,9 +201,9 @@ func AuthorizeProjectAccess(requiredRole models.ProjectRole) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		projectID := c.Param("projectId")
 		if projectID == "" {
-			projectID = c.Param("id") 
+			projectID = c.Param("id")
 		}
-		
+
 		userIDVal, exists := c.Get("userId")
 		if !exists {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
@@ -255,4 +246,3 @@ func AuthorizeProjectAccess(requiredRole models.ProjectRole) gin.HandlerFunc {
 		c.Next()
 	}
 }
-

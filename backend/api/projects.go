@@ -70,7 +70,7 @@ func GetUserProjects(c *gin.Context) {
 
 func GetProject(c *gin.Context) {
 	projectID := c.Param("projectId")
-	
+
 	var project models.Project
 	if err := db.DB.Preload("Collaborators").Preload("Collaborators.User").First(&project, "id = ?", projectID).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
@@ -179,10 +179,10 @@ func DeclineProjectInvite(c *gin.Context) {
 func RemoveCollaborator(c *gin.Context) {
 	projectID := c.Param("projectId")
 	targetUserID := c.Param("userId")
-	
+
 	currentUserIDVal, _ := c.Get("userId")
 	currentUserID := currentUserIDVal.(string)
-	
+
 	currentRoleVal, _ := c.Get("projectRole")
 	currentRole := currentRoleVal.(models.ProjectRole)
 

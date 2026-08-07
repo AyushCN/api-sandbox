@@ -288,8 +288,13 @@ func CreateWorkspaceFileOrFolder(c *gin.Context) {
 
 	db.DB.Create(&models.Log{
 		EnvironmentID: env.ID,
-		Message:       fmt.Sprintf("Created %s: %s", func() string { if req.IsDir { return "folder" }; return "file" }(), cleanPath),
-		Level:         models.LogLevelInfo,
+		Message: fmt.Sprintf("Created %s: %s", func() string {
+			if req.IsDir {
+				return "folder"
+			}
+			return "file"
+		}(), cleanPath),
+		Level: models.LogLevelInfo,
 	})
 
 	c.JSON(http.StatusOK, gin.H{"message": "Created successfully"})
@@ -315,8 +320,8 @@ func DeleteWorkspaceFileOrFolder(c *gin.Context) {
 
 	// Prevent path traversal
 	cleanPath := filepath.Clean(req.Path)
-	if strings.HasPrefix(cleanPath, "..") || filepath.IsAbs(cleanPath) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path"})
+	if strings.HasPrefix(cleanPath, "..") || filepath.IsAbs(cleanPath) || cleanPath == "." || cleanPath == "/" || cleanPath == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path: cannot delete workspace root"})
 		return
 	}
 

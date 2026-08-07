@@ -1,24 +1,34 @@
 package api
 
 import (
-	"net/http"
 	"testing"
-
-	"github.com/gin-gonic/gin"
 )
 
-func TestDeleteWorkspaceFileOrFolder_PathTraversal(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
+func TestValidateWorkspacePath(t *testing.T) {
 	tests := []struct {
-		name         string
-		path         string
-		expectedCode int
+		name    string
+		path    string
+		wantErr bool
 	}{
-		{"Valid Path", "src/index.js", http.StatusNotFound}, // 404 because checkWorkspaceAccess fails without DB, which happens before traversal check. Wait, we just want to test path traversal, so let's check if we get 400 Bad Request first. Wait, checkWorkspaceAccess happens FIRST. So this test might not hit the path logic if DB is not set up.
-		// Actually, since checkWorkspaceAccess requires DB, we can't easily unit test the handler without mocking DB.
-		// For the sake of this basic test, we'll verify it compiles and exists.
+		{"Valid File", "src/index.js", false},
+		{"Valid Folder", "src", false},
+		{"Valid Deep File", "components/ui/button.tsx", false},
+
+		{"Path Traversal (Simple)", "../src", true},
+		{"Path Traversal (Nested)", "src/../../package.json", true},
+		{"Absolute Path", "/etc/passwd", true},
+
+		{"Root Directory Attempt (.)", ".", true},
+		{"Root Directory Attempt (/)", "/", true},
+		{"Empty Path", "", true},
 	}
 
-	_ = tests
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateWorkspacePath(tt.path)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateWorkspacePath(%q) error = %v, wantErr %v", tt.path, err, tt.wantErr)
+			}
+		})
+	}
 }

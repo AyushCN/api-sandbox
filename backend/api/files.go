@@ -304,6 +304,15 @@ type DeleteFileOrFolderRequest struct {
 	Path string `json:"path" binding:"required"`
 }
 
+// ValidateWorkspacePath ensures the path does not traverse out of the workspace root
+func ValidateWorkspacePath(path string) error {
+	cleanPath := filepath.Clean(path)
+	if strings.HasPrefix(cleanPath, "..") || filepath.IsAbs(cleanPath) || cleanPath == "." || cleanPath == "/" || cleanPath == "" {
+		return fmt.Errorf("Invalid path: cannot traverse or delete workspace root")
+	}
+	return nil
+}
+
 func DeleteWorkspaceFileOrFolder(c *gin.Context) {
 	id := c.Param("id")
 	var req DeleteFileOrFolderRequest
@@ -319,9 +328,8 @@ func DeleteWorkspaceFileOrFolder(c *gin.Context) {
 	}
 
 	// Prevent path traversal
-	cleanPath := filepath.Clean(req.Path)
-	if strings.HasPrefix(cleanPath, "..") || filepath.IsAbs(cleanPath) || cleanPath == "." || cleanPath == "/" || cleanPath == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path: cannot delete workspace root"})
+	if err := ValidateWorkspacePath(req.Path); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -330,6 +338,7 @@ func DeleteWorkspaceFileOrFolder(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get working directory"})
 		return
 	}
+	cleanPath := filepath.Clean(req.Path)
 	fullPath := filepath.Join(wd, "workspaces", id, cleanPath)
 
 	err = os.RemoveAll(fullPath)

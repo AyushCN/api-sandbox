@@ -247,14 +247,17 @@ func Login(c *gin.Context) {
 		return
 	}
 
-	// Set HttpOnly cookie
-	c.SetCookie("token", tokenString, int(72*time.Hour/time.Second), "/", "", false, true)
+	isProd := os.Getenv("GIN_MODE") == "release"
+	c.SetSameSite(http.SameSiteStrictMode)
+	c.SetCookie("token", tokenString, int(72*time.Hour/time.Second), "/", "", isProd, true)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Login successful"})
 }
 
 func Logout(c *gin.Context) {
-	c.SetCookie("token", "", -1, "/", "", false, true)
+	isProd := os.Getenv("GIN_MODE") == "release"
+	c.SetSameSite(http.SameSiteStrictMode)
+	c.SetCookie("token", "", -1, "/", "", isProd, true)
 	c.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
 }
 

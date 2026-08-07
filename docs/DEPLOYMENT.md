@@ -57,10 +57,27 @@ For host-based deployments (as the orchestrator connects to the Docker socket):
 ```bash
 cd backend
 go build -o server .
-./server
+# Run with GIN_MODE=release to enforce Secure cookies
+GIN_MODE=release ./server
 ```
 
-## 5. Backups
+## 5. Run the Frontend
+
+Create a `.env.production` file in the `frontend` directory:
+
+```env
+# Required for the Next.js API proxy to route requests to your backend
+BACKEND_URL=http://localhost:8080
+```
+
+Build and start the Next.js app:
+```bash
+cd frontend
+npm run build
+npm start
+```
+
+## 6. Backups
 
 A backup script is provided in `scripts/backup.sh`.
 To run it daily, add it to your crontab:

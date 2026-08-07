@@ -19,7 +19,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     // Check if the backend recognizes our cookie session by hitting /api/user/me
-    fetchWithAuth("/api/user/me")
+    fetchWithAuth("/api/user/me", { cache: "no-store" })
       .then(() => {
         setIsAuthenticated(true);
         if (
@@ -54,7 +54,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = async () => {
     try {
-      await fetch("/api/auth/logout", { method: "POST" });
+      await fetchWithAuth("/api/auth/logout", { method: "POST" });
     } catch (e) {
       // Ignore
     }

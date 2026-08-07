@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 
 import { fetchWithAuth } from "@/lib/auth";
+import GitTreeVisualizer from "@/components/GitTreeVisualizer";
 
 const fetcher = async (url: string) => {
   return fetchWithAuth(url);
@@ -118,7 +119,7 @@ export default function EnvironmentDetail() {
   const xtermRef = useRef<any>(null);
   
   // Tab control
-  const [activeTab, setActiveTab] = useState<"logs" | "workspace" | "collaborators">("logs");
+  const [activeTab, setActiveTab] = useState<"logs" | "workspace" | "collaborators" | "git-tree">("logs");
   
   // File explorer states
   const [selectedFilePath, setSelectedFilePath] = useState<string>("");
@@ -148,7 +149,7 @@ export default function EnvironmentDetail() {
     try {
       const token = localStorage.getItem("token");
       const res = await fetch(`/api/environments/${id}/docker-logs`, {
-        headers: { 'Authorization': `Bearer ${token}` }
+        credentials: "include"
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({ error: "Failed to fetch logs" }));
@@ -171,9 +172,9 @@ export default function EnvironmentDetail() {
       const token = localStorage.getItem("token");
       const res = await fetch(`/api/projects/${env.projectId}/invite`, {
         method: "POST",
+        credentials: "include",
         headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({
           identifier: inviteIdentifier.trim(),
@@ -222,7 +223,7 @@ export default function EnvironmentDetail() {
       const token = localStorage.getItem("token");
       const res = await fetch(`/api/projects/${env.projectId}/collaborators/${userId}`, {
         method: "DELETE",
-        headers: { "Authorization": `Bearer ${token}` }
+        credentials: "include"
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -251,7 +252,7 @@ export default function EnvironmentDetail() {
       try {
         const token = localStorage.getItem("token");
         const res = await fetch(`/api/environments/${id}/files/content?path=${encodeURIComponent(selectedFilePath)}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
+          credentials: "include"
         });
         if (!res.ok) throw new Error("Failed to load file content");
         const data = await res.json();
@@ -276,9 +277,9 @@ export default function EnvironmentDetail() {
       const token = localStorage.getItem("token");
       const res = await fetch(`/api/environments/${id}/files/content`, {
         method: "POST",
+        credentials: "include",
         headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({
           path: selectedFilePath,
@@ -315,9 +316,9 @@ export default function EnvironmentDetail() {
       const token = localStorage.getItem("token");
       const res = await fetch(`/api/environments/${id}/files/create`, {
         method: "POST",
+        credentials: "include",
         headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({
           path: name.trim(),
@@ -346,9 +347,9 @@ export default function EnvironmentDetail() {
       const token = localStorage.getItem("token");
       const res = await fetch(`/api/environments/${id}/files/delete`, {
         method: "POST",
+        credentials: "include",
         headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({
           path: pathToDelete
@@ -452,7 +453,7 @@ export default function EnvironmentDetail() {
       const token = localStorage.getItem("token");
       const res = await fetch(`/api/environments/${id}`, { 
         method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
+        credentials: "include"
       });
       if (!res.ok) throw new Error("Failed to delete sandbox");
       toast.success("Sandbox deleted successfully");
@@ -470,7 +471,7 @@ export default function EnvironmentDetail() {
       const token = localStorage.getItem("token");
       const res = await fetch(`/api/environments/${id}/restart`, { 
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }
+        credentials: "include"
       });
       if (!res.ok) throw new Error("Failed to restart sandbox");
       toast.success("Sandbox restart initiated");
@@ -592,6 +593,19 @@ export default function EnvironmentDetail() {
           <span className="flex items-center gap-2">
             <Users className="w-4 h-4" />
             Collaborators
+          </span>
+        </button>
+        <button
+          onClick={() => setActiveTab("git-tree")}
+          className={`pb-3 text-sm font-medium transition-all relative ${
+            activeTab === "git-tree" 
+              ? "text-primary-fixed border-b-2 border-primary-fixed" 
+              : "text-on-surface-variant hover:text-on-surface"
+          }`}
+        >
+          <span className="flex items-center gap-2">
+            <GitBranch className="w-4 h-4" />
+            Git Tree
           </span>
         </button>
       </div>
@@ -852,6 +866,21 @@ export default function EnvironmentDetail() {
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Git Tree View */}
+      {activeTab === "git-tree" && (
+        <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-6">
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="font-semibold text-lg text-on-surface">Git Tree Visualizer</h3>
+            <div className="text-xs text-on-surface-variant flex gap-4">
+              <span className="flex items-center gap-1.5"><div className="w-3 h-3 bg-teal-700 border border-teal-500 rounded-sm"></div> Github Commits</span>
+              <span className="flex items-center gap-1.5"><div className="w-3 h-3 bg-cyan-700 border border-cyan-400 rounded-sm"></div> Local Commits</span>
+              <span className="flex items-center gap-1.5"><div className="w-3 h-3 bg-cyan-900/50 border border-dashed border-cyan-400 rounded-sm"></div> Uncommitted Edits</span>
+            </div>
+          </div>
+          <GitTreeVisualizer environmentId={id} />
         </div>
       )}
 

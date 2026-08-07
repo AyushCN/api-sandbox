@@ -76,6 +76,7 @@ func SetupRoutes(router *gin.Engine) {
 			protected.POST("/:id/files/create", CreateWorkspaceFileOrFolder)
 			protected.POST("/:id/files/delete", DeleteWorkspaceFileOrFolder)
 			protected.GET("/:id/docker-logs", GetDockerLogs)
+			protected.GET("/:id/git-tree", GetGitTree)
 		}
 
 		userGroup := api.Group("/user")
@@ -232,10 +233,11 @@ func CreateEnvironment(c *gin.Context) {
 
 	// Find project to assign to
 	var projectID string
+	var orgID string
 	if req.ProjectID != "" {
 		// Verify access
 		var collab models.ProjectCollaborator
-		if err := db.DB.Where("project_id = ? AND user_id = ?", req.ProjectID, uid).First(&collab).Error; err != nil {
+		if err := db.DB.Preload("Project").Where("project_id = ? AND user_id = ?", req.ProjectID, uid).First(&collab).Error; err != nil {
 			c.JSON(http.StatusForbidden, gin.H{"error": "You do not have access to this project"})
 			return
 		}
@@ -244,11 +246,13 @@ func CreateEnvironment(c *gin.Context) {
 			return
 		}
 		projectID = req.ProjectID
+		orgID = collab.Project.OwnerOrganizationID
 	} else {
 		// Fallback for legacy frontend: use first available project, or create one
 		var collab models.ProjectCollaborator
-		if err := db.DB.Where("user_id = ?", uid).First(&collab).Error; err == nil {
+		if err := db.DB.Preload("Project").Where("user_id = ?", uid).First(&collab).Error; err == nil {
 			projectID = collab.ProjectID
+			orgID = collab.Project.OwnerOrganizationID
 		} else {
 			// No projects exist, create a default one (legacy behavior fallback)
 			var orgMember models.OrganizationMember
@@ -265,6 +269,7 @@ func CreateEnvironment(c *gin.Context) {
 					Role:      models.ProjectRoleOwner,
 				})
 				projectID = defaultProject.ID
+				orgID = orgMember.OrganizationID
 			}
 		}
 	}
@@ -277,6 +282,7 @@ func CreateEnvironment(c *gin.Context) {
 	env := models.Environment{
 		UserID:            uid,
 		ProjectID:         projectID,
+		OrganizationID:    orgID,
 		Name:              req.Name,
 		GitURL:            req.GitURL,
 		GithubBranch:      req.GithubBranch,
@@ -421,6 +427,11 @@ func DeleteEnvironment(c *gin.Context) {
 
 	// Cleanup workspace folder on host
 	_ = worker.CleanupWorkspace(env.ID)
+
+	// Delete associated data first to satisfy foreign key constraints
+	db.DB.Where("environment_id = ?", env.ID).Delete(&models.Log{})
+	db.DB.Where("environment_id = ?", env.ID).Delete(&models.Metric{})
+	db.DB.Where("environment_id = ?", env.ID).Delete(&models.EnvironmentMember{})
 
 	// Delete from database
 	if err := db.DB.Delete(&env).Error; err != nil {

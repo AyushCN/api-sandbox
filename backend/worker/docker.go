@@ -64,7 +64,7 @@ func CloneAndBuildImage(ctx context.Context, envID string, gitURL string, branch
 	_ = os.RemoveAll(tmpDir)
 	
 	// Try cloning with the specified branch first
-	cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", "--branch", branch, gitURL, tmpDir)
+	cmd := exec.CommandContext(ctx, "git", "clone", "--branch", branch, gitURL, tmpDir)
 	if _, err := cmd.CombinedOutput(); err != nil {
 		// If it fails (likely due to branch not found), try again without specifying a branch (uses repository default, e.g. master)
 		db.DB.Create(&models.Log{
@@ -73,7 +73,7 @@ func CloneAndBuildImage(ctx context.Context, envID string, gitURL string, branch
 			Level:         models.LogLevelWarn,
 		})
 		
-		cmd = exec.CommandContext(ctx, "git", "clone", "--depth", "1", gitURL, tmpDir)
+		cmd = exec.CommandContext(ctx, "git", "clone", gitURL, tmpDir)
 		if out2, err2 := cmd.CombinedOutput(); err2 != nil {
 			_ = os.RemoveAll(tmpDir)
 			return "", fmt.Errorf("git clone failed: %s - %v", string(out2), err2)

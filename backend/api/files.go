@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -199,6 +200,50 @@ func UpdateWorkspaceFileContent(c *gin.Context) {
 		return
 	}
 
+	workspaceDir := filepath.Join(wd, "workspaces", id)
+
+	// Get git diff
+	cmdDiff := exec.Command("git", "diff", "HEAD", req.Path)
+	cmdDiff.Dir = workspaceDir
+	diffOut, _ := cmdDiff.Output()
+
+	// Stage file in git
+	cmdAdd := exec.Command("git", "add", req.Path)
+	cmdAdd.Dir = workspaceDir
+	cmdAdd.Run()
+
+	userID, _ := c.Get("userId")
+	userIDStr := userID.(string)
+
+	now := time.Now()
+
+	// Update environment uncommitted changes
+	db.DB.Model(&env).Updates(map[string]interface{}{
+		"has_uncommitted_changes": true,
+		"last_modified_at":        now,
+		"modified_by_user_id":     userIDStr,
+	})
+
+	// Store environment change record
+	db.DB.Create(&models.EnvironmentChange{
+		EnvironmentID: env.ID,
+		FilePath:      cleanPath,
+		ChangeType:    "modified",
+		UserID:        userIDStr,
+		Diff:          string(diffOut),
+	})
+
+	// Broadcast to team via WebSocket
+	BroadcastToProjectMembers(env.ID, map[string]interface{}{
+		"type":       "file_changed",
+		"file_path":  cleanPath,
+		"user_id":    userIDStr,
+		"user_name":  GetCurrentUserName(userIDStr),
+		"action":     "save",
+		"timestamp":  now,
+		"diff":       string(diffOut),
+	})
+
 	// Restart container gracefully to reload server process with updated code
 	if env.ContainerID != nil && *env.ContainerID != "" {
 		db.DB.Create(&models.Log{
@@ -226,7 +271,10 @@ func UpdateWorkspaceFileContent(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "File updated and environment reloaded successfully"})
+	c.JSON(http.StatusOK, gin.H{
+		"message": "File updated and environment reloaded successfully",
+		"diff":    string(diffOut),
+	})
 }
 
 type CreateFileOrFolderRequest struct {

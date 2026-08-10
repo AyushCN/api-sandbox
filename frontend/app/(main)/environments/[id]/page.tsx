@@ -13,7 +13,9 @@ import {
 } from "lucide-react";
 
 import { fetchWithAuth } from "@/lib/auth";
-import GitTreeVisualizer from "@/components/GitTreeVisualizer";
+import TeamCollaborationDashboard from "@/components/TeamCollaborationDashboard";
+import { useEnvironmentChanges } from "@/hooks/useEnvironmentChanges";
+import ActiveEditors from "@/components/ActiveEditors";
 
 const fetcher = async (url: string) => {
   return fetchWithAuth(url);
@@ -118,8 +120,39 @@ export default function EnvironmentDetail() {
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<any>(null);
   
+  const { hasUncommittedChanges, setHasUncommittedChanges, activeEditors } = useEnvironmentChanges(id);
+  const [isCommitting, setIsCommitting] = useState(false);
+
+  const handleCommit = async () => {
+    const msg = prompt("Enter commit message:");
+    if (!msg || !msg.trim()) return;
+    
+    setIsCommitting(true);
+    try {
+      const res = await fetch(`/api/environments/${id}/commit`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${localStorage.getItem("token")}`
+        },
+        body: JSON.stringify({ message: msg.trim() })
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success("Changes committed successfully!");
+        setHasUncommittedChanges(false);
+      } else {
+        throw new Error(data.error || "Commit failed");
+      }
+    } catch(err: any) {
+      toast.error(err.message);
+    } finally {
+      setIsCommitting(false);
+    }
+  };
+  
   // Tab control
-  const [activeTab, setActiveTab] = useState<"logs" | "workspace" | "collaborators" | "git-tree">("logs");
+  const [activeTab, setActiveTab] = useState<"logs" | "workspace" | "collaborators" | "team-activity">("logs");
   
   // File explorer states
   const [selectedFilePath, setSelectedFilePath] = useState<string>("");
@@ -518,6 +551,7 @@ export default function EnvironmentDetail() {
                   <Clock className="w-3 h-3" />
                   <span>{env.id.slice(0, 8)}...</span>
                 </div>
+                <ActiveEditors editors={activeEditors} />
               </div>
             </div>
           </div>
@@ -542,6 +576,16 @@ export default function EnvironmentDetail() {
               {isRestarting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
               Restart
             </button>
+            {hasUncommittedChanges && (
+              <button
+                onClick={handleCommit}
+                disabled={isCommitting}
+                className="px-4 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-500 hover:bg-amber-500/20 flex items-center gap-1.5 transition-colors disabled:opacity-50 text-xs font-semibold shadow-[0_0_8px_rgba(245,158,11,0.2)]"
+              >
+                {isCommitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                Commit Changes
+              </button>
+            )}
             <button
               onClick={handleDelete}
               disabled={isDeleting}
@@ -596,16 +640,16 @@ export default function EnvironmentDetail() {
           </span>
         </button>
         <button
-          onClick={() => setActiveTab("git-tree")}
+          onClick={() => setActiveTab("team-activity")}
           className={`pb-3 text-sm font-medium transition-all relative ${
-            activeTab === "git-tree" 
+            activeTab === "team-activity" 
               ? "text-primary-fixed border-b-2 border-primary-fixed" 
               : "text-on-surface-variant hover:text-on-surface"
           }`}
         >
           <span className="flex items-center gap-2">
-            <GitBranch className="w-4 h-4" />
-            Git Tree
+            <Activity className="w-4 h-4" />
+            Team Activity
           </span>
         </button>
       </div>
@@ -869,18 +913,10 @@ export default function EnvironmentDetail() {
         </div>
       )}
 
-      {/* Git Tree View */}
-      {activeTab === "git-tree" && (
-        <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-6">
-          <div className="mb-4 flex items-center justify-between">
-            <h3 className="font-semibold text-lg text-on-surface">Git Tree Visualizer</h3>
-            <div className="text-xs text-on-surface-variant flex gap-4">
-              <span className="flex items-center gap-1.5"><div className="w-3 h-3 bg-teal-700 border border-teal-500 rounded-sm"></div> Github Commits</span>
-              <span className="flex items-center gap-1.5"><div className="w-3 h-3 bg-cyan-700 border border-cyan-400 rounded-sm"></div> Local Commits</span>
-              <span className="flex items-center gap-1.5"><div className="w-3 h-3 bg-cyan-900/50 border border-dashed border-cyan-400 rounded-sm"></div> Uncommitted Edits</span>
-            </div>
-          </div>
-          <GitTreeVisualizer environmentId={id} />
+      {/* Team Activity View */}
+      {activeTab === "team-activity" && (
+        <div className="bg-surface-container-lowest border border-outline-variant rounded-xl overflow-hidden flex flex-col" style={{ height: 'calc(100vh - 260px)', minHeight: '500px' }}>
+          <TeamCollaborationDashboard projectId={env?.projectId} />
         </div>
       )}
 

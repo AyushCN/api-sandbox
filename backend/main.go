@@ -47,6 +47,9 @@ func main() {
 	queue.InitQueue()
 	worker.InitDocker()
 
+	// Start WebSocket Hub
+	go api.WSHub.Run()
+
 	mode := os.Getenv("MODE")
 	
 	var httpServer *http.Server

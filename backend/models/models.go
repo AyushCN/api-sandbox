@@ -158,6 +158,12 @@ type Environment struct {
 	UpdatedAt      time.Time         `gorm:"default:current_timestamp" json:"updatedAt"`
 	ExpiresAt      *time.Time        `gorm:"type:timestamp(3) without time zone" json:"expiresAt"`
 
+	// Code changes tracking
+	HasUncommittedChanges bool       `gorm:"default:false" json:"hasUncommittedChanges"`
+	LastModifiedAt        *time.Time `json:"lastModifiedAt"`
+	ModifiedByUserID      *string    `gorm:"type:text" json:"modifiedByUserId"`
+	CommitHash            *string    `gorm:"type:text" json:"commitHash"`
+
 	Logs    []Log    `gorm:"constraint:OnDelete:CASCADE;" json:"logs,omitempty"`
 	Metrics []Metric `gorm:"constraint:OnDelete:CASCADE;" json:"metrics,omitempty"`
 }
@@ -250,6 +256,26 @@ type AuditLog struct {
 func (a *AuditLog) BeforeCreate(tx *gorm.DB) (err error) {
 	if a.ID == "" {
 		a.ID = uuid.NewString()
+	}
+	return
+}
+
+type EnvironmentChange struct {
+	ID            string      `gorm:"type:text;primaryKey" json:"id"`
+	EnvironmentID string      `gorm:"type:text;not null;index" json:"environmentId"`
+	Environment   Environment `json:"-"`
+	FilePath      string      `gorm:"type:text;not null" json:"filePath"`
+	ChangeType    string      `gorm:"type:text;not null" json:"changeType"`
+	UserID        string      `gorm:"type:text;not null" json:"userId"`
+	User          User        `json:"-"`
+	Diff          string      `gorm:"type:text" json:"diff"`
+	CommittedAt   *time.Time  `json:"committedAt"`
+	CreatedAt     time.Time   `gorm:"default:current_timestamp" json:"createdAt"`
+}
+
+func (c *EnvironmentChange) BeforeCreate(tx *gorm.DB) (err error) {
+	if c.ID == "" {
+		c.ID = uuid.NewString()
 	}
 	return
 }

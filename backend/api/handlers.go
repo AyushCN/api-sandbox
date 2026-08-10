@@ -56,6 +56,8 @@ func SetupRoutes(router *gin.Engine) {
 			projectDetail.Use(AuthorizeProjectAccess(models.ProjectRoleViewer))
 			{
 				projectDetail.GET("", GetProject)
+				projectDetail.GET("/activity", GetProjectActivity)
+				projectDetail.GET("/team-status", GetProjectTeamStatus)
 				projectDetail.POST("/invite", AuthorizeProjectAccess(models.ProjectRoleAdmin), InviteToProject)
 				projectDetail.DELETE("/collaborators/:userId", RemoveCollaborator)
 			}
@@ -77,6 +79,13 @@ func SetupRoutes(router *gin.Engine) {
 			protected.POST("/:id/files/delete", DeleteWorkspaceFileOrFolder)
 			protected.GET("/:id/docker-logs", GetDockerLogs)
 			protected.GET("/:id/git-tree", GetGitTree)
+			protected.POST("/:id/commit", CommitChanges)
+		}
+
+		wsGroup := api.Group("/ws/environments")
+		wsGroup.Use(AuthMiddleware())
+		{
+			wsGroup.GET("/:id", ServeWS)
 		}
 
 		userGroup := api.Group("/user")

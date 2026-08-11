@@ -365,3 +365,61 @@ func CommitChanges(c *gin.Context) {
 	})
 }
 
+func SyncEnvironmentWithGitHub(c *gin.Context) {
+	id := c.Param("id")
+	env, err := checkWorkspaceAccess(c, id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get working directory"})
+		return
+	}
+	workspaceDir := filepath.Join(wd, "workspaces", env.ID)
+
+	// Fetch latest from origin
+	cmdFetch := exec.Command("git", "fetch", "origin")
+	cmdFetch.Dir = workspaceDir
+	if err := cmdFetch.Run(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch from GitHub"})
+		return
+	}
+
+	// Pull from origin
+	cmdPull := exec.Command("git", "pull", "origin", env.GithubBranch)
+	cmdPull.Dir = workspaceDir
+	pullOut, err := cmdPull.CombinedOutput()
+	if err != nil {
+		c.JSON(http.StatusConflict, gin.H{
+			"error": "Merge conflict or pull failed", 
+			"details": string(pullOut),
+		})
+		return
+	}
+
+	// Record activity
+	userID, _ := c.Get("userId")
+	userIDStr := userID.(string)
+
+	data := map[string]interface{}{
+		"type":       "file_changed", // triggers frontend to reload files
+		"action":     "sync",
+		"user_name":  GetCurrentUserName(userIDStr),
+		"user_id":    userIDStr,
+	}
+	dataBytes, _ := json.Marshal(data)
+
+	db.DB.Create(&models.Activity{
+		EnvironmentID: env.ID,
+		Type:          "build", // visual type
+		Data:          string(dataBytes),
+		UserID:        userIDStr,
+	})
+
+	BroadcastToProjectMembers(env.ID, data)
+
+	c.JSON(http.StatusOK, gin.H{"message": "Successfully synced with GitHub", "details": string(pullOut)})
+}

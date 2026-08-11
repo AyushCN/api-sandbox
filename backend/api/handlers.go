@@ -80,6 +80,7 @@ func SetupRoutes(router *gin.Engine) {
 			protected.GET("/:id/docker-logs", GetDockerLogs)
 			protected.GET("/:id/git-tree", GetGitTree)
 			protected.POST("/:id/commit", CommitChanges)
+			protected.POST("/:id/sync", SyncEnvironmentWithGitHub)
 		}
 
 		wsGroup := api.Group("/ws/environments")

@@ -9,7 +9,7 @@ import {
   Activity, Box, Clock, ExternalLink, GitBranch, 
   Terminal as TerminalIcon, Loader2, Trash2, RefreshCw,
   Folder, FolderOpen, File, ChevronRight, ChevronDown, 
-  Save, Code, Check, AlertCircle, FilePlus, FolderPlus, ScrollText, X, Users
+  Save, Code, Check, AlertCircle, FilePlus, FolderPlus, ScrollText, X, Users, DownloadCloud
 } from "lucide-react";
 
 import { fetchWithAuth } from "@/lib/auth";
@@ -122,6 +122,30 @@ export default function EnvironmentDetail() {
   
   const { hasUncommittedChanges, setHasUncommittedChanges, activeEditors } = useEnvironmentChanges(id);
   const [isCommitting, setIsCommitting] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  const handleSync = async () => {
+    setIsSyncing(true);
+    try {
+      const res = await fetch(`/api/environments/${id}/sync`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${localStorage.getItem("token")}`
+        }
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast.success("Successfully synced with GitHub!");
+        mutate();
+      } else {
+        throw new Error(data.error || "Sync failed");
+      }
+    } catch(err: any) {
+      toast.error(err.message);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   const handleCommit = async () => {
     const msg = prompt("Enter commit message:");
@@ -568,6 +592,14 @@ export default function EnvironmentDetail() {
                 Open App <ExternalLink className="w-3.5 h-3.5" />
               </a>
             )}
+            <button
+              onClick={handleSync}
+              disabled={isSyncing || env.status === 'BUILDING'}
+              className="px-4 py-1.5 rounded-lg border border-primary-fixed/30 bg-primary-fixed/5 text-primary-fixed hover:bg-primary-fixed/15 flex items-center gap-1.5 transition-colors disabled:opacity-50 text-xs font-semibold"
+            >
+              {isSyncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <DownloadCloud className="w-3.5 h-3.5" />}
+              Sync
+            </button>
             <button
               onClick={handleRestart}
               disabled={isRestarting || env.status === 'BUILDING'}

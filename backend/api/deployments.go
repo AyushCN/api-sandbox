@@ -22,18 +22,6 @@ func GetProviders(c *gin.Context) {
 			"requires":    []string{},
 			"default":     true,
 		},
-		{
-			"type":        "heroku",
-			"name":        "Heroku",
-			"description": "Deploy to Heroku (Delegated)",
-			"requires":    []string{"heroku_api_key"},
-		},
-		{
-			"type":        "railway",
-			"name":        "Railway",
-			"description": "Deploy to Railway (Delegated)",
-			"requires":    []string{"railway_api_key"},
-		},
 	}
 	c.JSON(http.StatusOK, providers)
 }
@@ -48,6 +36,11 @@ func CreateDeployment(c *gin.Context) {
 
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if req.ProviderType != "docker" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Only docker provider is currently implemented and allowed"})
 		return
 	}
 

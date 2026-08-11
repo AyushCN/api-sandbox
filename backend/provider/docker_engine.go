@@ -230,36 +230,10 @@ func StartContainer(ctx context.Context, envID string, entityType string, imageT
 		labels[fmt.Sprintf("traefik.http.routers.env-%s.entrypoints", envID)] = "web"
 	}
 
-	// Network Isolation: Create a network for this user if it doesn't exist
-	networkName := fmt.Sprintf("api-sandbox-net-%s", orgID)
-	networks, err := dockerClient.ListNetworks()
-	var networkFound bool
-	var networkID string
-	if err == nil {
-		for _, net := range networks {
-			if net.Name == networkName {
-				networkFound = true
-				networkID = net.ID
-				break
-			}
-		}
-	}
-
-	if !networkFound {
-		net, err := dockerClient.CreateNetwork(docker.CreateNetworkOptions{
-			Name:           networkName,
-			Driver:         "bridge",
-			CheckDuplicate: true,
-			EnableIPv6:     false,
-		})
-		if err != nil && err != docker.ErrNetworkAlreadyExists {
-			errMsg := fmt.Sprintf("Failed to create network %s: %v", networkName, err)
-			createLog(envID, entityType, errMsg, models.LogLevelError)
-			return "", 0, fmt.Errorf("%s", errMsg)
-		}
-		if net != nil {
-			networkID = net.ID
-		}
+	networkName, networkID, err := EnsureOrgNetwork(ctx, orgID)
+	if err != nil {
+		createLog(envID, entityType, err.Error(), models.LogLevelError)
+		return "", 0, err
 	}
 
 	// Always ensure Traefik proxy is connected to this user's network for routing
@@ -440,25 +414,9 @@ func StartSidecarDatabase(ctx context.Context, envID string, entityType string, 
 		return "", nil
 	}
 
-	networkName := fmt.Sprintf("api-sandbox-net-%s", orgID)
-	networks, err := dockerClient.ListNetworks()
-	var networkFound bool
-	if err == nil {
-		for _, net := range networks {
-			if net.Name == networkName {
-				networkFound = true
-				break
-			}
-		}
-	}
-
-	if !networkFound {
-		_, _ = dockerClient.CreateNetwork(docker.CreateNetworkOptions{
-			Name:           networkName,
-			Driver:         "bridge",
-			CheckDuplicate: true,
-			EnableIPv6:     false,
-		})
+	networkName, _, err := EnsureOrgNetwork(ctx, orgID)
+	if err != nil {
+		return "", fmt.Errorf("failed to ensure network: %v", err)
 	}
 
 	containerName := fmt.Sprintf("api-sandbox-db-%s", envID)
@@ -591,4 +549,36 @@ func waitForDatabaseReady(ctx context.Context, containerID string, dbType DBType
 			}
 		}
 	}
+}
+
+func EnsureOrgNetwork(ctx context.Context, orgID string) (string, string, error) {
+	networkName := fmt.Sprintf("api-sandbox-net-%s", orgID)
+	networks, err := dockerClient.ListNetworks()
+	var networkFound bool
+	var networkID string
+	if err == nil {
+		for _, net := range networks {
+			if net.Name == networkName {
+				networkFound = true
+				networkID = net.ID
+				break
+			}
+		}
+	}
+
+	if !networkFound {
+		net, err := dockerClient.CreateNetwork(docker.CreateNetworkOptions{
+			Name:           networkName,
+			Driver:         "bridge",
+			CheckDuplicate: true,
+			EnableIPv6:     false,
+		})
+		if err != nil && err != docker.ErrNetworkAlreadyExists {
+			return "", "", fmt.Errorf("failed to create network %s: %v", networkName, err)
+		}
+		if net != nil {
+			networkID = net.ID
+		}
+	}
+	return networkName, networkID, nil
 }

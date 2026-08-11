@@ -27,9 +27,7 @@ func (p *RailwayProvider) Build(ctx context.Context, deployment *models.Deployme
 
 func (p *RailwayProvider) Deploy(ctx context.Context, deployment *models.Deployment) error {
 	slog.Info("RailwayProvider: Deploying via Railway API", "deploymentID", deployment.ID)
-	deployment.Status = "RUNNING"
-	deployment.PublicURL = fmt.Sprintf("https://%s.up.railway.app", deployment.ID)
-	return nil
+	return fmt.Errorf("railway provider is not currently implemented")
 }
 
 func (p *RailwayProvider) Stop(ctx context.Context, deployment *models.Deployment) error {

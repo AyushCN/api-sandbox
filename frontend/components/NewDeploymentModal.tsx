@@ -11,7 +11,7 @@ const schema = z.object({
   projectId: z.string().min(1, "Project is required"),
   gitUrl: z.string().url("Must be a valid URL").regex(/^https:\/\/github\.com/, "Must be a GitHub repository"),
   gitBranch: z.string().min(1, "Branch is required").default("main"),
-  providerType: z.enum(["docker", "heroku", "railway"]).default("docker"),
+  providerType: z.enum(["docker"]).default("docker"),
   dbAddon: z.enum(["none", "postgres", "mongo", "redis"]).default("none"),
 });
 
@@ -127,8 +127,6 @@ export default function NewDeploymentModal({ isOpen, onClose, onDeploy }: Props)
             <div className="grid grid-cols-3 gap-3">
               {[
                 { id: "docker", name: "Local Docker", icon: Server },
-                { id: "heroku", name: "Heroku", icon: Cloud },
-                { id: "railway", name: "Railway", icon: Zap },
               ].map(provider => (
                 <label key={provider.id} className={`flex flex-col items-center gap-2 p-4 rounded-xl border cursor-pointer transition-all ${providerType === provider.id ? 'border-primary-fixed bg-primary-fixed/10 text-primary-fixed' : 'border-outline-variant hover:border-outline text-on-surface-variant'}`}>
                   <input type="radio" value={provider.id} {...register("providerType")} className="hidden" />

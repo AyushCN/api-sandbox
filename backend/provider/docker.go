@@ -41,11 +41,15 @@ func (p *DockerProvider) Deploy(ctx context.Context, deployment *models.Deployme
 	var addons []models.Addon
 	db.DB.Where("deployment_id = ?", deployment.ID).Find(&addons)
 
+	var project models.Project
+	db.DB.First(&project, "id = ?", deployment.ProjectID)
+	orgID := project.OwnerOrganizationID
+
 	addonManager := NewAddonManager()
 	var injectedEnv []string
 
 	for _, addon := range addons {
-		connStr, err := addonManager.Provision(ctx, &addon)
+		connStr, err := addonManager.Provision(ctx, &addon, orgID)
 		if err != nil {
 			return fmt.Errorf("failed to provision addon %s: %v", addon.Type, err)
 		}
@@ -61,16 +65,12 @@ func (p *DockerProvider) Deploy(ctx context.Context, deployment *models.Deployme
 		}
 	}
 
-	if len(injectedEnv) > 0 {
-		slog.Info("DockerProvider: Injected Addon Environment Variables", "env", injectedEnv)
-	}
-
 	// Find the imageTag.
 	imageTag := fmt.Sprintf("api-sandbox-%s", deployment.ID)
 	
 	// Delegate to existing StartContainer logic
-	// In the new world, organization doesn't necessarily dictate docker network, but we use deployment ID or user ID.
-	netID := deployment.ID
+	// We use the project's organization ID for network isolation
+	netID := orgID
 	
 	// We might need to join the addons' db URLs if we have multiple, but StartContainer currently accepts one dbURL string.
 	// We'll pass the first one for now, but StartContainer sets DATABASE_URL and MONGO_URI so it's fine.

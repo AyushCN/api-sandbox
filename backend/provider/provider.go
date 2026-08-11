@@ -26,10 +26,10 @@ type DeploymentProvider interface {
 // AddonProvider manages external databases and services
 type AddonProvider interface {
 	// Provision creates the requested add-on (e.g., PostgreSQL database)
-	Provision(ctx context.Context, addon *models.Addon) (string, error)
+	Provision(ctx context.Context, addon *models.Addon, orgID string) (string, error)
 
 	// Deprovision removes the add-on
-	Deprovision(ctx context.Context, addon *models.Addon) error
+	Deprovision(ctx context.Context, addon *models.Addon, orgID string) error
 }
 
 // Buildpack handles language-specific build logic

@@ -2,6 +2,8 @@ package provider
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"github.com/api-sandbox/backend/models"
@@ -17,14 +19,24 @@ func NewPostgresProvider() *PostgresProvider {
 	return &PostgresProvider{client: client}
 }
 
-func (p *PostgresProvider) Provision(ctx context.Context, addon *models.Addon) (string, error) {
+func (p *PostgresProvider) Provision(ctx context.Context, addon *models.Addon, orgID string) (string, error) {
 	slog.Info("Provisioning Postgres addon", "deploymentID", addon.DeploymentID)
 	containerName := fmt.Sprintf("postgres-%s", addon.DeploymentID)
 
-	_, err := p.client.InspectContainer(containerName)
+	networkName, _, err := EnsureOrgNetwork(ctx, orgID)
+	if err != nil {
+		return "", fmt.Errorf("failed to ensure network: %v", err)
+	}
+
+	// Generate random password
+	passwordBytes := make([]byte, 8)
+	rand.Read(passwordBytes)
+	password := hex.EncodeToString(passwordBytes)
+
+	_, err = p.client.InspectContainer(containerName)
 	if err == nil {
 		// Already exists
-		return fmt.Sprintf("postgresql://appuser:apppassword@%s:5432/myapp", containerName), nil
+		return fmt.Sprintf("postgresql://appuser:%s@%s:5432/myapp", password, containerName), nil
 	}
 
 	// Pull image if not exists
@@ -40,7 +52,7 @@ func (p *PostgresProvider) Provision(ctx context.Context, addon *models.Addon) (
 			Env: []string{
 				"POSTGRES_DB=myapp",
 				"POSTGRES_USER=appuser",
-				"POSTGRES_PASSWORD=apppassword",
+				fmt.Sprintf("POSTGRES_PASSWORD=%s", password),
 			},
 			Labels: map[string]string{
 				"deploymentID": addon.DeploymentID,
@@ -48,7 +60,7 @@ func (p *PostgresProvider) Provision(ctx context.Context, addon *models.Addon) (
 			},
 		},
 		HostConfig: &docker.HostConfig{
-			NetworkMode: "api-sandbox-network",
+			NetworkMode: networkName,
 		},
 	}
 
@@ -61,10 +73,10 @@ func (p *PostgresProvider) Provision(ctx context.Context, addon *models.Addon) (
 		return "", fmt.Errorf("failed to start postgres container: %v", err)
 	}
 
-	return fmt.Sprintf("postgresql://appuser:apppassword@%s:5432/myapp", containerName), nil
+	return fmt.Sprintf("postgresql://appuser:%s@%s:5432/myapp", password, containerName), nil
 }
 
-func (p *PostgresProvider) Deprovision(ctx context.Context, addon *models.Addon) error {
+func (p *PostgresProvider) Deprovision(ctx context.Context, addon *models.Addon, orgID string) error {
 	containerName := fmt.Sprintf("postgres-%s", addon.DeploymentID)
 	_ = p.client.StopContainer(containerName, 10)
 	return p.client.RemoveContainer(docker.RemoveContainerOptions{

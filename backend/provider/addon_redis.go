@@ -2,6 +2,8 @@ package provider
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"github.com/api-sandbox/backend/models"
@@ -17,13 +19,23 @@ func NewRedisProvider() *RedisProvider {
 	return &RedisProvider{client: client}
 }
 
-func (p *RedisProvider) Provision(ctx context.Context, addon *models.Addon) (string, error) {
+func (p *RedisProvider) Provision(ctx context.Context, addon *models.Addon, orgID string) (string, error) {
 	slog.Info("Provisioning Redis addon", "deploymentID", addon.DeploymentID)
 	containerName := fmt.Sprintf("redis-%s", addon.DeploymentID)
 
-	_, err := p.client.InspectContainer(containerName)
+	networkName, _, err := EnsureOrgNetwork(ctx, orgID)
+	if err != nil {
+		return "", fmt.Errorf("failed to ensure network: %v", err)
+	}
+
+	// Generate random password
+	passwordBytes := make([]byte, 8)
+	rand.Read(passwordBytes)
+	password := hex.EncodeToString(passwordBytes)
+
+	_, err = p.client.InspectContainer(containerName)
 	if err == nil {
-		return fmt.Sprintf("redis://%s:6379", containerName), nil
+		return fmt.Sprintf("redis://:%s@%s:6379", password, containerName), nil
 	}
 
 	err = p.client.PullImage(docker.PullImageOptions{Repository: "redis", Tag: "alpine", Context: ctx}, docker.AuthConfiguration{})
@@ -35,13 +47,14 @@ func (p *RedisProvider) Provision(ctx context.Context, addon *models.Addon) (str
 		Name: containerName,
 		Config: &docker.Config{
 			Image: "redis:alpine",
+			Cmd: []string{"redis-server", "--requirepass", password},
 			Labels: map[string]string{
 				"deploymentID": addon.DeploymentID,
 				"addonType":    "redis",
 			},
 		},
 		HostConfig: &docker.HostConfig{
-			NetworkMode: "api-sandbox-network",
+			NetworkMode: networkName,
 		},
 	}
 
@@ -54,10 +67,10 @@ func (p *RedisProvider) Provision(ctx context.Context, addon *models.Addon) (str
 		return "", fmt.Errorf("failed to start redis container: %v", err)
 	}
 
-	return fmt.Sprintf("redis://%s:6379", containerName), nil
+	return fmt.Sprintf("redis://:%s@%s:6379", password, containerName), nil
 }
 
-func (p *RedisProvider) Deprovision(ctx context.Context, addon *models.Addon) error {
+func (p *RedisProvider) Deprovision(ctx context.Context, addon *models.Addon, orgID string) error {
 	containerName := fmt.Sprintf("redis-%s", addon.DeploymentID)
 	_ = p.client.StopContainer(containerName, 10)
 	return p.client.RemoveContainer(docker.RemoveContainerOptions{

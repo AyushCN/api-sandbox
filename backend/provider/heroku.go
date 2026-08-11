@@ -27,9 +27,7 @@ func (p *HerokuProvider) Build(ctx context.Context, deployment *models.Deploymen
 
 func (p *HerokuProvider) Deploy(ctx context.Context, deployment *models.Deployment) error {
 	slog.Info("HerokuProvider: Deploying via Heroku API", "deploymentID", deployment.ID)
-	deployment.Status = "RUNNING"
-	deployment.PublicURL = fmt.Sprintf("https://%s.herokuapp.com", deployment.ID)
-	return nil
+	return fmt.Errorf("heroku provider is not currently implemented")
 }
 
 func (p *HerokuProvider) Stop(ctx context.Context, deployment *models.Deployment) error {

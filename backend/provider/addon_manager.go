@@ -23,19 +23,19 @@ func NewAddonManager() *AddonManager {
 }
 
 // Provision delegates the addon creation to the specific provider
-func (m *AddonManager) Provision(ctx context.Context, addon *models.Addon) (string, error) {
+func (m *AddonManager) Provision(ctx context.Context, addon *models.Addon, orgID string) (string, error) {
 	provider, exists := m.providers[addon.Type]
 	if !exists {
 		return "", fmt.Errorf("unsupported addon type: %s", addon.Type)
 	}
-	return provider.Provision(ctx, addon)
+	return provider.Provision(ctx, addon, orgID)
 }
 
 // Deprovision delegates the addon removal to the specific provider
-func (m *AddonManager) Deprovision(ctx context.Context, addon *models.Addon) error {
+func (m *AddonManager) Deprovision(ctx context.Context, addon *models.Addon, orgID string) error {
 	provider, exists := m.providers[addon.Type]
 	if !exists {
 		return fmt.Errorf("unsupported addon type: %s", addon.Type)
 	}
-	return provider.Deprovision(ctx, addon)
+	return provider.Deprovision(ctx, addon, orgID)
 }

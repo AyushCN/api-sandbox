@@ -2,6 +2,8 @@ package provider
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"github.com/api-sandbox/backend/models"
@@ -17,13 +19,23 @@ func NewMongoProvider() *MongoProvider {
 	return &MongoProvider{client: client}
 }
 
-func (p *MongoProvider) Provision(ctx context.Context, addon *models.Addon) (string, error) {
+func (p *MongoProvider) Provision(ctx context.Context, addon *models.Addon, orgID string) (string, error) {
 	slog.Info("Provisioning MongoDB addon", "deploymentID", addon.DeploymentID)
 	containerName := fmt.Sprintf("mongo-%s", addon.DeploymentID)
 
-	_, err := p.client.InspectContainer(containerName)
+	networkName, _, err := EnsureOrgNetwork(ctx, orgID)
+	if err != nil {
+		return "", fmt.Errorf("failed to ensure network: %v", err)
+	}
+
+	// Generate random password
+	passwordBytes := make([]byte, 8)
+	rand.Read(passwordBytes)
+	password := hex.EncodeToString(passwordBytes)
+
+	_, err = p.client.InspectContainer(containerName)
 	if err == nil {
-		return fmt.Sprintf("mongodb://admin:adminpass@%s:27017/myapp?authSource=admin", containerName), nil
+		return fmt.Sprintf("mongodb://admin:%s@%s:27017/myapp?authSource=admin", password, containerName), nil
 	}
 
 	err = p.client.PullImage(docker.PullImageOptions{Repository: "mongo", Tag: "6.0", Context: ctx}, docker.AuthConfiguration{})
@@ -38,7 +50,7 @@ func (p *MongoProvider) Provision(ctx context.Context, addon *models.Addon) (str
 			Env: []string{
 				"MONGO_INITDB_DATABASE=myapp",
 				"MONGO_INITDB_ROOT_USERNAME=admin",
-				"MONGO_INITDB_ROOT_PASSWORD=adminpass",
+				fmt.Sprintf("MONGO_INITDB_ROOT_PASSWORD=%s", password),
 			},
 			Labels: map[string]string{
 				"deploymentID": addon.DeploymentID,
@@ -46,7 +58,7 @@ func (p *MongoProvider) Provision(ctx context.Context, addon *models.Addon) (str
 			},
 		},
 		HostConfig: &docker.HostConfig{
-			NetworkMode: "api-sandbox-network",
+			NetworkMode: networkName,
 		},
 	}
 
@@ -59,10 +71,10 @@ func (p *MongoProvider) Provision(ctx context.Context, addon *models.Addon) (str
 		return "", fmt.Errorf("failed to start mongo container: %v", err)
 	}
 
-	return fmt.Sprintf("mongodb://admin:adminpass@%s:27017/myapp?authSource=admin", containerName), nil
+	return fmt.Sprintf("mongodb://admin:%s@%s:27017/myapp?authSource=admin", password, containerName), nil
 }
 
-func (p *MongoProvider) Deprovision(ctx context.Context, addon *models.Addon) error {
+func (p *MongoProvider) Deprovision(ctx context.Context, addon *models.Addon, orgID string) error {
 	containerName := fmt.Sprintf("mongo-%s", addon.DeploymentID)
 	_ = p.client.StopContainer(containerName, 10)
 	return p.client.RemoveContainer(docker.RemoveContainerOptions{

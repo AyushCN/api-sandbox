@@ -56,3 +56,6 @@ CLAUDE.md
 
 # Dynamic workspaces
 backend/workspaces/
+
+# Custom Scripts Binaries
+backend/scripts/**/main

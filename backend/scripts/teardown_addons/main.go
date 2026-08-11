@@ -27,7 +27,7 @@ func main() {
 	// 1. Delete all Addon records and Log an activity
 	var addons []models.Addon
 	db.DB.Find(&addons)
-	
+
 	if len(addons) > 0 {
 		slog.Info(fmt.Sprintf("Found %d Addon records. Deleting them...", len(addons)))
 		for _, addon := range addons {
@@ -38,7 +38,7 @@ func main() {
 				Data:         fmt.Sprintf(`{"message": "Addon %s removed due to security migration. Please redeploy."}`, addon.Type),
 			}
 			db.DB.Create(&activity)
-			
+
 			// Delete Addon
 			db.DB.Delete(&addon)
 		}
@@ -48,7 +48,7 @@ func main() {
 
 	// 2. Kill containers on api-sandbox-network
 	networkName := "api-sandbox-network"
-	
+
 	networks, err := client.ListNetworks()
 	if err != nil {
 		slog.Error("Failed to list networks", "error", err)

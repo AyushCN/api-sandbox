@@ -235,13 +235,13 @@ func UpdateWorkspaceFileContent(c *gin.Context) {
 	})
 
 	data := map[string]interface{}{
-		"type":       "file_changed",
-		"file_path":  cleanPath,
-		"user_id":    userIDStr,
-		"user_name":  GetCurrentUserName(userIDStr),
-		"action":     "save",
-		"timestamp":  now,
-		"diff":       string(diffOut),
+		"type":      "file_changed",
+		"file_path": cleanPath,
+		"user_id":   userIDStr,
+		"user_name": GetCurrentUserName(userIDStr),
+		"action":    "save",
+		"timestamp": now,
+		"diff":      string(diffOut),
 	}
 	dataBytes, _ := json.Marshal(data)
 

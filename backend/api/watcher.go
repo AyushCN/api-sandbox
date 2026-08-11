@@ -27,7 +27,7 @@ func WatchAllEnvironments() {
 	}
 
 	workspacesDir := filepath.Join(wd, "workspaces")
-	
+
 	// Create workspaces dir if it doesn't exist
 	if _, err := os.Stat(workspacesDir); os.IsNotExist(err) {
 		os.MkdirAll(workspacesDir, 0755)
@@ -56,7 +56,7 @@ func WatchAllEnvironments() {
 			if !ok {
 				return
 			}
-			
+
 			// If it's a new directory, watch it
 			if event.Op&fsnotify.Create == fsnotify.Create {
 				info, err := os.Stat(event.Name)

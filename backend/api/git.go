@@ -48,7 +48,7 @@ func GetGitTree(c *gin.Context) {
 	cmdRemotes := exec.Command("git", "log", "--remotes", "--format=%H")
 	cmdRemotes.Dir = workspaceDir
 	remotesOut, _ := cmdRemotes.Output()
-	
+
 	githubCommits := make(map[string]bool)
 	for _, hash := range strings.Split(string(remotesOut), "\n") {
 		hash = strings.TrimSpace(hash)
@@ -61,12 +61,12 @@ func GetGitTree(c *gin.Context) {
 	cmdAll := exec.Command("git", "log", "--all", "--format=%H|%P|%s|%an|%D")
 	cmdAll.Dir = workspaceDir
 	allOut, _ := cmdAll.Output()
-	
+
 	var nodes []GitNode
 	var edges []GitEdge
 
 	lines := strings.Split(string(allOut), "\n")
-	
+
 	// We want to track if we need an uncommitted edits node.
 	// We will attach it to the currently checked out commit (HEAD).
 	cmdHead := exec.Command("git", "rev-parse", "HEAD")
@@ -125,7 +125,7 @@ func GetGitTree(c *gin.Context) {
 	cmdStatus.Dir = workspaceDir
 	statusOut, _ := cmdStatus.Output()
 	statusLines := strings.Split(strings.TrimSpace(string(statusOut)), "\n")
-	
+
 	if len(statusLines) > 0 && statusLines[0] != "" && headHash != "" {
 		var modifiedFiles []string
 		for _, line := range statusLines {
@@ -135,12 +135,12 @@ func GetGitTree(c *gin.Context) {
 				modifiedFiles = append(modifiedFiles, strings.TrimSpace(line[2:]))
 			}
 		}
-		
+
 		filesStr := strings.Join(modifiedFiles, ", ")
 		if len(filesStr) > 40 {
 			filesStr = filesStr[:37] + "..."
 		}
-		
+
 		editsID := "uncommitted-edits"
 		nodes = append(nodes, GitNode{
 			ID:   editsID,
@@ -153,7 +153,7 @@ func GetGitTree(c *gin.Context) {
 			},
 			Position: gin.H{"x": 0, "y": 0},
 		})
-		
+
 		edges = append(edges, GitEdge{
 			ID:     fmt.Sprintf("%s-%s", headHash, editsID),
 			Source: headHash,

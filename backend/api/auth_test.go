@@ -1,10 +1,10 @@
 package api
 
 import (
-	"testing"
+	"github.com/gin-gonic/gin"
 	"net/http"
 	"net/http/httptest"
-	"github.com/gin-gonic/gin"
+	"testing"
 )
 
 func TestGenerateVerificationCode(t *testing.T) {
@@ -29,7 +29,7 @@ func TestLogout(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Errorf("Expected status 200, got %d", w.Code)
 	}
-	
+
 	// Check if the token cookie is set to expire immediately (empty value, max age -1)
 	cookieHeader := w.Header().Get("Set-Cookie")
 	if cookieHeader == "" {

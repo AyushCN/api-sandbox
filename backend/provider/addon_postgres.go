@@ -5,9 +5,9 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"log/slog"
 	"github.com/api-sandbox/backend/models"
 	docker "github.com/fsouza/go-dockerclient"
+	"log/slog"
 )
 
 type PostgresProvider struct {
@@ -33,10 +33,22 @@ func (p *PostgresProvider) Provision(ctx context.Context, addon *models.Addon, o
 	rand.Read(passwordBytes)
 	password := hex.EncodeToString(passwordBytes)
 
-	_, err = p.client.InspectContainer(containerName)
+	containerInfo, err := p.client.InspectContainer(containerName)
 	if err == nil {
-		// Already exists
-		return fmt.Sprintf("postgresql://appuser:%s@%s:5432/myapp", password, containerName), nil
+		// Already exists. Ensure it's running.
+		if !containerInfo.State.Running {
+			if err := p.client.StartContainer(containerName, nil); err != nil {
+				return "", fmt.Errorf("failed to start existing postgres container: %v", err)
+			}
+		}
+
+		// Extract password from existing environment
+		existingPassword, found := extractEnvValue(containerInfo.Config.Env, "POSTGRES_PASSWORD")
+		if !found {
+			return "", fmt.Errorf("failed to extract POSTGRES_PASSWORD from existing container")
+		}
+
+		return fmt.Sprintf("postgresql://appuser:%s@%s:5432/myapp", existingPassword, containerName), nil
 	}
 
 	// Pull image if not exists

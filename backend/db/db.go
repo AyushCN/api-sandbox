@@ -49,15 +49,15 @@ func InitDB() {
 
 	// Auto Migrate the schemas
 	err = DB.AutoMigrate(
-		&models.User{}, 
-		&models.Organization{}, 
-		&models.OrganizationMember{}, 
-		&models.Project{}, 
-		&models.ProjectCollaborator{}, 
-		&models.Environment{}, 
-		&models.EnvironmentMember{}, 
-		&models.Log{}, 
-		&models.Metric{}, 
+		&models.User{},
+		&models.Organization{},
+		&models.OrganizationMember{},
+		&models.Project{},
+		&models.ProjectCollaborator{},
+		&models.Environment{},
+		&models.EnvironmentMember{},
+		&models.Log{},
+		&models.Metric{},
 		&models.Deployment{},
 		&models.ProcessType{},
 		&models.Addon{},
@@ -73,18 +73,18 @@ func InitDB() {
 	// Migration: Create default projects for environments that only have OrganizationID
 	var envsWithoutProject []models.Environment
 	DB.Where("project_id = '' OR project_id IS NULL").Find(&envsWithoutProject)
-	
+
 	if len(envsWithoutProject) > 0 {
 		slog.Info("Migrating existing environments to Project model...", "count", len(envsWithoutProject))
 		for _, env := range envsWithoutProject {
 			if env.OrganizationID == "" {
 				continue // Can't migrate without org
 			}
-			
+
 			// Find or create a default project for this org
 			var project models.Project
 			err := DB.Where("owner_organization_id = ? AND name = ?", env.OrganizationID, "Default Workspace").First(&project).Error
-			
+
 			if err != nil {
 				// Create the project
 				project = models.Project{
@@ -94,7 +94,7 @@ func InitDB() {
 					CreatedByUserID:     env.UserID,
 				}
 				DB.Create(&project)
-				
+
 				// Add the creator as OWNER
 				DB.Create(&models.ProjectCollaborator{
 					ProjectID:       project.ID,
@@ -103,7 +103,7 @@ func InitDB() {
 					InvitedByUserID: env.UserID,
 				})
 			}
-			
+
 			// Assign environment to project
 			env.ProjectID = project.ID
 			DB.Save(&env)
@@ -125,7 +125,7 @@ func InitDB() {
 	if redisUrl == "" {
 		redisUrl = "redis://localhost:6379"
 	}
-	
+
 	opt, err := redis.ParseURL(redisUrl)
 	if err != nil {
 		slog.Error("Failed to parse Redis URI", "redis_url", redisUrl, "error", err)

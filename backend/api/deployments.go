@@ -89,7 +89,7 @@ func GetDeployment(c *gin.Context) {
 
 func CreateDeploymentAddon(c *gin.Context) {
 	id := c.Param("id")
-	
+
 	var req struct {
 		Type string `json:"type" binding:"required"`
 		Plan string `json:"plan"`

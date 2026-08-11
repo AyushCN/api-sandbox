@@ -5,9 +5,9 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"log/slog"
 	"github.com/api-sandbox/backend/models"
 	docker "github.com/fsouza/go-dockerclient"
+	"log/slog"
 )
 
 type RedisProvider struct {
@@ -33,9 +33,22 @@ func (p *RedisProvider) Provision(ctx context.Context, addon *models.Addon, orgI
 	rand.Read(passwordBytes)
 	password := hex.EncodeToString(passwordBytes)
 
-	_, err = p.client.InspectContainer(containerName)
+	containerInfo, err := p.client.InspectContainer(containerName)
 	if err == nil {
-		return fmt.Sprintf("redis://:%s@%s:6379", password, containerName), nil
+		// Already exists. Ensure it's running.
+		if !containerInfo.State.Running {
+			if err := p.client.StartContainer(containerName, nil); err != nil {
+				return "", fmt.Errorf("failed to start existing redis container: %v", err)
+			}
+		}
+
+		// Extract password from existing command
+		existingPassword, found := extractFlagValue(containerInfo.Config.Cmd, "--requirepass")
+		if !found {
+			return "", fmt.Errorf("failed to extract --requirepass flag from existing container")
+		}
+
+		return fmt.Sprintf("redis://:%s@%s:6379", existingPassword, containerName), nil
 	}
 
 	err = p.client.PullImage(docker.PullImageOptions{Repository: "redis", Tag: "alpine", Context: ctx}, docker.AuthConfiguration{})
@@ -47,7 +60,7 @@ func (p *RedisProvider) Provision(ctx context.Context, addon *models.Addon, orgI
 		Name: containerName,
 		Config: &docker.Config{
 			Image: "redis:alpine",
-			Cmd: []string{"redis-server", "--requirepass", password},
+			Cmd:   []string{"redis-server", "--requirepass", password},
 			Labels: map[string]string{
 				"deploymentID": addon.DeploymentID,
 				"addonType":    "redis",

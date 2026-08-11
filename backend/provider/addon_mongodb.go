@@ -5,9 +5,9 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"log/slog"
 	"github.com/api-sandbox/backend/models"
 	docker "github.com/fsouza/go-dockerclient"
+	"log/slog"
 )
 
 type MongoProvider struct {
@@ -33,9 +33,22 @@ func (p *MongoProvider) Provision(ctx context.Context, addon *models.Addon, orgI
 	rand.Read(passwordBytes)
 	password := hex.EncodeToString(passwordBytes)
 
-	_, err = p.client.InspectContainer(containerName)
+	containerInfo, err := p.client.InspectContainer(containerName)
 	if err == nil {
-		return fmt.Sprintf("mongodb://admin:%s@%s:27017/myapp?authSource=admin", password, containerName), nil
+		// Already exists. Ensure it's running.
+		if !containerInfo.State.Running {
+			if err := p.client.StartContainer(containerName, nil); err != nil {
+				return "", fmt.Errorf("failed to start existing mongo container: %v", err)
+			}
+		}
+
+		// Extract password from existing environment
+		existingPassword, found := extractEnvValue(containerInfo.Config.Env, "MONGO_INITDB_ROOT_PASSWORD")
+		if !found {
+			return "", fmt.Errorf("failed to extract MONGO_INITDB_ROOT_PASSWORD from existing container")
+		}
+
+		return fmt.Sprintf("mongodb://admin:%s@%s:27017/myapp?authSource=admin", existingPassword, containerName), nil
 	}
 
 	err = p.client.PullImage(docker.PullImageOptions{Repository: "mongo", Tag: "6.0", Context: ctx}, docker.AuthConfiguration{})

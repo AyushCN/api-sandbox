@@ -37,7 +37,7 @@ func GetProjectActivity(c *gin.Context) {
 	}
 
 	activityMap := make(map[string]GitActivity) // Deduplicate by hash
-	
+
 	wd, err := os.Getwd()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get working directory"})
@@ -234,11 +234,11 @@ func GetProjectTeamStatus(c *gin.Context) {
 		}
 
 		branchInfo := map[string]interface{}{
-			"environment_id": env.ID,
+			"environment_id":   env.ID,
 			"environment_name": env.Name,
-			"name":           env.GithubBranch,
-			"status":         status,
-			"latest_commit":  latestCommit,
+			"name":             env.GithubBranch,
+			"status":           status,
+			"latest_commit":    latestCommit,
 			"author": map[string]string{
 				"id":    env.User.ID,
 				"name":  env.User.Email, // Using email as name for mock
@@ -390,7 +390,7 @@ func SyncEnvironmentWithGitHub(c *gin.Context) {
 	pullOut, err := cmdPull.CombinedOutput()
 	if err != nil {
 		c.JSON(http.StatusConflict, gin.H{
-			"error": "Merge conflict or pull failed", 
+			"error":   "Merge conflict or pull failed",
 			"details": string(pullOut),
 		})
 		return
@@ -401,10 +401,10 @@ func SyncEnvironmentWithGitHub(c *gin.Context) {
 	userIDStr := userID.(string)
 
 	data := map[string]interface{}{
-		"type":       "file_changed", // triggers frontend to reload files
-		"action":     "sync",
-		"user_name":  GetCurrentUserName(userIDStr),
-		"user_id":    userIDStr,
+		"type":      "file_changed", // triggers frontend to reload files
+		"action":    "sync",
+		"user_name": GetCurrentUserName(userIDStr),
+		"user_id":   userIDStr,
 	}
 	dataBytes, _ := json.Marshal(data)
 

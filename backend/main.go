@@ -53,7 +53,7 @@ func main() {
 	go api.WatchAllEnvironments()
 
 	mode := os.Getenv("MODE")
-	
+
 	var httpServer *http.Server
 	var asynqServer *asynq.Server
 	var asynqScheduler *asynq.Scheduler
@@ -64,7 +64,7 @@ func main() {
 			asynqScheduler = startScheduler()
 		}
 	}
-	
+
 	if mode == "" || mode == "api" {
 		httpServer = startAPI()
 	}

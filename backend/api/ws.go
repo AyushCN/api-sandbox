@@ -22,7 +22,7 @@ var upgrader = websocket.Upgrader{
 		if frontendUrl == "" {
 			frontendUrl = "http://localhost:3000"
 		}
-		
+
 		// Ensure origin matches exactly, avoiding substring matches like 'http://localhost:3000.malicious.com'
 		return origin == frontendUrl
 	},
@@ -30,11 +30,11 @@ var upgrader = websocket.Upgrader{
 
 // WsClient represents a single websocket connection
 type WsClient struct {
-	ID      string
-	Conn    *websocket.Conn
-	Send    chan interface{}
-	EnvID   string
-	UserID  string
+	ID     string
+	Conn   *websocket.Conn
+	Send   chan interface{}
+	EnvID  string
+	UserID string
 }
 
 // Hub maintains active clients and broadcasts messages
@@ -184,7 +184,7 @@ func BroadcastToProjectMembers(envID string, data map[string]interface{}) {
 	msgType, _ := data["type"].(string)
 	userID, _ := data["user_id"].(string)
 	userName, _ := data["user_name"].(string)
-	
+
 	timestamp := time.Now()
 	if t, ok := data["timestamp"].(time.Time); ok {
 		timestamp = t

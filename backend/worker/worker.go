@@ -51,7 +51,6 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 		return err
 	}
 
-
 	// 1.5 Database Provisioning
 	var dbURL string
 	if env.UserProvidedDBURL != nil && *env.UserProvidedDBURL != "" {
@@ -64,7 +63,7 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 	} else {
 		wd, _ := os.Getwd()
 		workspaceDir := filepath.Join(wd, "workspaces", env.ID)
-		
+
 		dbType, _ := provider.DetectDatabaseRequirements(workspaceDir)
 		if dbType != provider.DBTypeNone {
 			db.DB.Create(&models.Log{
@@ -72,12 +71,12 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 				Message:       fmt.Sprintf("Auto-detected database requirement: %s", string(dbType)),
 				Level:         models.LogLevelInfo,
 			})
-			
+
 			netID := env.OrganizationID
 			if netID == "" {
 				netID = env.UserID
 			}
-			
+
 			url, err := provider.StartSidecarDatabase(ctx, env.ID, "environment", netID, dbType)
 			if err != nil {
 				slog.Error("Failed to start sidecar db", "env_id", envID, "error", err)
@@ -118,7 +117,7 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 	if domain == "localhost" {
 		protocol = "http"
 	}
-	
+
 	publicURL := fmt.Sprintf("%s://%s.%s", protocol, env.ID, domain)
 	db.DB.Model(&env).Updates(map[string]interface{}{
 		"status":       models.StatusRunning,

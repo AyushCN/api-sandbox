@@ -20,17 +20,17 @@ func NewDockerProvider() *DockerProvider {
 
 func (p *DockerProvider) Build(ctx context.Context, deployment *models.Deployment) error {
 	slog.Info("DockerProvider: Building deployment", "deploymentID", deployment.ID, "gitURL", deployment.GitURL)
-	
+
 	imageTag, err := CloneAndBuildImage(ctx, deployment.ID, "deployment", deployment.GitURL, deployment.GitBranch)
 	if err != nil {
 		return err
 	}
-	
+
 	// We need to save the imageTag to use it during deploy
 	// In this simple model, we assume imageTag is deterministic: api-sandbox-{id}
 	// So we don't strictly need to store it on the model if we can derive it.
 	_ = imageTag
-	
+
 	return nil
 }
 
@@ -53,7 +53,7 @@ func (p *DockerProvider) Deploy(ctx context.Context, deployment *models.Deployme
 		if err != nil {
 			return fmt.Errorf("failed to provision addon %s: %v", addon.Type, err)
 		}
-		
+
 		// Map connection strings based on type
 		switch addon.Type {
 		case "postgres":
@@ -67,11 +67,11 @@ func (p *DockerProvider) Deploy(ctx context.Context, deployment *models.Deployme
 
 	// Find the imageTag.
 	imageTag := fmt.Sprintf("api-sandbox-%s", deployment.ID)
-	
+
 	// Delegate to existing StartContainer logic
 	// We use the project's organization ID for network isolation
 	netID := orgID
-	
+
 	// We might need to join the addons' db URLs if we have multiple, but StartContainer currently accepts one dbURL string.
 	// We'll pass the first one for now, but StartContainer sets DATABASE_URL and MONGO_URI so it's fine.
 	// Actually, we already inject environment variables in Deploy! Wait, StartContainer doesn't accept a list of ENV strings yet.
@@ -80,14 +80,14 @@ func (p *DockerProvider) Deploy(ctx context.Context, deployment *models.Deployme
 	primaryDbUrl := ""
 	if len(addons) > 0 {
 		// Just pass the first one to dbUrl to satisfy the old signature, we'll fix StartContainer later.
-		primaryDbUrl = "injected" 
+		primaryDbUrl = "injected"
 	}
-	
+
 	_, _, err := StartContainer(ctx, deployment.ID, "deployment", imageTag, netID, primaryDbUrl)
 	if err != nil {
 		return err
 	}
-	
+
 	deployment.Status = "RUNNING"
 	deployment.PublicURL = fmt.Sprintf("https://%s.sandbox.local", deployment.ID)
 	return nil

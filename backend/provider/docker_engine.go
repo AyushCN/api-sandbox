@@ -4,6 +4,8 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log/slog"
@@ -31,7 +33,6 @@ func InitDocker() {
 		os.Exit(1)
 	}
 }
-
 
 func createLog(entityID string, entityType string, message string, level models.LogLevel) {
 	log := models.Log{
@@ -72,13 +73,13 @@ func CloneAndBuildImage(ctx context.Context, envID string, entityType string, gi
 	// 1. Clone Repo
 	// Ensure temp directory is clean before cloning
 	_ = os.RemoveAll(tmpDir)
-	
+
 	// Try cloning with the specified branch first
 	cmd := exec.CommandContext(ctx, "git", "clone", "--branch", branch, gitURL, tmpDir)
 	if _, err := cmd.CombinedOutput(); err != nil {
 		// If it fails (likely due to branch not found), try again without specifying a branch (uses repository default, e.g. master)
 		createLog(envID, entityType, fmt.Sprintf("Branch '%s' not found, falling back to default branch...", branch), models.LogLevelWarn)
-		
+
 		cmd = exec.CommandContext(ctx, "git", "clone", gitURL, tmpDir)
 		if out2, err2 := cmd.CombinedOutput(); err2 != nil {
 			_ = os.RemoveAll(tmpDir)
@@ -92,7 +93,7 @@ func CloneAndBuildImage(ctx context.Context, envID string, entityType string, gi
 	buildDir := tmpDir
 	if subDir != "" {
 		buildDir = filepath.Clean(filepath.Join(tmpDir, subDir))
-		
+
 		// Prevent path traversal
 		if !strings.HasPrefix(buildDir, filepath.Clean(tmpDir)+string(os.PathSeparator)) && buildDir != filepath.Clean(tmpDir) {
 			errMsg := fmt.Sprintf("Invalid subdirectory path: %s", subDir)
@@ -117,10 +118,10 @@ func CloneAndBuildImage(ctx context.Context, envID string, entityType string, gi
 		// Use Buildpack Manager to auto-detect and generate a Dockerfile
 		manager := NewBuildpackManager()
 		bp, bpErr := manager.Detect(buildDir)
-		
+
 		if bpErr == nil {
 			createLog(envID, entityType, "Detected language buildpack. Generating optimized Dockerfile...", models.LogLevelInfo)
-			
+
 			_, buildErr := bp.Build(ctx, buildDir)
 			if buildErr != nil {
 				return "", fmt.Errorf("buildpack generation failed: %v", buildErr)
@@ -215,7 +216,7 @@ func StartContainer(ctx context.Context, envID string, entityType string, imageT
 	if domain == "" {
 		domain = "localhost"
 	}
-	
+
 	labels := map[string]string{
 		"traefik.enable": "true",
 		fmt.Sprintf("traefik.http.routers.env-%s.rule", envID):                      fmt.Sprintf("Host(`%s.%s`)", envID, domain),
@@ -425,32 +426,37 @@ func StartSidecarDatabase(ctx context.Context, envID string, entityType string, 
 	var image, dbURL string
 	var env []string
 
+	// Generate a secure random password for sidecar
+	passwordBytes := make([]byte, 8)
+	rand.Read(passwordBytes)
+	securePassword := hex.EncodeToString(passwordBytes)
+
 	switch dbType {
 	case DBTypeMySQL:
 		image = "mysql:8.0"
 		env = []string{
-			"MYSQL_ROOT_PASSWORD=rootpass123",
+			"MYSQL_ROOT_PASSWORD=" + securePassword,
 			"MYSQL_DATABASE=myapp",
 			"MYSQL_USER=appuser",
-			"MYSQL_PASSWORD=apppassword",
+			"MYSQL_PASSWORD=" + securePassword,
 		}
-		dbURL = fmt.Sprintf("mysql://appuser:apppassword@%s:3306/myapp", containerName)
+		dbURL = fmt.Sprintf("mysql://appuser:%s@%s:3306/myapp", securePassword, containerName)
 	case DBTypePostgres:
 		image = "postgres:15"
 		env = []string{
 			"POSTGRES_DB=myapp",
 			"POSTGRES_USER=appuser",
-			"POSTGRES_PASSWORD=apppassword",
+			"POSTGRES_PASSWORD=" + securePassword,
 		}
-		dbURL = fmt.Sprintf("postgresql://appuser:apppassword@%s:5432/myapp", containerName)
+		dbURL = fmt.Sprintf("postgresql://appuser:%s@%s:5432/myapp", securePassword, containerName)
 	case DBTypeMongo:
 		image = "mongo:6.0"
 		env = []string{
 			"MONGO_INITDB_DATABASE=myapp",
 			"MONGO_INITDB_ROOT_USERNAME=admin",
-			"MONGO_INITDB_ROOT_PASSWORD=adminpass",
+			"MONGO_INITDB_ROOT_PASSWORD=" + securePassword,
 		}
-		dbURL = fmt.Sprintf("mongodb://admin:adminpass@%s:27017/myapp?authSource=admin", containerName)
+		dbURL = fmt.Sprintf("mongodb://admin:%s@%s:27017/myapp?authSource=admin", securePassword, containerName)
 	}
 
 	createLog(envID, entityType, fmt.Sprintf("Pulling %s database image (this may take a minute on first run)...", string(dbType)), models.LogLevelInfo)

@@ -18,11 +18,11 @@ const (
 )
 
 type User struct {
-	ID        string    `gorm:"type:text;primaryKey" json:"id"`
-	Email     string    `gorm:"type:text;unique;not null" json:"email"`
-	Username  string    `gorm:"type:text;uniqueIndex" json:"username"`
-	Password         string     `gorm:"type:text;not null" json:"-"` // never return password to client
-	IsEmailVerified  bool       `gorm:"default:false" json:"isEmailVerified"`
+	ID                string     `gorm:"type:text;primaryKey" json:"id"`
+	Email             string     `gorm:"type:text;unique;not null" json:"email"`
+	Username          string     `gorm:"type:text;uniqueIndex" json:"username"`
+	Password          string     `gorm:"type:text;not null" json:"-"` // never return password to client
+	IsEmailVerified   bool       `gorm:"default:false" json:"isEmailVerified"`
 	VerificationCode  string     `gorm:"type:text" json:"-"`
 	VerificationExp   *time.Time `gorm:"type:timestamp" json:"-"`
 	ResetPasswordCode string     `gorm:"type:text" json:"-"`
@@ -36,7 +36,7 @@ type User struct {
 	Twitter           string     `gorm:"type:text" json:"twitter"`
 	Github            string     `gorm:"type:text" json:"github"`
 	CreatedAt         time.Time  `gorm:"default:current_timestamp" json:"createdAt"`
-	UpdatedAt        time.Time  `gorm:"default:current_timestamp" json:"updatedAt"`
+	UpdatedAt         time.Time  `gorm:"default:current_timestamp" json:"updatedAt"`
 }
 
 func (u *User) BeforeCreate(tx *gorm.DB) (err error) {
@@ -139,24 +139,24 @@ func (pc *ProjectCollaborator) BeforeCreate(tx *gorm.DB) (err error) {
 }
 
 type Environment struct {
-	ID             string            `gorm:"type:text;primaryKey" json:"id"`
-	ProjectID      string            `gorm:"type:text;index" json:"projectId"`
-	Project        *Project          `json:"-"`
-	OrganizationID string            `gorm:"type:text;index" json:"organizationId"` // Legacy reference
-	Organization   *Organization     `json:"-"`
-	UserID         string            `gorm:"type:text;not null" json:"userId"`      // Creator
-	User           User              `json:"-"`
-	Name           string            `gorm:"type:text;not null" json:"name"`
-	GitURL         string            `gorm:"type:text;not null" json:"gitUrl"`
-	GithubBranch   string            `gorm:"type:text;default:main;not null" json:"githubBranch"`
-	Status         EnvironmentStatus `gorm:"type:text;default:IDLE;not null" json:"status"`
-	PublicURL      *string           `gorm:"type:text" json:"publicUrl"`
-	UserProvidedDBURL *string        `gorm:"type:text" json:"userProvidedDbUrl"`
-	ContainerID    *string           `gorm:"type:text" json:"containerId"`
-	Port           *int              `gorm:"type:integer" json:"port"`
-	CreatedAt      time.Time         `gorm:"default:current_timestamp" json:"createdAt"`
-	UpdatedAt      time.Time         `gorm:"default:current_timestamp" json:"updatedAt"`
-	ExpiresAt      *time.Time        `gorm:"type:timestamp(3) without time zone" json:"expiresAt"`
+	ID                string            `gorm:"type:text;primaryKey" json:"id"`
+	ProjectID         string            `gorm:"type:text;index" json:"projectId"`
+	Project           *Project          `json:"-"`
+	OrganizationID    string            `gorm:"type:text;index" json:"organizationId"` // Legacy reference
+	Organization      *Organization     `json:"-"`
+	UserID            string            `gorm:"type:text;not null" json:"userId"` // Creator
+	User              User              `json:"-"`
+	Name              string            `gorm:"type:text;not null" json:"name"`
+	GitURL            string            `gorm:"type:text;not null" json:"gitUrl"`
+	GithubBranch      string            `gorm:"type:text;default:main;not null" json:"githubBranch"`
+	Status            EnvironmentStatus `gorm:"type:text;default:IDLE;not null" json:"status"`
+	PublicURL         *string           `gorm:"type:text" json:"publicUrl"`
+	UserProvidedDBURL *string           `gorm:"type:text" json:"userProvidedDbUrl"`
+	ContainerID       *string           `gorm:"type:text" json:"containerId"`
+	Port              *int              `gorm:"type:integer" json:"port"`
+	CreatedAt         time.Time         `gorm:"default:current_timestamp" json:"createdAt"`
+	UpdatedAt         time.Time         `gorm:"default:current_timestamp" json:"updatedAt"`
+	ExpiresAt         *time.Time        `gorm:"type:timestamp(3) without time zone" json:"expiresAt"`
 
 	// Code changes tracking
 	HasUncommittedChanges bool       `gorm:"default:false" json:"hasUncommittedChanges"`
@@ -212,14 +212,14 @@ const (
 )
 
 type Log struct {
-	ID            string      `gorm:"type:text;primaryKey" json:"id"`
-	EnvironmentID *string     `gorm:"type:text;index" json:"environmentId"`
+	ID            string       `gorm:"type:text;primaryKey" json:"id"`
+	EnvironmentID *string      `gorm:"type:text;index" json:"environmentId"`
 	Environment   *Environment `json:"-"`
-	DeploymentID  *string     `gorm:"type:text;index" json:"deploymentId"`
-	Deployment    *Deployment `json:"-"`
-	Message       string      `gorm:"type:text;not null" json:"message"`
-	Level         LogLevel    `gorm:"type:text;default:info;not null" json:"level"`
-	Timestamp     time.Time   `gorm:"default:current_timestamp" json:"timestamp"`
+	DeploymentID  *string      `gorm:"type:text;index" json:"deploymentId"`
+	Deployment    *Deployment  `json:"-"`
+	Message       string       `gorm:"type:text;not null" json:"message"`
+	Level         LogLevel     `gorm:"type:text;default:info;not null" json:"level"`
+	Timestamp     time.Time    `gorm:"default:current_timestamp" json:"timestamp"`
 }
 
 func (l *Log) BeforeCreate(tx *gorm.DB) (err error) {
@@ -230,14 +230,14 @@ func (l *Log) BeforeCreate(tx *gorm.DB) (err error) {
 }
 
 type Metric struct {
-	ID            string      `gorm:"type:text;primaryKey" json:"id"`
-	EnvironmentID *string     `gorm:"type:text;index" json:"environmentId"`
+	ID            string       `gorm:"type:text;primaryKey" json:"id"`
+	EnvironmentID *string      `gorm:"type:text;index" json:"environmentId"`
 	Environment   *Environment `json:"-"`
-	DeploymentID  *string     `gorm:"type:text;index" json:"deploymentId"`
-	Deployment    *Deployment `json:"-"`
-	CpuUsage      float64     `gorm:"type:double precision;not null" json:"cpuUsage"`
-	MemoryUsage   float64     `gorm:"type:double precision;not null" json:"memoryUsage"`
-	Timestamp     time.Time   `gorm:"default:current_timestamp" json:"timestamp"`
+	DeploymentID  *string      `gorm:"type:text;index" json:"deploymentId"`
+	Deployment    *Deployment  `json:"-"`
+	CpuUsage      float64      `gorm:"type:double precision;not null" json:"cpuUsage"`
+	MemoryUsage   float64      `gorm:"type:double precision;not null" json:"memoryUsage"`
+	Timestamp     time.Time    `gorm:"default:current_timestamp" json:"timestamp"`
 }
 
 func (m *Metric) BeforeCreate(tx *gorm.DB) (err error) {
@@ -265,18 +265,18 @@ func (a *AuditLog) BeforeCreate(tx *gorm.DB) (err error) {
 }
 
 type EnvironmentChange struct {
-	ID            string      `gorm:"type:text;primaryKey" json:"id"`
-	EnvironmentID *string     `gorm:"type:text;index" json:"environmentId"`
+	ID            string       `gorm:"type:text;primaryKey" json:"id"`
+	EnvironmentID *string      `gorm:"type:text;index" json:"environmentId"`
 	Environment   *Environment `json:"-"`
-	DeploymentID  *string     `gorm:"type:text;index" json:"deploymentId"`
-	Deployment    *Deployment `json:"-"`
-	FilePath      string      `gorm:"type:text;not null" json:"filePath"`
-	ChangeType    string      `gorm:"type:text;not null" json:"changeType"`
-	UserID        string      `gorm:"type:text;not null" json:"userId"`
-	User          User        `json:"-"`
-	Diff          string      `gorm:"type:text" json:"diff"`
-	CommittedAt   *time.Time  `json:"committedAt"`
-	CreatedAt     time.Time   `gorm:"default:current_timestamp" json:"createdAt"`
+	DeploymentID  *string      `gorm:"type:text;index" json:"deploymentId"`
+	Deployment    *Deployment  `json:"-"`
+	FilePath      string       `gorm:"type:text;not null" json:"filePath"`
+	ChangeType    string       `gorm:"type:text;not null" json:"changeType"`
+	UserID        string       `gorm:"type:text;not null" json:"userId"`
+	User          User         `json:"-"`
+	Diff          string       `gorm:"type:text" json:"diff"`
+	CommittedAt   *time.Time   `json:"committedAt"`
+	CreatedAt     time.Time    `gorm:"default:current_timestamp" json:"createdAt"`
 }
 
 func (c *EnvironmentChange) BeforeCreate(tx *gorm.DB) (err error) {
@@ -287,16 +287,16 @@ func (c *EnvironmentChange) BeforeCreate(tx *gorm.DB) (err error) {
 }
 
 type Activity struct {
-	ID            string      `gorm:"type:text;primaryKey" json:"id"`
-	EnvironmentID *string     `gorm:"type:text;index" json:"environmentId"`
+	ID            string       `gorm:"type:text;primaryKey" json:"id"`
+	EnvironmentID *string      `gorm:"type:text;index" json:"environmentId"`
 	Environment   *Environment `json:"-"`
-	DeploymentID  *string     `gorm:"type:text;index" json:"deploymentId"`
-	Deployment    *Deployment `json:"-"`
-	Type          string      `gorm:"type:text;not null" json:"type"` // e.g. "file_edit", "commit", "build"
-	Data          string      `gorm:"type:text" json:"data"`          // JSON encoded string
-	UserID        *string     `gorm:"type:text;index" json:"userId"`
-	User          User        `json:"-"`
-	CreatedAt     time.Time   `gorm:"default:current_timestamp;index" json:"createdAt"`
+	DeploymentID  *string      `gorm:"type:text;index" json:"deploymentId"`
+	Deployment    *Deployment  `json:"-"`
+	Type          string       `gorm:"type:text;not null" json:"type"` // e.g. "file_edit", "commit", "build"
+	Data          string       `gorm:"type:text" json:"data"`          // JSON encoded string
+	UserID        *string      `gorm:"type:text;index" json:"userId"`
+	User          User         `json:"-"`
+	CreatedAt     time.Time    `gorm:"default:current_timestamp;index" json:"createdAt"`
 }
 
 func (a *Activity) BeforeCreate(tx *gorm.DB) (err error) {

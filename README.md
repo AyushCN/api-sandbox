@@ -9,9 +9,10 @@ A powerful, full-stack environment provisioning and sandboxing platform. This pr
 *   **Deep Subdirectory Support:** Users can deploy specific folders inside monorepos directly (e.g. `https://github.com/org/repo/tree/main/examples/api`).
 
 ### 🔒 Security Features
-*   **Strict Container Isolation:** Each user workspace is assigned a dynamically generated, dedicated Docker bridge network (`api-sandbox-net-<orgId>`). Containers are bound exclusively to this network, preventing lateral movement and inter-tenant communication.
-*   **Container Hardening:** Sandboxes are deployed with `no-new-privileges:true` and `CapDrop: ALL` to neuter privilege escalation and breakout vectors. Database credentials injected into containers as environment variables are securely scoped strictly to that specific environment's isolated database, minimizing the blast radius of any compromise.
-*   **Host Network Protection:** Core platform services (PostgreSQL, Redis) are bound strictly to `127.0.0.1` on the host, preventing sandbox containers from exploiting the default Docker gateway to access internal databases.
+*   **Strict Container & Addon Isolation:** Each user workspace is assigned a dynamically generated, dedicated Docker bridge network (`api-sandbox-net-<orgId>`). Both sandbox application containers and dynamically provisioned database addons (PostgreSQL, MongoDB, Redis) are bound exclusively to this network, preventing lateral movement and inter-tenant communication.
+*   **Cryptographically Secure Addon Credentials:** Database credentials injected into containers are dynamically generated 16-character secure random hex strings (`crypto/rand`). This eliminates hardcoded defaults and ensures strict scoping to that specific environment's isolated database.
+*   **Container Hardening:** Sandboxes are deployed with `no-new-privileges:true` and `CapDrop: ALL` to neuter privilege escalation and breakout vectors.
+*   **Host Network Protection:** Core platform services are bound strictly to `127.0.0.1` on the host, preventing sandbox containers from exploiting the default Docker gateway to access internal databases.
 *   **Resource Limits:** Hard caps on memory (512MB), CPU quotas, and PIDs (max 256) are strictly enforced at the container level to protect host stability from fork bombs or memory leaks.
 *   **Path Traversal & SSRF Prevention:** Strict bounds-checking on subdirectory cloning and explicit enforcement of `https://github.com/` URLs.
 *   **Hardened Authentication & SMTP:** JWT-based system enforcing 12-character complex passwords. Verification and password resets utilize generic `net/smtp` to send real emails via any provider (SendGrid, SES, Mailgun).

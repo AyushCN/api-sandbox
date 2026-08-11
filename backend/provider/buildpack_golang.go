@@ -13,7 +13,7 @@ func (b *GolangBuildpack) Detect(repoPath string) bool {
 	if _, err := os.Stat(filepath.Join(repoPath, "go.mod")); err == nil {
 		return true
 	}
-	
+
 	// Also detect if there are any .go files in the root
 	files, err := os.ReadDir(repoPath)
 	if err == nil {
@@ -23,7 +23,7 @@ func (b *GolangBuildpack) Detect(repoPath string) bool {
 			}
 		}
 	}
-	
+
 	return false
 }
 

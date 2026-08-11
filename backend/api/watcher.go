@@ -104,7 +104,7 @@ func WatchAllEnvironments() {
 
 			// Create Activity
 			db.DB.Create(&models.Activity{
-				EnvironmentID: envID,
+				EnvironmentID: &envID,
 				Type:          "file_edit",
 				Data:          string(dataBytes),
 				UserID:        nil, // System user

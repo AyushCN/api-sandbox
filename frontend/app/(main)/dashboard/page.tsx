@@ -3,6 +3,7 @@ import React, { useState } from "react";
 
 import useSWR, { mutate } from "swr";
 import Link from "next/link";
+import NewDeploymentModal from "@/components/NewDeploymentModal";
 import { 
   Plus, Server, GitBranch, Clock, Box, 
   ExternalLink, Activity, Zap, XCircle, 
@@ -16,7 +17,7 @@ import toast from "react-hot-toast";
 
 const fetcher = (url: string) => fetchWithAuth(url);
 
-interface Environment {
+interface Deployment {
   id: string;
   name: string;
   gitUrl: string;
@@ -71,19 +72,20 @@ function StatCard({ label, value, icon: Icon, color }: { label: string; value: n
 }
 
 export default function Dashboard() {
-  const { data: environments, error, isLoading } = useSWR<Environment[]>("/api/environments", fetcher, {
+  const { data: deployments, error, isLoading } = useSWR<Deployment[]>("/api/deployments", fetcher, {
     refreshInterval: 3000,
   });
 
   const stats = {
-    total:    environments?.length ?? 0,
-    running:  environments?.filter(e => e.status === "RUNNING").length ?? 0,
-    building: environments?.filter(e => e.status === "BUILDING").length ?? 0,
-    failed:   environments?.filter(e => e.status === "FAILED").length ?? 0,
+    total:    deployments?.length ?? 0,
+    running:  deployments?.filter(e => e.status === "RUNNING").length ?? 0,
+    building: deployments?.filter(e => e.status === "BUILDING").length ?? 0,
+    failed:   deployments?.filter(e => e.status === "FAILED").length ?? 0,
   };
 
   const { data: invites, mutate: mutateInvites } = useSWR<ProjectCollaborator[]>("/api/user/invites", fetcher);
   const [isProcessingInvite, setIsProcessingInvite] = useState<string | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   const handleInviteAction = async (projectId: string, action: 'accept' | 'decline') => {
     setIsProcessingInvite(projectId);
@@ -98,8 +100,8 @@ export default function Dashboard() {
       toast.success(`Invite ${action}ed successfully`);
       mutateInvites();
       if (action === 'accept') {
-        // Refresh environments to show new project's sandboxes
-        mutate("/api/environments");
+        // Refresh deployments to show new project's sandboxes
+        mutate("/api/deployments");
       }
     } catch (e: any) {
       toast.error(e.message);
@@ -119,17 +121,25 @@ export default function Dashboard() {
           </div>
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-on-surface">Deployments</h1>
-            <p className="text-on-surface-variant text-sm">Manage and monitor your sandbox environments</p>
+            <p className="text-on-surface-variant text-sm">Manage and monitor your sandbox deployments</p>
           </div>
         </div>
-        <Link
-          href="/upload"
+        <button
+          onClick={() => setIsModalOpen(true)}
           className="flex items-center gap-2 bg-primary-container text-on-primary-fixed-variant px-5 py-2.5 rounded-xl font-bold text-sm hover:shadow-[0_0_20px_rgba(0,240,255,0.25)] active:scale-95 transition-all"
         >
           <Plus className="w-4 h-4" />
-          New Sandbox
-        </Link>
+          New Deployment
+        </button>
       </div>
+
+      <NewDeploymentModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        onDeploy={(d) => {
+          mutate("/api/deployments");
+        }}
+      />
 
       {/* Pending Invites Section */}
       {invites && invites.length > 0 && (
@@ -188,10 +198,10 @@ export default function Dashboard() {
       ) : error ? (
         <div className="bg-error-container/10 border border-error/20 p-10 rounded-xl text-center">
           <XCircle className="w-10 h-10 text-error mx-auto mb-3" />
-          <p className="text-error font-semibold">Failed to load environments</p>
+          <p className="text-error font-semibold">Failed to load deployments</p>
           <p className="text-on-surface-variant text-sm mt-1">Ensure the backend is running.</p>
         </div>
-      ) : environments?.length === 0 ? (
+      ) : deployments?.length === 0 ? (
         <div className="bg-surface-container-lowest border border-outline-variant border-dashed rounded-xl py-24 text-center flex flex-col items-center">
           <div className="w-16 h-16 rounded-2xl bg-primary-fixed/5 border border-primary-fixed/10 flex items-center justify-center mb-5">
             <Server className="w-8 h-8 text-on-surface-variant/30" />
@@ -204,14 +214,14 @@ export default function Dashboard() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-          {environments?.map((env, idx) => (
+          {deployments?.map((env, idx) => (
             <motion.div
               key={env.id}
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: idx * 0.04, duration: 0.35 }}
             >
-              <Link href={`/environments/${env.id}`} className="block group h-full">
+              <Link href={`/deployments/${env.id}`} className="block group h-full">
                 <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-5 h-full flex flex-col gap-4 transition-all duration-300 hover:border-primary-fixed/40 hover:shadow-[0_0_24px_rgba(0,240,255,0.08)] relative overflow-hidden">
                   
                   {/* Hover glow */}

@@ -136,7 +136,7 @@ export default function EnvironmentDetail() {
       const data = await res.json();
       if (res.ok) {
         toast.success("Successfully synced with GitHub!");
-        mutate();
+        mutate(`/api/environments/${id}`);
       } else {
         throw new Error(data.error || "Sync failed");
       }

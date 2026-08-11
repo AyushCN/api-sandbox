@@ -11,6 +11,7 @@ var Client *asynq.Client
 
 const (
 	TaskBuildEnvironment  = "environment:build"
+	TaskDeploy            = "deployment:deploy"
 	TaskCollectMetrics    = "system:metrics"
 	TaskCleanupContainers = "system:cleanup"
 )

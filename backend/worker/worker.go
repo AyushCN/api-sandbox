@@ -10,6 +10,7 @@ import (
 
 	"github.com/api-sandbox/backend/db"
 	"github.com/api-sandbox/backend/models"
+	"github.com/api-sandbox/backend/provider"
 	"github.com/hibiken/asynq"
 )
 
@@ -34,16 +35,16 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 	// Idempotency: cleanup existing container if retrying
 	if env.ContainerID != nil && *env.ContainerID != "" {
 		slog.Info("Cleaning up existing container", "container_id", *env.ContainerID)
-		_ = CleanupContainer(ctx, *env.ContainerID)
+		_ = provider.CleanupContainer(ctx, *env.ContainerID, "environment")
 	}
 
 	// 1. Clone & Build
-	imageTag, err := CloneAndBuildImage(ctx, env.ID, env.GitURL, env.GithubBranch)
+	imageTag, err := provider.CloneAndBuildImage(ctx, env.ID, "environment", env.GitURL, env.GithubBranch)
 	if err != nil {
 		slog.Error("Build failed", "env_id", envID, "error", err)
 		db.DB.Model(&env).Update("status", models.StatusFailed)
 		db.DB.Create(&models.Log{
-			EnvironmentID: env.ID,
+			EnvironmentID: &env.ID,
 			Message:       fmt.Sprintf("Build failed: %v", err),
 			Level:         models.LogLevelError,
 		})
@@ -56,7 +57,7 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 	if env.UserProvidedDBURL != nil && *env.UserProvidedDBURL != "" {
 		dbURL = *env.UserProvidedDBURL
 		db.DB.Create(&models.Log{
-			EnvironmentID: env.ID,
+			EnvironmentID: &env.ID,
 			Message:       "Using user-provided DATABASE_URL",
 			Level:         models.LogLevelInfo,
 		})
@@ -64,10 +65,10 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 		wd, _ := os.Getwd()
 		workspaceDir := filepath.Join(wd, "workspaces", env.ID)
 		
-		dbType, _ := DetectDatabaseRequirements(workspaceDir)
-		if dbType != DBTypeNone {
+		dbType, _ := provider.DetectDatabaseRequirements(workspaceDir)
+		if dbType != provider.DBTypeNone {
 			db.DB.Create(&models.Log{
-				EnvironmentID: env.ID,
+				EnvironmentID: &env.ID,
 				Message:       fmt.Sprintf("Auto-detected database requirement: %s", string(dbType)),
 				Level:         models.LogLevelInfo,
 			})
@@ -77,11 +78,11 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 				netID = env.UserID
 			}
 			
-			url, err := StartSidecarDatabase(ctx, env.ID, netID, dbType)
+			url, err := provider.StartSidecarDatabase(ctx, env.ID, "environment", netID, dbType)
 			if err != nil {
 				slog.Error("Failed to start sidecar db", "env_id", envID, "error", err)
 				db.DB.Create(&models.Log{
-					EnvironmentID: env.ID,
+					EnvironmentID: &env.ID,
 					Message:       fmt.Sprintf("Failed to provision database: %v", err),
 					Level:         models.LogLevelError,
 				})
@@ -96,12 +97,12 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 	if netID == "" {
 		netID = env.UserID
 	}
-	containerID, port, err := StartContainer(ctx, env.ID, imageTag, netID, dbURL)
+	containerID, port, err := provider.StartContainer(ctx, env.ID, "environment", imageTag, netID, dbURL)
 	if err != nil {
 		slog.Error("Start failed", "env_id", envID, "error", err)
 		db.DB.Model(&env).Update("status", models.StatusFailed)
 		db.DB.Create(&models.Log{
-			EnvironmentID: env.ID,
+			EnvironmentID: &env.ID,
 			Message:       fmt.Sprintf("Container start failed: %v", err),
 			Level:         models.LogLevelError,
 		})

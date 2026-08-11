@@ -144,7 +144,7 @@ func GetProjectActivity(c *gin.Context) {
 				Action:        action,
 				Message:       message,
 				Hash:          hash,
-				EnvironmentID: dbAct.EnvironmentID,
+				EnvironmentID: getEnvId(dbAct.EnvironmentID),
 				Branch:        "live",
 			}
 		}
@@ -409,7 +409,7 @@ func SyncEnvironmentWithGitHub(c *gin.Context) {
 	dataBytes, _ := json.Marshal(data)
 
 	db.DB.Create(&models.Activity{
-		EnvironmentID: env.ID,
+		EnvironmentID: &env.ID,
 		Type:          "build", // visual type
 		Data:          string(dataBytes),
 		UserID:        &userIDStr,
@@ -418,4 +418,11 @@ func SyncEnvironmentWithGitHub(c *gin.Context) {
 	BroadcastToProjectMembers(env.ID, data)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Successfully synced with GitHub", "details": string(pullOut)})
+}
+
+func getEnvId(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }

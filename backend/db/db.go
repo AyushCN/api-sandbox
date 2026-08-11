@@ -58,6 +58,10 @@ func InitDB() {
 		&models.EnvironmentMember{}, 
 		&models.Log{}, 
 		&models.Metric{}, 
+		&models.Deployment{},
+		&models.ProcessType{},
+		&models.Addon{},
+		&models.ProviderConfig{},
 		&models.AuditLog{},
 		&models.Activity{},
 	)

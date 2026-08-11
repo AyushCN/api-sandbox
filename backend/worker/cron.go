@@ -7,6 +7,7 @@ import (
 
 	"github.com/api-sandbox/backend/db"
 	"github.com/api-sandbox/backend/models"
+	"github.com/api-sandbox/backend/provider"
 	"github.com/hibiken/asynq"
 )
 
@@ -26,7 +27,7 @@ func HandleCollectMetricsTask(ctx context.Context, t *asynq.Task) error {
 		// we'll mock the metrics insertion here to prove the architectural pipeline.
 		// This simulates reading Docker cgroups.
 		metric := models.Metric{
-			EnvironmentID: env.ID,
+			EnvironmentID: &env.ID,
 			CpuUsage:      2.5,  // Mock %
 			MemoryUsage:   150.0, // Mock MB
 		}
@@ -48,7 +49,7 @@ func HandleCleanupContainersTask(ctx context.Context, t *asynq.Task) error {
 	for _, env := range envs {
 		if env.ContainerID != nil && *env.ContainerID != "" {
 			slog.Info("Cron: Cleaning up expired container", "env_id", env.ID)
-			_ = CleanupContainer(ctx, *env.ContainerID)
+			_ = provider.CleanupContainer(ctx, *env.ContainerID, "environment")
 		}
 
 		db.DB.Model(&env).Updates(map[string]interface{}{
@@ -57,7 +58,7 @@ func HandleCleanupContainersTask(ctx context.Context, t *asynq.Task) error {
 		})
 		
 		db.DB.Create(&models.Log{
-			EnvironmentID: env.ID,
+			EnvironmentID: &env.ID,
 			Message:       "System: Container stopped automatically after reaching 1-hour time limit.",
 			Level:         models.LogLevelWarn,
 		})

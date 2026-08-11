@@ -12,6 +12,7 @@ import (
 	"github.com/api-sandbox/backend/api"
 	"github.com/api-sandbox/backend/db"
 	"github.com/api-sandbox/backend/models"
+	"github.com/api-sandbox/backend/provider"
 	"github.com/api-sandbox/backend/queue"
 	"github.com/api-sandbox/backend/worker"
 	"github.com/gin-gonic/gin"
@@ -35,7 +36,7 @@ func main() {
 	if err := db.DB.Where("status = ?", "BUILDING").Find(&stuckEnvs).Error; err == nil && len(stuckEnvs) > 0 {
 		for _, env := range stuckEnvs {
 			db.DB.Create(&models.Log{
-				EnvironmentID: env.ID,
+				EnvironmentID: &env.ID,
 				Message:       "Build failed: build process was interrupted due to server shutdown/restart.",
 				Level:         models.LogLevelError,
 			})
@@ -45,7 +46,7 @@ func main() {
 	}
 
 	queue.InitQueue()
-	worker.InitDocker()
+	provider.InitDocker()
 
 	// Start WebSocket Hub and File Watcher
 	go api.WSHub.Run()
@@ -172,6 +173,7 @@ func startWorker() *asynq.Server {
 
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(queue.TaskBuildEnvironment, worker.HandleBuildEnvironmentTask)
+	mux.HandleFunc(queue.TaskDeploy, worker.HandleDeployTask)
 	mux.HandleFunc(queue.TaskCollectMetrics, worker.HandleCollectMetricsTask)
 	mux.HandleFunc(queue.TaskCleanupContainers, worker.HandleCleanupContainersTask)
 

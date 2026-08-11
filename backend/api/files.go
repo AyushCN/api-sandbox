@@ -13,7 +13,7 @@ import (
 
 	"github.com/api-sandbox/backend/db"
 	"github.com/api-sandbox/backend/models"
-	"github.com/api-sandbox/backend/worker"
+	"github.com/api-sandbox/backend/provider"
 	"github.com/gin-gonic/gin"
 )
 
@@ -227,7 +227,7 @@ func UpdateWorkspaceFileContent(c *gin.Context) {
 
 	// Store environment change record
 	db.DB.Create(&models.EnvironmentChange{
-		EnvironmentID: env.ID,
+		EnvironmentID: &env.ID,
 		FilePath:      cleanPath,
 		ChangeType:    "modified",
 		UserID:        userIDStr,
@@ -246,7 +246,7 @@ func UpdateWorkspaceFileContent(c *gin.Context) {
 	dataBytes, _ := json.Marshal(data)
 
 	db.DB.Create(&models.Activity{
-		EnvironmentID: env.ID,
+		EnvironmentID: &env.ID,
 		Type:          "file_edit",
 		Data:          string(dataBytes),
 		UserID:        &userIDStr,
@@ -258,11 +258,11 @@ func UpdateWorkspaceFileContent(c *gin.Context) {
 	// Restart container gracefully to reload server process with updated code
 	if env.ContainerID != nil && *env.ContainerID != "" {
 		db.DB.Create(&models.Log{
-			EnvironmentID: env.ID,
+			EnvironmentID: &env.ID,
 			Message:       fmt.Sprintf("File %s modified. Restarting container to apply updates...", cleanPath),
 			Level:         models.LogLevelInfo,
 		})
-		err = worker.RestartContainer(c.Request.Context(), *env.ContainerID)
+		err = provider.RestartContainer(c.Request.Context(), *env.ContainerID)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to reload sandbox container: %v", err)})
 			return
@@ -270,12 +270,12 @@ func UpdateWorkspaceFileContent(c *gin.Context) {
 
 		// Wait a small delay and query new port mapping from container, saving to DB
 		time.Sleep(500 * time.Millisecond)
-		newPort, err := worker.GetContainerPort(*env.ContainerID)
+		newPort, err := provider.GetContainerPort(*env.ContainerID)
 		if err == nil && newPort > 0 {
 			env.Port = &newPort
 			db.DB.Save(env)
 			db.DB.Create(&models.Log{
-				EnvironmentID: env.ID,
+				EnvironmentID: &env.ID,
 				Message:       fmt.Sprintf("Container restarted and bound to new port %d.", newPort),
 				Level:         models.LogLevelInfo,
 			})
@@ -346,7 +346,7 @@ func CreateWorkspaceFileOrFolder(c *gin.Context) {
 	}
 
 	db.DB.Create(&models.Log{
-		EnvironmentID: env.ID,
+		EnvironmentID: &env.ID,
 		Message: fmt.Sprintf("Created %s: %s", func() string {
 			if req.IsDir {
 				return "folder"
@@ -407,17 +407,17 @@ func DeleteWorkspaceFileOrFolder(c *gin.Context) {
 	}
 
 	db.DB.Create(&models.Log{
-		EnvironmentID: env.ID,
+		EnvironmentID: &env.ID,
 		Message:       fmt.Sprintf("Deleted: %s. Restarting container to apply updates...", cleanPath),
 		Level:         models.LogLevelInfo,
 	})
 
 	// Restart container gracefully to reload server process with updated files
 	if env.ContainerID != nil && *env.ContainerID != "" {
-		err = worker.RestartContainer(c.Request.Context(), *env.ContainerID)
+		err = provider.RestartContainer(c.Request.Context(), *env.ContainerID)
 		if err == nil {
 			time.Sleep(500 * time.Millisecond)
-			newPort, err := worker.GetContainerPort(*env.ContainerID)
+			newPort, err := provider.GetContainerPort(*env.ContainerID)
 			if err == nil && newPort > 0 {
 				env.Port = &newPort
 				db.DB.Save(env)

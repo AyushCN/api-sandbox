@@ -14,8 +14,8 @@ import (
 
 	"github.com/api-sandbox/backend/db"
 	"github.com/api-sandbox/backend/models"
+	"github.com/api-sandbox/backend/provider"
 	"github.com/api-sandbox/backend/queue"
-	"github.com/api-sandbox/backend/worker"
 	"github.com/gin-gonic/gin"
 	"github.com/hibiken/asynq"
 	"golang.org/x/crypto/bcrypt"
@@ -61,6 +61,19 @@ func SetupRoutes(router *gin.Engine) {
 				projectDetail.POST("/invite", AuthorizeProjectAccess(models.ProjectRoleAdmin), InviteToProject)
 				projectDetail.DELETE("/collaborators/:userId", RemoveCollaborator)
 			}
+		}
+		providers := api.Group("/providers")
+		providers.Use(AuthMiddleware(), RateLimitAPI())
+		{
+			providers.GET("", GetProviders)
+		}
+
+		deployments := api.Group("/deployments")
+		deployments.Use(AuthMiddleware(), RateLimitAPI())
+		{
+			deployments.POST("", CreateDeployment)
+			deployments.GET("/:id", GetDeployment)
+			deployments.POST("/:id/addons", CreateDeploymentAddon)
 		}
 
 		protected := api.Group("/environments")
@@ -430,13 +443,13 @@ func DeleteEnvironment(c *gin.Context) {
 
 	// Try to stop and remove docker container if it exists
 	if env.ContainerID != nil && *env.ContainerID != "" {
-		_ = worker.CleanupContainer(c.Request.Context(), *env.ContainerID)
+		_ = provider.CleanupContainer(c.Request.Context(), *env.ContainerID, "environment")
 	}
 	// Also attempt to cleanup by predictable name, in case it was created but ContainerID wasn't saved
-	_ = worker.CleanupContainer(c.Request.Context(), fmt.Sprintf("api-sandbox-env-%s", env.ID))
+	_ = provider.CleanupContainer(c.Request.Context(), fmt.Sprintf("api-sandbox-env-%s", env.ID), "environment")
 
 	// Cleanup workspace folder on host
-	_ = worker.CleanupWorkspace(env.ID)
+	_ = provider.CleanupWorkspace(env.ID)
 
 	// Delete associated data first to satisfy foreign key constraints
 	db.DB.Where("environment_id = ?", env.ID).Delete(&models.Log{})
@@ -479,10 +492,10 @@ func RestartEnvironment(c *gin.Context) {
 
 	// Try to stop and remove old docker container if it exists
 	if env.ContainerID != nil && *env.ContainerID != "" {
-		_ = worker.CleanupContainer(c.Request.Context(), *env.ContainerID)
+		_ = provider.CleanupContainer(c.Request.Context(), *env.ContainerID, "environment")
 	}
 	// Also attempt to cleanup by predictable name, in case it was created but ContainerID wasn't saved
-	_ = worker.CleanupContainer(c.Request.Context(), fmt.Sprintf("api-sandbox-env-%s", env.ID))
+	_ = provider.CleanupContainer(c.Request.Context(), fmt.Sprintf("api-sandbox-env-%s", env.ID), "environment")
 
 	// Delete old logs
 	db.DB.Where("environment_id = ?", env.ID).Delete(&models.Log{})

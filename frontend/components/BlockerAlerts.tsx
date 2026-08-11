@@ -19,8 +19,6 @@ interface BranchStatus {
     name: string;
     email: string;
   };
-  tests_passing: boolean;
-  reviews_pending: number;
   has_uncommitted: boolean;
 }
 
@@ -140,14 +138,6 @@ export default function BlockerAlerts({ branches, blockers }: BlockerAlertsProps
                       Conflict
                     </span>
                   )}
-
-                  <div className="flex items-center gap-2 mt-1">
-                    {branch.tests_passing ? (
-                      <span className="text-[10px] text-emerald-400 font-medium bg-emerald-500/10 px-1.5 py-0.5 rounded">Tests: Pass</span>
-                    ) : (
-                      <span className="text-[10px] text-error font-medium bg-error/10 px-1.5 py-0.5 rounded">Tests: Fail</span>
-                    )}
-                  </div>
                 </div>
               </div>
             </div>

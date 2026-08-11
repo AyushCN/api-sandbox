@@ -286,7 +286,7 @@ type Activity struct {
 	Environment   Environment `json:"-"`
 	Type          string      `gorm:"type:text;not null" json:"type"` // e.g. "file_edit", "commit", "build"
 	Data          string      `gorm:"type:text" json:"data"`          // JSON encoded string
-	UserID        string      `gorm:"type:text;index" json:"userId"`
+	UserID        *string     `gorm:"type:text;index" json:"userId"`
 	User          User        `json:"-"`
 	CreatedAt     time.Time   `gorm:"default:current_timestamp;index" json:"createdAt"`
 }

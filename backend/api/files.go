@@ -249,7 +249,7 @@ func UpdateWorkspaceFileContent(c *gin.Context) {
 		EnvironmentID: env.ID,
 		Type:          "file_edit",
 		Data:          string(dataBytes),
-		UserID:        userIDStr,
+		UserID:        &userIDStr,
 	})
 
 	// Broadcast to team via WebSocket

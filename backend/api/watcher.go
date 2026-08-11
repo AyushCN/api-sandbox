@@ -107,7 +107,7 @@ func WatchAllEnvironments() {
 				EnvironmentID: envID,
 				Type:          "file_edit",
 				Data:          string(dataBytes),
-				UserID:        "system",
+				UserID:        nil, // System user
 			})
 
 			// Broadcast

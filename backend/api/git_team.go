@@ -115,7 +115,7 @@ func GetProjectActivity(c *gin.Context) {
 			json.Unmarshal([]byte(dbAct.Data), &data)
 
 			actorName := "System"
-			if dbAct.User.Username != "" {
+			if dbAct.UserID != nil && dbAct.User.Username != "" {
 				actorName = dbAct.User.Username
 			} else if name, ok := data["user_name"].(string); ok && name != "" {
 				actorName = name
@@ -217,8 +217,6 @@ func GetProjectTeamStatus(c *gin.Context) {
 			}
 		}
 
-		// Mock ahead/behind vs main
-		// In a real scenario we'd do git rev-list count, but here we simulate or skip
 		// Check for actual merge conflicts using git diff
 		cmdConflict := exec.Command("git", "diff", "--name-only", "--diff-filter=U")
 		cmdConflict.Dir = workspaceDir
@@ -246,8 +244,6 @@ func GetProjectTeamStatus(c *gin.Context) {
 				"name":  env.User.Email, // Using email as name for mock
 				"email": env.User.Email,
 			},
-			"tests_passing":   true, // Mocked as requested
-			"reviews_pending": 0,    // Mocked
 			"has_uncommitted": hasUncommitted,
 		}
 		branches = append(branches, branchInfo)
@@ -416,7 +412,7 @@ func SyncEnvironmentWithGitHub(c *gin.Context) {
 		EnvironmentID: env.ID,
 		Type:          "build", // visual type
 		Data:          string(dataBytes),
-		UserID:        userIDStr,
+		UserID:        &userIDStr,
 	})
 
 	BroadcastToProjectMembers(env.ID, data)

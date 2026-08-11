@@ -3,6 +3,7 @@ package api
 import (
 	"log"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -16,7 +17,14 @@ var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all origins for sandbox
+		origin := r.Header.Get("Origin")
+		frontendUrl := os.Getenv("FRONTEND_URL")
+		if frontendUrl == "" {
+			frontendUrl = "http://localhost:3000"
+		}
+		
+		// Ensure origin matches exactly, avoiding substring matches like 'http://localhost:3000.malicious.com'
+		return origin == frontendUrl
 	},
 }
 

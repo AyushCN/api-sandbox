@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -233,8 +234,7 @@ func UpdateWorkspaceFileContent(c *gin.Context) {
 		Diff:          string(diffOut),
 	})
 
-	// Broadcast to team via WebSocket
-	BroadcastToProjectMembers(env.ID, map[string]interface{}{
+	data := map[string]interface{}{
 		"type":       "file_changed",
 		"file_path":  cleanPath,
 		"user_id":    userIDStr,
@@ -242,7 +242,18 @@ func UpdateWorkspaceFileContent(c *gin.Context) {
 		"action":     "save",
 		"timestamp":  now,
 		"diff":       string(diffOut),
+	}
+	dataBytes, _ := json.Marshal(data)
+
+	db.DB.Create(&models.Activity{
+		EnvironmentID: env.ID,
+		Type:          "file_edit",
+		Data:          string(dataBytes),
+		UserID:        userIDStr,
 	})
+
+	// Broadcast to team via WebSocket
+	BroadcastToProjectMembers(env.ID, data)
 
 	// Restart container gracefully to reload server process with updated code
 	if env.ContainerID != nil && *env.ContainerID != "" {

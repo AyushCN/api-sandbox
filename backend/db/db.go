@@ -59,6 +59,7 @@ func InitDB() {
 		&models.Log{}, 
 		&models.Metric{}, 
 		&models.AuditLog{},
+		&models.Activity{},
 	)
 	if err != nil {
 		slog.Error("Failed to auto migrate database schemas", "error", err)

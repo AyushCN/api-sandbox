@@ -39,8 +39,12 @@ type Hub struct {
 }
 
 type BroadcastMessage struct {
-	EnvID string
-	Data  interface{}
+	Type      string
+	EnvID     string
+	UserID    string
+	UserName  string
+	Data      interface{}
+	Timestamp time.Time
 }
 
 var WSHub = &Hub{
@@ -70,7 +74,7 @@ func (h *Hub) Run() {
 				// Broadcast to all clients connected to this environment
 				if client.EnvID == message.EnvID {
 					select {
-					case client.Send <- message.Data:
+					case client.Send <- message:
 					default:
 						close(client.Send)
 						delete(h.clients, client)
@@ -88,6 +92,28 @@ func ServeWS(c *gin.Context) {
 	userID, exists := c.Get("userId")
 	if !exists {
 		userID = "anonymous"
+	}
+
+	// Check if user has access to this environment's project
+	var env models.Environment
+	if err := db.DB.First(&env, "id = ?", envID).Error; err != nil {
+		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "Environment not found"})
+		return
+	}
+
+	var hasAccess bool
+	if env.UserID == userID {
+		hasAccess = true
+	} else if env.ProjectID != "" {
+		var member models.ProjectCollaborator
+		if err := db.DB.Where("project_id = ? AND user_id = ?", env.ProjectID, userID).First(&member).Error; err == nil {
+			hasAccess = true
+		}
+	}
+
+	if !hasAccess {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
 	}
 
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
@@ -147,9 +173,22 @@ func (c *WsClient) readPump() {
 }
 
 func BroadcastToProjectMembers(envID string, data map[string]interface{}) {
+	msgType, _ := data["type"].(string)
+	userID, _ := data["user_id"].(string)
+	userName, _ := data["user_name"].(string)
+	
+	timestamp := time.Now()
+	if t, ok := data["timestamp"].(time.Time); ok {
+		timestamp = t
+	}
+
 	WSHub.broadcast <- BroadcastMessage{
-		EnvID: envID,
-		Data:  data,
+		Type:      msgType,
+		EnvID:     envID,
+		UserID:    userID,
+		UserName:  userName,
+		Data:      data,
+		Timestamp: timestamp,
 	}
 }
 

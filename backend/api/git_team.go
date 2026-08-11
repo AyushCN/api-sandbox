@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"os"
 	"os/exec"
@@ -43,7 +44,9 @@ func GetProjectActivity(c *gin.Context) {
 		return
 	}
 
+	envIDs := []string{}
 	for _, env := range envs {
+		envIDs = append(envIDs, env.ID)
 		workspaceDir := filepath.Join(wd, "workspaces", env.ID)
 		if _, err := os.Stat(workspaceDir); os.IsNotExist(err) {
 			continue
@@ -98,6 +101,51 @@ func GetProjectActivity(c *gin.Context) {
 					EnvironmentID: env.ID,
 					Branch:        branchStr,
 				}
+			}
+		}
+	}
+
+	// Fetch from Activity table
+	if len(envIDs) > 0 {
+		var dbActivities []models.Activity
+		db.DB.Preload("User").Where("environment_id IN ?", envIDs).Order("created_at DESC").Limit(100).Find(&dbActivities)
+
+		for _, dbAct := range dbActivities {
+			var data map[string]interface{}
+			json.Unmarshal([]byte(dbAct.Data), &data)
+
+			actorName := "System"
+			if dbAct.User.Username != "" {
+				actorName = dbAct.User.Username
+			} else if name, ok := data["user_name"].(string); ok && name != "" {
+				actorName = name
+			}
+
+			action := dbAct.Type
+			if act, ok := data["action"].(string); ok && act != "" {
+				action = act
+			}
+
+			message := dbAct.Type
+			if filePath, ok := data["file_path"].(string); ok {
+				message = action + " " + filePath
+			}
+
+			hash := dbAct.ID
+			if len(hash) > 8 {
+				hash = hash[:8]
+			}
+
+			activityMap[dbAct.ID] = GitActivity{
+				Timestamp:     dbAct.CreatedAt,
+				TimestampStr:  dbAct.CreatedAt.Format(time.RFC3339),
+				ActorName:     actorName,
+				ActorEmail:    dbAct.User.Email,
+				Action:        action,
+				Message:       message,
+				Hash:          hash,
+				EnvironmentID: dbAct.EnvironmentID,
+				Branch:        "live",
 			}
 		}
 	}
@@ -171,12 +219,12 @@ func GetProjectTeamStatus(c *gin.Context) {
 
 		// Mock ahead/behind vs main
 		// In a real scenario we'd do git rev-list count, but here we simulate or skip
-		// Let's check if the current branch has conflicts by checking if there's a merge in progress
-		mergeHeadPath := filepath.Join(workspaceDir, ".git", "MERGE_HEAD")
-		hasConflict := false
-		if _, err := os.Stat(mergeHeadPath); err == nil {
-			hasConflict = true
-		}
+		// Check for actual merge conflicts using git diff
+		cmdConflict := exec.Command("git", "diff", "--name-only", "--diff-filter=U")
+		cmdConflict.Dir = workspaceDir
+		conflictOut, _ := cmdConflict.Output()
+		conflictFiles := strings.Split(strings.TrimSpace(string(conflictOut)), "\n")
+		hasConflict := len(conflictFiles) > 0 && conflictFiles[0] != ""
 
 		status := "ready_to_merge"
 		if hasConflict {
@@ -210,10 +258,11 @@ func GetProjectTeamStatus(c *gin.Context) {
 				"type":        "conflict",
 				"environment": env.Name,
 				"branch":      env.GithubBranch,
+				"files":       conflictFiles,
 				"resolution":  "Needs manual merge resolution",
 			})
 		}
-		if hasUncommitted {
+		if hasUncommitted && !hasConflict {
 			blockers = append(blockers, map[string]interface{}{
 				"type":        "uncommitted_changes",
 				"environment": env.Name,

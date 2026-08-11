@@ -52,7 +52,11 @@ export default function ActivityFeed({ activities }: ActivityFeedProps) {
                     </div>
                     <div>
                       <div className="font-semibold text-on-surface text-sm">
-                        {activity.actorName} <span className="font-normal text-on-surface-variant">pushed to</span> <span className="font-mono text-primary-fixed">{activity.branch}</span>
+                        {activity.actorName}{' '}
+                        <span className="font-normal text-on-surface-variant">
+                          {activity.action === "pushed" ? "pushed to" : activity.action}
+                        </span>{' '}
+                        {activity.action === "pushed" && <span className="font-mono text-primary-fixed">{activity.branch}</span>}
                       </div>
                       <div className="text-xs text-on-surface-variant/70">
                         {formatDistanceToNow(new Date(activity.timestamp), { addSuffix: true })}
@@ -63,7 +67,11 @@ export default function ActivityFeed({ activities }: ActivityFeedProps) {
 
                 <div className="bg-surface-container-lowest border border-outline-variant/50 rounded-lg p-3 mt-3">
                   <div className="flex items-start gap-3">
-                    <GitCommit className="w-4 h-4 text-on-surface-variant/50 mt-0.5 shrink-0" />
+                    {activity.action === "pushed" ? (
+                      <GitCommit className="w-4 h-4 text-on-surface-variant/50 mt-0.5 shrink-0" />
+                    ) : (
+                      <div className="w-4 h-4 text-on-surface-variant/50 mt-0.5 shrink-0 flex items-center justify-center text-[10px]">📝</div>
+                    )}
                     <div className="min-w-0">
                       <div className="text-sm text-on-surface font-medium truncate" title={activity.message}>
                         {activity.message}

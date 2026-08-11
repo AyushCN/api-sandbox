@@ -29,6 +29,7 @@ interface Blocker {
   environment: string;
   branch: string;
   resolution: string;
+  files?: string[];
 }
 
 interface BlockerAlertsProps {
@@ -51,14 +52,26 @@ export default function BlockerAlerts({ branches, blockers }: BlockerAlertsProps
             {blockers.map((blocker, i) => (
               <div key={i} className="bg-error/10 border border-error/30 rounded-xl p-4 flex items-start gap-3">
                 <AlertCircle className="w-5 h-5 text-error mt-0.5 shrink-0" />
-                <div>
+                <div className="w-full">
                   <div className="font-semibold text-error text-sm">
                     {blocker.type === 'conflict' ? 'Merge Conflict' : 'Uncommitted Changes'}
                   </div>
                   <div className="text-sm text-error/80 mt-1">
                     <span className="font-mono bg-error/20 px-1 py-0.5 rounded text-xs">{blocker.branch}</span> in <strong>{blocker.environment}</strong>
                   </div>
-                  <div className="text-xs text-error/60 mt-2 font-medium bg-error/10 inline-block px-2 py-1 rounded">
+                  
+                  {blocker.type === 'conflict' && blocker.files && blocker.files.length > 0 && (
+                    <div className="mt-3 bg-error/5 border border-error/20 rounded p-2">
+                      <div className="text-xs font-semibold text-error mb-1">Conflicting Files:</div>
+                      <ul className="list-disc pl-4 space-y-1">
+                        {blocker.files.map((file, idx) => (
+                          <li key={idx} className="text-xs text-error/90 font-mono break-all">{file}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  <div className="text-xs text-error/60 mt-3 font-medium bg-error/10 inline-block px-2 py-1 rounded">
                     Action required: {blocker.resolution}
                   </div>
                 </div>

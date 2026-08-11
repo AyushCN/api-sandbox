@@ -47,8 +47,9 @@ func main() {
 	queue.InitQueue()
 	worker.InitDocker()
 
-	// Start WebSocket Hub
+	// Start WebSocket Hub and File Watcher
 	go api.WSHub.Run()
+	go api.WatchAllEnvironments()
 
 	mode := os.Getenv("MODE")
 	

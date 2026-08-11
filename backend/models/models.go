@@ -279,3 +279,21 @@ func (c *EnvironmentChange) BeforeCreate(tx *gorm.DB) (err error) {
 	}
 	return
 }
+
+type Activity struct {
+	ID            string      `gorm:"type:text;primaryKey" json:"id"`
+	EnvironmentID string      `gorm:"type:text;not null;index" json:"environmentId"`
+	Environment   Environment `json:"-"`
+	Type          string      `gorm:"type:text;not null" json:"type"` // e.g. "file_edit", "commit", "build"
+	Data          string      `gorm:"type:text" json:"data"`          // JSON encoded string
+	UserID        string      `gorm:"type:text;index" json:"userId"`
+	User          User        `json:"-"`
+	CreatedAt     time.Time   `gorm:"default:current_timestamp;index" json:"createdAt"`
+}
+
+func (a *Activity) BeforeCreate(tx *gorm.DB) (err error) {
+	if a.ID == "" {
+		a.ID = uuid.NewString()
+	}
+	return
+}

@@ -8,6 +8,7 @@ import toast from "react-hot-toast";
 import { fetchWithAuth } from "@/lib/auth";
 
 const schema = z.object({
+  name: z.string().min(1, "Name is required").default("Untitled Deployment"),
   projectId: z.string().min(1, "Project is required"),
   gitUrl: z.string().url("Must be a valid URL").regex(/^https:\/\/github\.com/, "Must be a GitHub repository"),
   gitBranch: z.string().min(1, "Branch is required").default("main"),
@@ -35,7 +36,7 @@ export default function NewDeploymentModal({ isOpen, onClose, onDeploy }: Props)
     reset,
   } = useForm<FormData>({
     resolver: zodResolver(schema),
-    defaultValues: { gitBranch: "main", providerType: "docker", dbAddon: "none" },
+    defaultValues: { name: "", gitBranch: "main", providerType: "docker", dbAddon: "none" },
   });
 
   const providerType = watch("providerType");
@@ -55,6 +56,7 @@ export default function NewDeploymentModal({ isOpen, onClose, onDeploy }: Props)
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          name: data.name,
           projectId: data.projectId,
           gitUrl: data.gitUrl,
           gitBranch: data.gitBranch,
@@ -98,6 +100,12 @@ export default function NewDeploymentModal({ isOpen, onClose, onDeploy }: Props)
         </div>
 
         <form onSubmit={handleSubmit(onSubmit)} className="p-6 space-y-6">
+          <div className="space-y-2">
+            <label className="text-xs font-bold uppercase tracking-wider text-on-surface-variant">Deployment Name</label>
+            <input {...register("name")} className="w-full bg-surface-container-lowest border border-outline-variant rounded-xl px-4 py-2.5 text-sm" placeholder="e.g. Production API Sandbox" />
+            {errors.name && <p className="text-xs text-error">{errors.name.message}</p>}
+          </div>
+
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <label className="text-xs font-bold uppercase tracking-wider text-on-surface-variant">Project</label>

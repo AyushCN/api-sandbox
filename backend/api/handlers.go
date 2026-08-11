@@ -71,6 +71,7 @@ func SetupRoutes(router *gin.Engine) {
 		deployments := api.Group("/deployments")
 		deployments.Use(AuthMiddleware(), RateLimitAPI())
 		{
+			deployments.GET("", GetDeployments)
 			deployments.POST("", CreateDeployment)
 			deployments.GET("/:id", GetDeployment)
 			deployments.POST("/:id/addons", CreateDeploymentAddon)

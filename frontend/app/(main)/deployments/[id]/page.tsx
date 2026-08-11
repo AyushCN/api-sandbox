@@ -256,7 +256,7 @@ export default function EnvironmentDetail() {
     }
   };
 
-  const { data: env, error } = useSWR(`/api/environments/${id}`, fetcher, {
+  const { data: env, error } = useSWR(`/api/deployments/${id}`, fetcher, {
     refreshInterval: (data) => (data?.status === 'BUILDING' ? 1000 : 5000),
   });
 
@@ -569,7 +569,7 @@ export default function EnvironmentDetail() {
                     {env.gitUrl.replace('https://github.com/', '')}
                   </a>
                   <span className="text-outline-variant">·</span>
-                  <span className="font-bold text-on-surface">{env.githubBranch}</span>
+                  <span className="font-bold text-on-surface">{env.gitBranch}</span>
                 </div>
                 <div className="flex items-center gap-1 text-[10px] text-on-surface-variant/50 font-mono">
                   <Clock className="w-3 h-3" />

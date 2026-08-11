@@ -308,6 +308,7 @@ func (a *Activity) BeforeCreate(tx *gorm.DB) (err error) {
 
 type Deployment struct {
 	ID             string        `gorm:"type:text;primaryKey" json:"id"`
+	Name           string        `gorm:"type:text;not null;default:'Untitled Deployment'" json:"name"`
 	ProjectID      string        `gorm:"type:text;not null;index" json:"projectId"`
 	Project        Project       `json:"-"`
 	GitURL         string        `gorm:"type:text;not null" json:"gitUrl"`

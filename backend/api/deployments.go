@@ -26,8 +26,30 @@ func GetProviders(c *gin.Context) {
 	c.JSON(http.StatusOK, providers)
 }
 
+func GetDeployments(c *gin.Context) {
+	userID, _ := c.Get("userId")
+
+	var collabs []models.ProjectCollaborator
+	db.DB.Where("user_id = ?", userID).Find(&collabs)
+
+	var projectIDs []string
+	for _, collab := range collabs {
+		projectIDs = append(projectIDs, collab.ProjectID)
+	}
+
+	var deployments []models.Deployment
+	if len(projectIDs) > 0 {
+		db.DB.Where("project_id IN ?", projectIDs).Order("created_at desc").Find(&deployments)
+	} else {
+		deployments = []models.Deployment{}
+	}
+
+	c.JSON(http.StatusOK, deployments)
+}
+
 func CreateDeployment(c *gin.Context) {
 	var req struct {
+		Name         string `json:"name"`
 		ProjectID    string `json:"projectId" binding:"required"`
 		GitURL       string `json:"gitUrl" binding:"required"`
 		GitBranch    string `json:"gitBranch"`
@@ -47,8 +69,13 @@ func CreateDeployment(c *gin.Context) {
 	if req.GitBranch == "" {
 		req.GitBranch = "main"
 	}
+	
+	if req.Name == "" {
+		req.Name = "Untitled Deployment"
+	}
 
 	deployment := models.Deployment{
+		Name:         req.Name,
 		ProjectID:    req.ProjectID,
 		GitURL:       req.GitURL,
 		GitBranch:    req.GitBranch,

@@ -18,6 +18,7 @@ func NewAddonManager() *AddonManager {
 			"postgres": NewPostgresProvider(),
 			"mongodb":  NewMongoProvider(),
 			"redis":    NewRedisProvider(),
+			"mysql":    NewMySQLProvider(),
 		},
 	}
 }

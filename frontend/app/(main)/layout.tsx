@@ -15,9 +15,12 @@ export default function MainLayout({
             <span className="material-symbols-outlined text-primary text-3xl">token</span>
             <span className="font-bold tracking-tight text-xl text-primary">API Sandbox</span>
           </Link>
-          <div className="flex items-center gap-4">
-            <Link href="/upload" className="text-sm font-bold tracking-wide text-on-surface-variant hover:text-primary transition-colors uppercase">
-              New Sandbox
+          <div className="flex items-center gap-6">
+            <Link href="/dashboard" className="text-sm font-bold tracking-wide text-on-surface-variant hover:text-primary transition-colors">
+              Deployments
+            </Link>
+            <Link href="/sandboxes" className="text-sm font-bold tracking-wide text-on-surface-variant hover:text-primary transition-colors">
+              Sandboxes
             </Link>
             <UserAvatar />
             <LogoutButton />

@@ -2,14 +2,17 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 
 	"github.com/api-sandbox/backend/db"
 	"github.com/api-sandbox/backend/models"
+	"github.com/api-sandbox/backend/provider"
 	"github.com/api-sandbox/backend/queue"
 	"github.com/gin-gonic/gin"
 	"github.com/hibiken/asynq"
+	"gorm.io/gorm"
 )
 
 func GetProviders(c *gin.Context) {
@@ -106,7 +109,9 @@ func GetDeployment(c *gin.Context) {
 	id := c.Param("id")
 	var deployment models.Deployment
 
-	if err := db.DB.First(&deployment, "id = ?", id).Error; err != nil {
+	if err := db.DB.Preload("AddOns").Preload("Logs", func(db *gorm.DB) *gorm.DB {
+		return db.Order("timestamp desc").Limit(100)
+	}).First(&deployment, "id = ?", id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Deployment not found"})
 		return
 	}
@@ -153,4 +158,96 @@ func CreateDeploymentAddon(c *gin.Context) {
 	// Here, we just store it. DockerProvider.Deploy will provision it and inject the URI.
 
 	c.JSON(http.StatusCreated, addon)
+}
+
+func DeleteDeployment(c *gin.Context) {
+	id := c.Param("id")
+	userID, _ := c.Get("userId")
+	
+	var dep models.Deployment
+	if err := db.DB.First(&dep, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Deployment not found"})
+		return
+	}
+
+	// Try to stop and remove docker container if it exists
+	containerName := fmt.Sprintf("deploy-%s", dep.ID)
+	_ = provider.CleanupContainer(c.Request.Context(), containerName, "deployment")
+
+	// Delete associated addons and their containers
+	var addons []models.Addon
+	db.DB.Where("deployment_id = ?", dep.ID).Find(&addons)
+	for _, a := range addons {
+		addonContainerName := fmt.Sprintf("%s-%s", a.Type, dep.ID)
+		_ = provider.CleanupContainer(c.Request.Context(), addonContainerName, "addon")
+	}
+
+	// Delete associated database records manually since GORM might not have configured ON DELETE CASCADE correctly
+	db.DB.Where("deployment_id = ?", dep.ID).Delete(&models.Log{})
+	db.DB.Where("deployment_id = ?", dep.ID).Delete(&models.Metric{})
+	db.DB.Where("deployment_id = ?", dep.ID).Delete(&models.Activity{})
+	db.DB.Where("deployment_id = ?", dep.ID).Delete(&models.ProcessType{})
+	db.DB.Where("deployment_id = ?", dep.ID).Delete(&models.Addon{})
+	db.DB.Where("deployment_id = ?", dep.ID).Delete(&models.EnvironmentChange{})
+	db.DB.Where("deployment_id = ?", dep.ID).Delete(&models.BenchmarkRun{})
+
+	// Delete from database
+	if err := db.DB.Delete(&dep).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete deployment"})
+		return
+	}
+
+	db.DB.Create(&models.AuditLog{
+		UserID:    fmt.Sprintf("%v", userID),
+		Action:    "DELETE_DEPLOYMENT",
+		Resource:  dep.ID,
+		IPAddress: c.ClientIP(),
+	})
+
+	c.JSON(http.StatusOK, gin.H{"message": "Deployment deleted successfully"})
+}
+
+func RestartDeployment(c *gin.Context) {
+	id := c.Param("id")
+	userID, _ := c.Get("userId")
+
+	var dep models.Deployment
+	if err := db.DB.First(&dep, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Deployment not found"})
+		return
+	}
+
+	// Try to stop and remove old docker container if it exists
+	containerName := fmt.Sprintf("deploy-%s", dep.ID)
+	_ = provider.CleanupContainer(c.Request.Context(), containerName, "deployment")
+
+	// Update status back to queued/building
+	dep.Status = "QUEUED"
+	if err := db.DB.Save(&dep).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update deployment status"})
+		return
+	}
+
+	db.DB.Create(&models.AuditLog{
+		UserID:    fmt.Sprintf("%v", userID),
+		Action:    "RESTART_DEPLOYMENT",
+		Resource:  dep.ID,
+		IPAddress: c.ClientIP(),
+	})
+
+	// Enqueue the deploy task again
+	payload, err := json.Marshal(map[string]string{"deploymentId": dep.ID})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to serialize task payload"})
+		return
+	}
+
+	task := asynq.NewTask(queue.TaskDeploy, payload)
+	_, err = queue.Client.Enqueue(task, asynq.MaxRetry(3))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to enqueue restart task"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Deployment restart initiated"})
 }

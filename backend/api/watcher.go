@@ -93,6 +93,13 @@ func WatchAllEnvironments() {
 				continue // Ignore Chmod, Rename (unless we want to handle Rename specially)
 			}
 
+			// Check if this ID actually belongs to an Environment (ignore Deployments to avoid FK errors and spam)
+			var count int64
+			db.DB.Model(&models.Environment{}).Where("id = ?", envID).Count(&count)
+			if count == 0 {
+				continue // It's likely a Deployment building, which we shouldn't log file_edits for
+			}
+
 			data := map[string]interface{}{
 				"type":      "file_changed",
 				"file_path": filePath,

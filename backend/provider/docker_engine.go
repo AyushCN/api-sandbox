@@ -47,7 +47,64 @@ func createLog(entityID string, entityType string, message string, level models.
 	db.DB.Create(&log)
 }
 
+type buildTiming struct {
+	Stage    string
+	Duration time.Duration
+}
+
+func recordBenchmark(id, kind string, timings []buildTiming, totalDuration time.Duration, imageTag, repo string) {
+	condition := os.Getenv("BERTH_CACHE_MODE")
+	if condition == "" {
+		condition = "cold"
+	}
+	
+	var imageSizeBytes int64
+	if inspect, err := dockerClient.InspectImage(imageTag); err == nil {
+		imageSizeBytes = inspect.Size
+	}
+
+	for _, t := range timings {
+		run := models.BenchmarkRun{
+			DeploymentID:   id,
+			Repo:           repo,
+			Condition:      condition,
+			Stage:          t.Stage,
+			DurationMs:     t.Duration.Milliseconds(),
+			ImageSizeBytes: imageSizeBytes,
+		}
+		db.DB.Create(&run)
+	}
+
+	totalRun := models.BenchmarkRun{
+		DeploymentID:   id,
+		Repo:           repo,
+		Condition:      condition,
+		Stage:          "total",
+		DurationMs:     totalDuration.Milliseconds(),
+		ImageSizeBytes: imageSizeBytes,
+	}
+	db.DB.Create(&totalRun)
+}
+
+func cloneOrFetch(ctx context.Context, dir, gitURL, branch string) error {
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+		exec.CommandContext(ctx, "git", "-C", dir, "fetch", "--depth", "1", "origin", branch).Run()
+		return exec.CommandContext(ctx, "git", "-C", dir, "reset", "--hard", "origin/"+branch).Run()
+	}
+	cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", "--branch", branch, gitURL, dir)
+	if _, err := cmd.CombinedOutput(); err != nil {
+		cmd = exec.CommandContext(ctx, "git", "clone", "--depth", "1", gitURL, dir)
+		if out2, err2 := cmd.CombinedOutput(); err2 != nil {
+			return fmt.Errorf("git clone failed: %s - %v", string(out2), err2)
+		}
+	}
+	return nil
+}
+
 func CloneAndBuildImage(ctx context.Context, envID string, entityType string, gitURL string, branch string) (string, error) {
+	var timings []buildTiming
+	start := time.Now()
+
 	wd, err := os.Getwd()
 	if err != nil {
 		return "", fmt.Errorf("failed to get working directory: %v", err)
@@ -68,26 +125,24 @@ func CloneAndBuildImage(ctx context.Context, envID string, entityType string, gi
 		subDir = matches[4]
 	}
 
+	repoForBenchmark := gitURL
+
 	createLog(envID, entityType, fmt.Sprintf("Cloning repository %s (branch: %s, subdir: %s)...", gitURL, branch, subDir), models.LogLevelInfo)
 
+	// clone/fetch stage
+	t0 := time.Now()
+
 	// 1. Clone Repo
-	// Ensure temp directory is clean before cloning
-	_ = os.RemoveAll(tmpDir)
-
-	// Try cloning with the specified branch first
-	cmd := exec.CommandContext(ctx, "git", "clone", "--branch", branch, gitURL, tmpDir)
-	if _, err := cmd.CombinedOutput(); err != nil {
-		// If it fails (likely due to branch not found), try again without specifying a branch (uses repository default, e.g. master)
-		createLog(envID, entityType, fmt.Sprintf("Branch '%s' not found, falling back to default branch...", branch), models.LogLevelWarn)
-
-		cmd = exec.CommandContext(ctx, "git", "clone", gitURL, tmpDir)
-		if out2, err2 := cmd.CombinedOutput(); err2 != nil {
-			_ = os.RemoveAll(tmpDir)
-			return "", fmt.Errorf("git clone failed: %s - %v", string(out2), err2)
-		}
+	if err := cloneOrFetch(ctx, tmpDir, gitURL, branch); err != nil {
+		_ = os.RemoveAll(tmpDir)
+		return "", err
 	}
+	timings = append(timings, buildTiming{"clone", time.Since(t0)})
 
 	createLog(envID, entityType, fmt.Sprintf("Building Docker image %s...", imageTag), models.LogLevelInfo)
+
+	// detect stage
+	t1 := time.Now()
 
 	// Set the build directory to the subdirectory if specified
 	buildDir := tmpDir
@@ -165,6 +220,10 @@ func CloneAndBuildImage(ctx context.Context, envID string, entityType string, gi
 		}
 	}
 
+	timings = append(timings, buildTiming{"detect", time.Since(t1)})
+
+	// build stage
+	t2 := time.Now()
 	// 2. Tar the directory for build context
 	tarStream, err := tarballDir(buildDir)
 	if err != nil {
@@ -181,14 +240,25 @@ func CloneAndBuildImage(ctx context.Context, envID string, entityType string, gi
 		Version:      docker.BuilderBuildKit,
 	}
 
+	if os.Getenv("BERTH_CACHE_MODE") == "warm" {
+		opts.CacheFrom = []string{imageTag}
+		opts.BuildArgs = []docker.BuildArg{
+			{Name: "BUILDKIT_INLINE_CACHE", Value: "1"},
+		}
+	}
+
 	if err := dockerClient.BuildImage(opts); err != nil {
 		return "", fmt.Errorf("failed to build image: %v", err)
 	}
+
+	timings = append(timings, buildTiming{"build", time.Since(t2)})
 
 	// Log output
 	createLog(envID, entityType, buf.String(), models.LogLevelInfo)
 
 	createLog(envID, entityType, "Image built successfully.", models.LogLevelInfo)
+
+	recordBenchmark(envID, entityType, timings, time.Since(start), imageTag, repoForBenchmark)
 
 	return imageTag, nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 
 	"github.com/api-sandbox/backend/db"
 	"github.com/api-sandbox/backend/models"
@@ -60,6 +61,8 @@ func (p *DockerProvider) Deploy(ctx context.Context, deployment *models.Deployme
 			injectedEnv = append(injectedEnv, fmt.Sprintf("DATABASE_URL=%s", connStr))
 		case "mongodb":
 			injectedEnv = append(injectedEnv, fmt.Sprintf("MONGO_URI=%s", connStr))
+		case "mysql":
+			injectedEnv = append(injectedEnv, fmt.Sprintf("DATABASE_URL=%s", connStr), fmt.Sprintf("MYSQL_URI=%s", connStr))
 		case "redis":
 			injectedEnv = append(injectedEnv, fmt.Sprintf("REDIS_URL=%s", connStr))
 		}
@@ -83,13 +86,19 @@ func (p *DockerProvider) Deploy(ctx context.Context, deployment *models.Deployme
 		primaryDbUrl = "injected"
 	}
 
-	_, _, err := StartContainer(ctx, deployment.ID, "deployment", imageTag, netID, primaryDbUrl)
+	_, assignedPort, err := StartContainer(ctx, deployment.ID, "deployment", imageTag, netID, primaryDbUrl)
 	if err != nil {
 		return err
 	}
 
 	deployment.Status = "RUNNING"
-	deployment.PublicURL = fmt.Sprintf("https://%s.sandbox.local", deployment.ID)
+	
+	domain := os.Getenv("DOMAIN")
+	if domain == "localhost" || domain == "" {
+		deployment.PublicURL = fmt.Sprintf("http://localhost:%d", assignedPort)
+	} else {
+		deployment.PublicURL = fmt.Sprintf("https://%s.%s", deployment.ID, domain)
+	}
 	return nil
 }
 

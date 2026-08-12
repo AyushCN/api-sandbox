@@ -13,7 +13,7 @@ const schema = z.object({
   gitUrl: z.string().url("Must be a valid URL").regex(/^https:\/\/github\.com/, "Must be a GitHub repository"),
   gitBranch: z.string().min(1, "Branch is required").default("main"),
   providerType: z.enum(["docker"]).default("docker"),
-  dbAddon: z.enum(["none", "postgres", "mongo", "redis"]).default("none"),
+  dbAddon: z.enum(["none", "postgres", "mongo", "redis", "mysql"]).default("none"),
 });
 
 type FormData = z.infer<typeof schema>;
@@ -27,11 +27,14 @@ interface Props {
 export default function NewDeploymentModal({ isOpen, onClose, onDeploy }: Props) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [projects, setProjects] = useState<any[]>([]);
+  const [branches, setBranches] = useState<string[]>([]);
+  const [isFetchingBranches, setIsFetchingBranches] = useState(false);
 
   const {
     register,
     handleSubmit,
     watch,
+    setValue,
     formState: { errors },
     reset,
   } = useForm<FormData>({
@@ -41,6 +44,44 @@ export default function NewDeploymentModal({ isOpen, onClose, onDeploy }: Props)
 
   const providerType = watch("providerType");
   const dbAddon = watch("dbAddon");
+  const gitUrl = watch("gitUrl");
+
+  useEffect(() => {
+    const fetchBranches = async () => {
+      if (!gitUrl || !gitUrl.startsWith("https://github.com/")) return;
+      
+      const match = gitUrl.match(/https:\/\/github\.com\/([^/]+)\/([^/.]+)/);
+      if (!match) return;
+
+      const owner = match[1];
+      const repo = match[2];
+
+      setIsFetchingBranches(true);
+      try {
+        const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/branches`);
+        if (!res.ok) {
+          setBranches([]);
+          return;
+        }
+        const data = await res.json();
+        const branchNames = data.map((b: any) => b.name);
+        setBranches(branchNames);
+        
+        // Auto-select main or master if available
+        if (branchNames.includes("main")) setValue("gitBranch", "main");
+        else if (branchNames.includes("master")) setValue("gitBranch", "master");
+        else if (branchNames.length > 0) setValue("gitBranch", branchNames[0]);
+      } catch (err) {
+        // Silently fail and fallback to manual input if network request fails entirely
+        setBranches([]);
+      } finally {
+        setIsFetchingBranches(false);
+      }
+    };
+
+    const timeout = setTimeout(fetchBranches, 800);
+    return () => clearTimeout(timeout);
+  }, [gitUrl, setValue]);
 
   useEffect(() => {
     if (isOpen) {
@@ -118,8 +159,19 @@ export default function NewDeploymentModal({ isOpen, onClose, onDeploy }: Props)
               {errors.projectId && <p className="text-xs text-error">{errors.projectId.message}</p>}
             </div>
             <div className="space-y-2">
-              <label className="text-xs font-bold uppercase tracking-wider text-on-surface-variant">Git Branch</label>
-              <input {...register("gitBranch")} className="w-full bg-surface-container-lowest border border-outline-variant rounded-xl px-4 py-2.5 text-sm" placeholder="main" />
+              <label className="text-xs font-bold uppercase tracking-wider text-on-surface-variant flex items-center gap-2">
+                Git Branch
+                {isFetchingBranches && <Loader2 className="w-3 h-3 animate-spin text-primary-fixed" />}
+              </label>
+              {branches.length > 0 ? (
+                <select {...register("gitBranch")} className="w-full bg-surface-container-lowest border border-outline-variant rounded-xl px-4 py-2.5 text-sm appearance-none">
+                  {branches.map(b => (
+                    <option key={b} value={b}>{b}</option>
+                  ))}
+                </select>
+              ) : (
+                <input {...register("gitBranch")} className="w-full bg-surface-container-lowest border border-outline-variant rounded-xl px-4 py-2.5 text-sm" placeholder="main" />
+              )}
               {errors.gitBranch && <p className="text-xs text-error">{errors.gitBranch.message}</p>}
             </div>
           </div>
@@ -147,11 +199,12 @@ export default function NewDeploymentModal({ isOpen, onClose, onDeploy }: Props)
 
           <div className="space-y-3">
             <label className="text-xs font-bold uppercase tracking-wider text-on-surface-variant">Database Add-on (Optional)</label>
-            <div className="grid grid-cols-4 gap-3">
+            <div className="grid grid-cols-5 gap-3">
               {[
                 { id: "none", name: "None" },
                 { id: "postgres", name: "PostgreSQL" },
                 { id: "mongo", name: "MongoDB" },
+                { id: "mysql", name: "MySQL" },
                 { id: "redis", name: "Redis" },
               ].map(db => (
                 <label key={db.id} className={`flex items-center justify-center p-3 rounded-xl border cursor-pointer transition-all ${dbAddon === db.id ? 'border-primary-fixed bg-primary-fixed/10 text-primary-fixed' : 'border-outline-variant hover:border-outline text-on-surface-variant'}`}>

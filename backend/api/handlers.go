@@ -75,6 +75,8 @@ func SetupRoutes(router *gin.Engine) {
 			deployments.POST("", CreateDeployment)
 			deployments.GET("/:id", GetDeployment)
 			deployments.POST("/:id/addons", CreateDeploymentAddon)
+			deployments.POST("/:id/restart", RestartDeployment)
+			deployments.DELETE("/:id", DeleteDeployment)
 		}
 
 		protected := api.Group("/environments")

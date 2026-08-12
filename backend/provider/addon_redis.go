@@ -28,10 +28,7 @@ func (p *RedisProvider) Provision(ctx context.Context, addon *models.Addon, orgI
 		return "", fmt.Errorf("failed to ensure network: %v", err)
 	}
 
-	// Generate random password
-	passwordBytes := make([]byte, 8)
-	rand.Read(passwordBytes)
-	password := hex.EncodeToString(passwordBytes)
+
 
 	containerInfo, err := p.client.InspectContainer(containerName)
 	if err == nil {
@@ -55,6 +52,11 @@ func (p *RedisProvider) Provision(ctx context.Context, addon *models.Addon, orgI
 	if err != nil {
 		return "", fmt.Errorf("failed to pull redis image: %v", err)
 	}
+
+	// Generate random password for new container
+	passwordBytes := make([]byte, 8)
+	rand.Read(passwordBytes)
+	password := hex.EncodeToString(passwordBytes)
 
 	opts := docker.CreateContainerOptions{
 		Name: containerName,

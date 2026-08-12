@@ -321,6 +321,7 @@ type Deployment struct {
 	Environment    string        `gorm:"type:text" json:"environment"`
 	ProcessTypes   []ProcessType `gorm:"constraint:OnDelete:CASCADE;" json:"processTypes"`
 	AddOns         []Addon       `gorm:"constraint:OnDelete:CASCADE;" json:"addOns"`
+	Logs           []Log         `gorm:"constraint:OnDelete:CASCADE;" json:"logs,omitempty"`
 	Replicas       int           `gorm:"default:1" json:"replicas"`
 	Status         string        `gorm:"type:text;default:QUEUED;not null" json:"status"`
 	DeployedAt     *time.Time    `json:"deployedAt"`
@@ -380,6 +381,24 @@ type ProviderConfig struct {
 func (p *ProviderConfig) BeforeCreate(tx *gorm.DB) (err error) {
 	if p.ID == "" {
 		p.ID = uuid.NewString()
+	}
+	return
+}
+
+type BenchmarkRun struct {
+	ID             string    `gorm:"type:text;primaryKey" json:"id"`
+	DeploymentID   string    `gorm:"type:text;index" json:"deploymentId"`
+	Repo           string    `gorm:"type:text" json:"repo"`
+	Condition      string    `gorm:"type:text" json:"condition"`
+	Stage          string    `gorm:"type:text" json:"stage"`
+	DurationMs     int64     `gorm:"type:bigint" json:"durationMs"`
+	ImageSizeBytes int64     `gorm:"type:bigint" json:"imageSizeBytes"`
+	CreatedAt      time.Time `gorm:"default:current_timestamp" json:"createdAt"`
+}
+
+func (b *BenchmarkRun) BeforeCreate(tx *gorm.DB) (err error) {
+	if b.ID == "" {
+		b.ID = uuid.NewString()
 	}
 	return
 }

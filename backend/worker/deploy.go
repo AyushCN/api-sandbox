@@ -59,7 +59,7 @@ func HandleDeployTask(ctx context.Context, t *asynq.Task) error {
 	}
 
 	// Persist the updated deployment (e.g. status, public URL)
-	db.DB.Save(&deployment)
+	if err := db.DB.Save(&deployment).Error; err != nil { slog.Error("Failed to save deployment", "error", err) }
 
 	slog.Info("Deployment job completed successfully", "deployment_id", deploymentID)
 	return nil

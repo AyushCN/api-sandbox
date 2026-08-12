@@ -28,10 +28,7 @@ func (p *PostgresProvider) Provision(ctx context.Context, addon *models.Addon, o
 		return "", fmt.Errorf("failed to ensure network: %v", err)
 	}
 
-	// Generate random password
-	passwordBytes := make([]byte, 8)
-	rand.Read(passwordBytes)
-	password := hex.EncodeToString(passwordBytes)
+
 
 	containerInfo, err := p.client.InspectContainer(containerName)
 	if err == nil {
@@ -51,11 +48,15 @@ func (p *PostgresProvider) Provision(ctx context.Context, addon *models.Addon, o
 		return fmt.Sprintf("postgresql://appuser:%s@%s:5432/myapp", existingPassword, containerName), nil
 	}
 
-	// Pull image if not exists
 	err = p.client.PullImage(docker.PullImageOptions{Repository: "postgres", Tag: "15", Context: ctx}, docker.AuthConfiguration{})
 	if err != nil {
 		return "", fmt.Errorf("failed to pull postgres image: %v", err)
 	}
+
+	// Generate random password for new container
+	passwordBytes := make([]byte, 8)
+	rand.Read(passwordBytes)
+	password := hex.EncodeToString(passwordBytes)
 
 	opts := docker.CreateContainerOptions{
 		Name: containerName,

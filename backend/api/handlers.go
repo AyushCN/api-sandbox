@@ -458,6 +458,8 @@ func DeleteEnvironment(c *gin.Context) {
 	db.DB.Where("environment_id = ?", env.ID).Delete(&models.Log{})
 	db.DB.Where("environment_id = ?", env.ID).Delete(&models.Metric{})
 	db.DB.Where("environment_id = ?", env.ID).Delete(&models.EnvironmentMember{})
+	db.DB.Where("environment_id = ?", env.ID).Delete(&models.Activity{})
+	db.DB.Where("environment_id = ?", env.ID).Delete(&models.EnvironmentChange{})
 
 	// Delete from database
 	if err := db.DB.Delete(&env).Error; err != nil {

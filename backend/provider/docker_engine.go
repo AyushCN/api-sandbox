@@ -282,6 +282,11 @@ func StartContainer(ctx context.Context, envID string, entityType string, imageT
 		exposedPort = "5000"
 	}
 
+	var originalCmd []string
+	if imageInfo != nil && imageInfo.Config != nil {
+		originalCmd = imageInfo.Config.Cmd
+	}
+
 	domain := os.Getenv("DOMAIN")
 	if domain == "" {
 		domain = "localhost"
@@ -372,6 +377,15 @@ func StartContainer(ctx context.Context, envID string, entityType string, imageT
 				networkName: {},
 			},
 		},
+	}
+
+	if entityType == "environment" {
+		if len(originalCmd) > 0 {
+			cmdStr := strings.Join(originalCmd, " ")
+			opts.Config.Cmd = []string{"sh", "-c", fmt.Sprintf("%s || true; sleep infinity", cmdStr)}
+		} else {
+			opts.Config.Cmd = []string{"sh", "-c", "sleep infinity"}
+		}
 	}
 
 	container, err := dockerClient.CreateContainer(opts)

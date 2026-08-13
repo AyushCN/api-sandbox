@@ -73,6 +73,22 @@ func CreateDeployment(c *gin.Context) {
 		req.GitBranch = "main"
 	}
 	
+	userID, exists := c.Get("userId")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	var collab models.ProjectCollaborator
+	if err := db.DB.Where("project_id = ? AND user_id = ?", req.ProjectID, userID).First(&collab).Error; err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Not a collaborator on this project"})
+		return
+	}
+	if collab.Role == models.ProjectRoleViewer {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Viewers cannot create deployments"})
+		return
+	}
+
 	if req.Name == "" {
 		req.Name = "Untitled Deployment"
 	}
@@ -116,6 +132,13 @@ func GetDeployment(c *gin.Context) {
 		return
 	}
 
+	userID, _ := c.Get("userId")
+	var collab models.ProjectCollaborator
+	if err := db.DB.Where("project_id = ? AND user_id = ?", deployment.ProjectID, userID).First(&collab).Error; err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
 	c.JSON(http.StatusOK, deployment)
 }
 
@@ -135,6 +158,17 @@ func CreateDeploymentAddon(c *gin.Context) {
 	var deployment models.Deployment
 	if err := db.DB.First(&deployment, "id = ?", id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Deployment not found"})
+		return
+	}
+
+	userID, _ := c.Get("userId")
+	var collab models.ProjectCollaborator
+	if err := db.DB.Where("project_id = ? AND user_id = ?", deployment.ProjectID, userID).First(&collab).Error; err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+	if collab.Role == models.ProjectRoleViewer {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Viewers cannot create addons"})
 		return
 	}
 
@@ -167,6 +201,16 @@ func DeleteDeployment(c *gin.Context) {
 	var dep models.Deployment
 	if err := db.DB.First(&dep, "id = ?", id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Deployment not found"})
+		return
+	}
+
+	var collab models.ProjectCollaborator
+	if err := db.DB.Where("project_id = ? AND user_id = ?", dep.ProjectID, userID).First(&collab).Error; err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+	if collab.Role == models.ProjectRoleViewer {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Viewers cannot delete deployments"})
 		return
 	}
 
@@ -214,6 +258,16 @@ func RestartDeployment(c *gin.Context) {
 	var dep models.Deployment
 	if err := db.DB.First(&dep, "id = ?", id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Deployment not found"})
+		return
+	}
+
+	var collab models.ProjectCollaborator
+	if err := db.DB.Where("project_id = ? AND user_id = ?", dep.ProjectID, userID).First(&collab).Error; err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+	if collab.Role == models.ProjectRoleViewer {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Viewers cannot restart deployments"})
 		return
 	}
 

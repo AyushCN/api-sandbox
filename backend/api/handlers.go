@@ -120,6 +120,12 @@ func SetupRoutes(router *gin.Engine) {
 }
 
 func PrometheusMetrics(c *gin.Context) {
+	clientIP := c.ClientIP()
+	if clientIP != "127.0.0.1" && clientIP != "::1" && !strings.HasPrefix(clientIP, "10.") && !strings.HasPrefix(clientIP, "172.") && !strings.HasPrefix(clientIP, "192.168.") {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Metrics are internal-only"})
+		return
+	}
+
 	c.Header("Content-Type", "text/plain; version=0.0.4")
 
 	var responseBuilder strings.Builder

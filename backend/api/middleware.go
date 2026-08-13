@@ -52,9 +52,8 @@ func RateLimitRegister() gin.HandlerFunc {
 		ctx := context.Background()
 		count, err := db.RedisClient.Incr(ctx, key).Result()
 		if err != nil {
-			// If Redis fails, log it but don't block registration
 			slog.Error("Redis error during rate limiting", "error", err)
-			c.Next()
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "Rate limiter unavailable"})
 			return
 		}
 
@@ -82,7 +81,7 @@ func RateLimitLogin() gin.HandlerFunc {
 		count, err := db.RedisClient.Incr(ctx, key).Result()
 		if err != nil {
 			slog.Error("Redis error during rate limiting", "error", err)
-			c.Next()
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "Rate limiter unavailable"})
 			return
 		}
 
@@ -114,7 +113,7 @@ func RateLimitAPI() gin.HandlerFunc {
 		count, err := db.RedisClient.Incr(ctx, key).Result()
 		if err != nil {
 			slog.Error("Redis error during API rate limiting", "error", err)
-			c.Next()
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "Rate limiter unavailable"})
 			return
 		}
 
@@ -142,7 +141,7 @@ func RateLimitPasswordReset() gin.HandlerFunc {
 		count, err := db.RedisClient.Incr(ctx, key).Result()
 		if err != nil {
 			slog.Error("Redis error during password reset rate limiting", "error", err)
-			c.Next()
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "Rate limiter unavailable"})
 			return
 		}
 
@@ -170,7 +169,7 @@ func RateLimitVerifyEmail() gin.HandlerFunc {
 		count, err := db.RedisClient.Incr(ctx, key).Result()
 		if err != nil {
 			slog.Error("Redis error during verify email rate limiting", "error", err)
-			c.Next()
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "Rate limiter unavailable"})
 			return
 		}
 

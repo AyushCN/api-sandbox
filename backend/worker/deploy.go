@@ -37,10 +37,6 @@ func HandleDeployTask(ctx context.Context, t *asynq.Task) error {
 	switch deployment.ProviderType {
 	case "docker":
 		p = provider.NewDockerProvider()
-	case "heroku":
-		p = provider.NewHerokuProvider("") // Should retrieve from org settings
-	case "railway":
-		p = provider.NewRailwayProvider("") // Should retrieve from org settings
 	default:
 		// Fallback to Docker
 		p = provider.NewDockerProvider()

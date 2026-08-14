@@ -17,10 +17,7 @@ export default function MainLayout({
           </Link>
           <div className="flex items-center gap-6">
             <Link href="/dashboard" className="text-sm font-bold tracking-wide text-on-surface-variant hover:text-primary transition-colors">
-              Deployments
-            </Link>
-            <Link href="/sandboxes" className="text-sm font-bold tracking-wide text-on-surface-variant hover:text-primary transition-colors">
-              Sandboxes
+              Dashboard
             </Link>
             <UserAvatar />
             <LogoutButton />

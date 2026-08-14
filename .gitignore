@@ -59,3 +59,4 @@ backend/workspaces/
 
 # Custom Scripts Binaries
 backend/scripts/**/main
+test.db

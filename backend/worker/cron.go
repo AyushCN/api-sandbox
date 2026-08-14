@@ -49,7 +49,7 @@ func HandleCleanupContainersTask(ctx context.Context, t *asynq.Task) error {
 	for _, env := range envs {
 		if env.ContainerID != nil && *env.ContainerID != "" {
 			slog.Info("Cron: Cleaning up expired container", "env_id", env.ID)
-			_ = provider.CleanupContainer(ctx, *env.ContainerID, "environment")
+			_ = provider.CleanupContainer(ctx, *env.ContainerID)
 		}
 
 		db.DB.Model(&env).Updates(map[string]interface{}{

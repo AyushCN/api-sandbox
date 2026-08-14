@@ -173,7 +173,6 @@ func startWorker() *asynq.Server {
 
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(queue.TaskBuildEnvironment, worker.HandleBuildEnvironmentTask)
-	mux.HandleFunc(queue.TaskDeploy, worker.HandleDeployTask)
 	mux.HandleFunc(queue.TaskCollectMetrics, worker.HandleCollectMetricsTask)
 	mux.HandleFunc(queue.TaskCleanupContainers, worker.HandleCleanupContainersTask)
 

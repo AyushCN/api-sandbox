@@ -1,8 +1,15 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 )
+
+type Buildpack interface {
+	Detect(repoPath string) bool
+	Build(ctx context.Context, repoPath string) (string, error)
+	GetPort(repoPath string) int
+}
 
 // BuildpackManager manages a registry of available buildpacks
 type BuildpackManager struct {

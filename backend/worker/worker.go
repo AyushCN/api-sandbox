@@ -35,11 +35,11 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 	// Idempotency: cleanup existing container if retrying
 	if env.ContainerID != nil && *env.ContainerID != "" {
 		slog.Info("Cleaning up existing container", "container_id", *env.ContainerID)
-		_ = provider.CleanupContainer(ctx, *env.ContainerID, "environment")
+		_ = provider.CleanupContainer(ctx, *env.ContainerID)
 	}
 
 	// 1. Clone & Build
-	imageTag, err := provider.CloneAndBuildImage(ctx, env.ID, "environment", env.GitURL, env.GithubBranch)
+	imageTag, err := provider.CloneAndBuildImage(ctx, env.ID, env.GitURL, env.GithubBranch)
 	if err != nil {
 		slog.Error("Build failed", "env_id", envID, "error", err)
 		db.DB.Model(&env).Update("status", models.StatusFailed)
@@ -77,7 +77,7 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 				netID = env.UserID
 			}
 
-			url, err := provider.StartSidecarDatabase(ctx, env.ID, "environment", netID, dbType)
+			url, err := provider.StartSidecarDatabase(ctx, env.ID, netID, dbType)
 			if err != nil {
 				slog.Error("Failed to start sidecar db", "env_id", envID, "error", err)
 				db.DB.Create(&models.Log{
@@ -96,7 +96,7 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 	if netID == "" {
 		netID = env.UserID
 	}
-	containerID, port, err := provider.StartContainer(ctx, env.ID, "environment", imageTag, netID, dbURL)
+	containerID, port, err := provider.StartContainer(ctx, env.ID, imageTag, netID, dbURL)
 	if err != nil {
 		slog.Error("Start failed", "env_id", envID, "error", err)
 		db.DB.Model(&env).Update("status", models.StatusFailed)

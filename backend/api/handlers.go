@@ -62,22 +62,8 @@ func SetupRoutes(router *gin.Engine) {
 				projectDetail.DELETE("/collaborators/:userId", RemoveCollaborator)
 			}
 		}
-		providers := api.Group("/providers")
-		providers.Use(AuthMiddleware(), RateLimitAPI())
-		{
-			providers.GET("", GetProviders)
-		}
 
-		deployments := api.Group("/deployments")
-		deployments.Use(AuthMiddleware(), RateLimitAPI())
-		{
-			deployments.GET("", GetDeployments)
-			deployments.POST("", CreateDeployment)
-			deployments.GET("/:id", GetDeployment)
-			deployments.POST("/:id/addons", CreateDeploymentAddon)
-			deployments.POST("/:id/restart", RestartDeployment)
-			deployments.DELETE("/:id", DeleteDeployment)
-		}
+
 
 		protected := api.Group("/environments")
 		protected.Use(AuthMiddleware(), RateLimitAPI())
@@ -452,10 +438,10 @@ func DeleteEnvironment(c *gin.Context) {
 
 	// Try to stop and remove docker container if it exists
 	if env.ContainerID != nil && *env.ContainerID != "" {
-		_ = provider.CleanupContainer(c.Request.Context(), *env.ContainerID, "environment")
+		_ = provider.CleanupContainer(c.Request.Context(), *env.ContainerID)
 	}
 	// Also attempt to cleanup by predictable name, in case it was created but ContainerID wasn't saved
-	_ = provider.CleanupContainer(c.Request.Context(), fmt.Sprintf("api-sandbox-env-%s", env.ID), "environment")
+	_ = provider.CleanupContainer(c.Request.Context(), fmt.Sprintf("api-sandbox-env-%s", env.ID))
 
 	// Cleanup workspace folder on host
 	_ = provider.CleanupWorkspace(env.ID)
@@ -503,10 +489,10 @@ func RestartEnvironment(c *gin.Context) {
 
 	// Try to stop and remove old docker container if it exists
 	if env.ContainerID != nil && *env.ContainerID != "" {
-		_ = provider.CleanupContainer(c.Request.Context(), *env.ContainerID, "environment")
+		_ = provider.CleanupContainer(c.Request.Context(), *env.ContainerID)
 	}
 	// Also attempt to cleanup by predictable name, in case it was created but ContainerID wasn't saved
-	_ = provider.CleanupContainer(c.Request.Context(), fmt.Sprintf("api-sandbox-env-%s", env.ID), "environment")
+	_ = provider.CleanupContainer(c.Request.Context(), fmt.Sprintf("api-sandbox-env-%s", env.ID))
 
 	// Delete old logs
 	db.DB.Where("environment_id = ?", env.ID).Delete(&models.Log{})

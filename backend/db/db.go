@@ -58,10 +58,6 @@ func InitDB() {
 		&models.EnvironmentMember{},
 		&models.Log{},
 		&models.Metric{},
-		&models.Deployment{},
-		&models.ProcessType{},
-		&models.Addon{},
-		&models.ProviderConfig{},
 		&models.AuditLog{},
 		&models.Activity{},
 		&models.BenchmarkRun{},
@@ -70,6 +66,12 @@ func InitDB() {
 		slog.Error("Failed to auto migrate database schemas", "error", err)
 		os.Exit(1)
 	}
+
+	// Drop legacy tables that are no longer used (Tier 1 Architecture Update)
+	DB.Exec("DROP TABLE IF EXISTS addons CASCADE")
+	DB.Exec("DROP TABLE IF EXISTS process_types CASCADE")
+	DB.Exec("DROP TABLE IF EXISTS provider_configs CASCADE")
+	DB.Exec("DROP TABLE IF EXISTS deployments CASCADE")
 
 	// Migration: Create default projects for environments that only have OrganizationID
 	var envsWithoutProject []models.Environment

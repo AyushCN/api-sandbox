@@ -57,12 +57,11 @@ func main() {
 		os.Setenv("BERTH_CACHE_MODE", run.condition)
 
 		envID := uuid.NewString()
-		entityType := "benchmark"
 		
 		// Determine branch, fallback to empty to let clone fallback work
 		branch := "master" // Or main, will be overridden by clone fallback if needed
 
-		_, err := provider.CloneAndBuildImage(ctx, envID, entityType, run.repo, branch)
+		_, err := provider.CloneAndBuildImage(ctx, envID, run.repo, branch)
 		if err != nil {
 			slog.Error("Run failed", "repo", run.repo, "condition", run.condition, "error", err)
 			continue

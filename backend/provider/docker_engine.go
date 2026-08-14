@@ -34,16 +34,12 @@ func InitDocker() {
 	}
 }
 
-func createLog(entityID string, entityType string, message string, level models.LogLevel) {
+func createLog(entityID string, message string, level models.LogLevel) {
 	log := models.Log{
 		Message: message,
 		Level:   level,
 	}
-	if entityType == "deployment" {
-		log.DeploymentID = &entityID
-	} else {
-		log.EnvironmentID = &entityID
-	}
+	log.EnvironmentID = &entityID
 	db.DB.Create(&log)
 }
 
@@ -52,7 +48,7 @@ type buildTiming struct {
 	Duration time.Duration
 }
 
-func recordBenchmark(id, kind string, timings []buildTiming, totalDuration time.Duration, imageTag, repo string) {
+func recordBenchmark(id string, timings []buildTiming, totalDuration time.Duration, imageTag, repo string) {
 	condition := os.Getenv("BERTH_CACHE_MODE")
 	if condition == "" {
 		condition = "cold"
@@ -65,7 +61,7 @@ func recordBenchmark(id, kind string, timings []buildTiming, totalDuration time.
 
 	for _, t := range timings {
 		run := models.BenchmarkRun{
-			DeploymentID:   id,
+			EnvironmentID:  id,
 			Repo:           repo,
 			Condition:      condition,
 			Stage:          t.Stage,
@@ -76,7 +72,7 @@ func recordBenchmark(id, kind string, timings []buildTiming, totalDuration time.
 	}
 
 	totalRun := models.BenchmarkRun{
-		DeploymentID:   id,
+		EnvironmentID:  id,
 		Repo:           repo,
 		Condition:      condition,
 		Stage:          "total",
@@ -101,7 +97,7 @@ func cloneOrFetch(ctx context.Context, dir, gitURL, branch string) error {
 	return nil
 }
 
-func CloneAndBuildImage(ctx context.Context, envID string, entityType string, gitURL string, branch string) (string, error) {
+func CloneAndBuildImage(ctx context.Context, envID string, gitURL string, branch string) (string, error) {
 	var timings []buildTiming
 	start := time.Now()
 
@@ -127,7 +123,7 @@ func CloneAndBuildImage(ctx context.Context, envID string, entityType string, gi
 
 	repoForBenchmark := gitURL
 
-	createLog(envID, entityType, fmt.Sprintf("Cloning repository %s (branch: %s, subdir: %s)...", gitURL, branch, subDir), models.LogLevelInfo)
+	createLog(envID, fmt.Sprintf("Cloning repository %s (branch: %s, subdir: %s)...", gitURL, branch, subDir), models.LogLevelInfo)
 
 	// clone/fetch stage
 	t0 := time.Now()
@@ -139,7 +135,7 @@ func CloneAndBuildImage(ctx context.Context, envID string, entityType string, gi
 	}
 	timings = append(timings, buildTiming{"clone", time.Since(t0)})
 
-	createLog(envID, entityType, fmt.Sprintf("Building Docker image %s...", imageTag), models.LogLevelInfo)
+	createLog(envID, fmt.Sprintf("Building Docker image %s...", imageTag), models.LogLevelInfo)
 
 	// detect stage
 	t1 := time.Now()
@@ -152,14 +148,14 @@ func CloneAndBuildImage(ctx context.Context, envID string, entityType string, gi
 		// Prevent path traversal
 		if !strings.HasPrefix(buildDir, filepath.Clean(tmpDir)+string(os.PathSeparator)) && buildDir != filepath.Clean(tmpDir) {
 			errMsg := fmt.Sprintf("Invalid subdirectory path: %s", subDir)
-			createLog(envID, entityType, errMsg, models.LogLevelError)
+			createLog(envID, errMsg, models.LogLevelError)
 			return "", fmt.Errorf("%s", errMsg)
 		}
 
 		// Check if the subdirectory actually exists in the cloned repo
 		if info, err := os.Stat(buildDir); os.IsNotExist(err) || !info.IsDir() {
 			errMsg := fmt.Sprintf("Subdirectory '%s' does not exist in the repository.", subDir)
-			createLog(envID, entityType, errMsg, models.LogLevelError)
+			createLog(envID, errMsg, models.LogLevelError)
 			return "", fmt.Errorf("%s", errMsg)
 		}
 	}
@@ -175,7 +171,7 @@ func CloneAndBuildImage(ctx context.Context, envID string, entityType string, gi
 		bp, bpErr := manager.Detect(buildDir)
 
 		if bpErr == nil {
-			createLog(envID, entityType, "Detected language buildpack. Generating optimized Dockerfile...", models.LogLevelInfo)
+			createLog(envID, "Detected language buildpack. Generating optimized Dockerfile...", models.LogLevelInfo)
 
 			_, buildErr := bp.Build(ctx, buildDir)
 			if buildErr != nil {
@@ -184,7 +180,7 @@ func CloneAndBuildImage(ctx context.Context, envID string, entityType string, gi
 			dockerfilePath = filepath.Join(buildDir, "Dockerfile")
 		} else {
 			// Fallback to Nixpacks
-			createLog(envID, entityType, "No supported buildpack found. Generating build plan using Nixpacks...", models.LogLevelInfo)
+			createLog(envID, "No supported buildpack found. Generating build plan using Nixpacks...", models.LogLevelInfo)
 
 			nixpacksPath := "nixpacks"
 			if home, err := os.UserHomeDir(); err == nil {
@@ -200,7 +196,7 @@ func CloneAndBuildImage(ctx context.Context, envID string, entityType string, gi
 				return "", fmt.Errorf("nixpacks build failed: %s - %v", string(out), err)
 			}
 
-			createLog(envID, entityType, "Nixpacks build plan generated successfully.", models.LogLevelInfo)
+			createLog(envID, "Nixpacks build plan generated successfully.", models.LogLevelInfo)
 
 			// Move .nixpacks/Dockerfile to root Dockerfile so we don't need to specify opts.Dockerfile
 			err = os.Rename(filepath.Join(buildDir, ".nixpacks", "Dockerfile"), filepath.Join(buildDir, "Dockerfile"))
@@ -216,7 +212,7 @@ func CloneAndBuildImage(ctx context.Context, envID string, entityType string, gi
 			// Append EXPOSE 5000 as a fallback so PublishAllPorts works
 			newContent := string(content) + "\n# Auto-injected by API Sandbox\nEXPOSE 5000\n"
 			os.WriteFile(dockerfilePath, []byte(newContent), 0644)
-			createLog(envID, entityType, "No EXPOSE instruction found in Dockerfile. Auto-injecting 'EXPOSE 5000'...", models.LogLevelWarn)
+			createLog(envID, "No EXPOSE instruction found in Dockerfile. Auto-injecting 'EXPOSE 5000'...", models.LogLevelWarn)
 		}
 	}
 
@@ -254,20 +250,20 @@ func CloneAndBuildImage(ctx context.Context, envID string, entityType string, gi
 	timings = append(timings, buildTiming{"build", time.Since(t2)})
 
 	// Log output
-	createLog(envID, entityType, buf.String(), models.LogLevelInfo)
+	createLog(envID, buf.String(), models.LogLevelInfo)
 
-	createLog(envID, entityType, "Image built successfully.", models.LogLevelInfo)
+	createLog(envID, "Image built successfully.", models.LogLevelInfo)
 
-	recordBenchmark(envID, entityType, timings, time.Since(start), imageTag, repoForBenchmark)
+	recordBenchmark(envID, timings, time.Since(start), imageTag, repoForBenchmark)
 
 	return imageTag, nil
 }
 
-func StartContainer(ctx context.Context, envID string, entityType string, imageTag string, orgID string, dbURL string) (string, int, error) {
-	createLog(envID, entityType, fmt.Sprintf("Starting container for image %s...", imageTag), models.LogLevelInfo)
+func StartContainer(ctx context.Context, envID string, imageTag string, orgID string, dbURL string) (string, int, error) {
+	createLog(envID, fmt.Sprintf("Starting container for image %s...", imageTag), models.LogLevelInfo)
 
 	// Pre-cleanup in case a zombie container with this name exists from a previous failed run
-	_ = CleanupContainer(ctx, fmt.Sprintf("api-sandbox-env-%s", envID), entityType)
+	_ = CleanupContainer(ctx, fmt.Sprintf("api-sandbox-env-%s", envID))
 
 	// Inspect image to find the exposed port
 	imageInfo, err := dockerClient.InspectImage(imageTag)
@@ -308,7 +304,7 @@ func StartContainer(ctx context.Context, envID string, entityType string, imageT
 
 	networkName, networkID, err := EnsureOrgNetwork(ctx, orgID)
 	if err != nil {
-		createLog(envID, entityType, err.Error(), models.LogLevelError)
+		createLog(envID, err.Error(), models.LogLevelError)
 		return "", 0, err
 	}
 
@@ -379,13 +375,11 @@ func StartContainer(ctx context.Context, envID string, entityType string, imageT
 		},
 	}
 
-	if entityType == "environment" {
-		if len(originalCmd) > 0 {
-			cmdStr := strings.Join(originalCmd, " ")
-			opts.Config.Cmd = []string{"sh", "-c", fmt.Sprintf("%s || true; sleep infinity", cmdStr)}
-		} else {
-			opts.Config.Cmd = []string{"sh", "-c", "sleep infinity"}
-		}
+	if len(originalCmd) > 0 {
+		cmdStr := strings.Join(originalCmd, " ")
+		opts.Config.Cmd = []string{"sh", "-c", fmt.Sprintf("%s || true; sleep infinity", cmdStr)}
+	} else {
+		opts.Config.Cmd = []string{"sh", "-c", "sleep infinity"}
 	}
 
 	container, err := dockerClient.CreateContainer(opts)
@@ -416,12 +410,12 @@ func StartContainer(ctx context.Context, envID string, entityType string, imageT
 		return container.ID, 0, fmt.Errorf("container started but no ports were mapped")
 	}
 
-	createLog(envID, entityType, fmt.Sprintf("Container started successfully on port %d (Container ID: %s).", assignedPort, container.ID[:12]), models.LogLevelInfo)
+	createLog(envID, fmt.Sprintf("Container started successfully on port %d (Container ID: %s).", assignedPort, container.ID[:12]), models.LogLevelInfo)
 
 	return container.ID, assignedPort, nil
 }
 
-func CleanupContainer(ctx context.Context, containerID string, entityType string) error {
+func CleanupContainer(ctx context.Context, containerID string) error {
 	_ = dockerClient.StopContainer(containerID, 10)
 	return dockerClient.RemoveContainer(docker.RemoveContainerOptions{
 		ID:    containerID,
@@ -494,7 +488,7 @@ func GetContainerPort(containerID string) (int, error) {
 	return assignedPort, nil
 }
 
-func StartSidecarDatabase(ctx context.Context, envID string, entityType string, orgID string, dbType DBType) (string, error) {
+func StartSidecarDatabase(ctx context.Context, envID string, orgID string, dbType DBType) (string, error) {
 	if dbType == DBTypeNone {
 		return "", nil
 	}
@@ -505,7 +499,7 @@ func StartSidecarDatabase(ctx context.Context, envID string, entityType string, 
 	}
 
 	containerName := fmt.Sprintf("api-sandbox-db-%s", envID)
-	_ = CleanupContainer(ctx, containerName, entityType)
+	_ = CleanupContainer(ctx, containerName)
 
 	var image, dbURL string
 	var env []string
@@ -543,14 +537,14 @@ func StartSidecarDatabase(ctx context.Context, envID string, entityType string, 
 		dbURL = fmt.Sprintf("mongodb://admin:%s@%s:27017/myapp?authSource=admin", securePassword, containerName)
 	}
 
-	createLog(envID, entityType, fmt.Sprintf("Pulling %s database image (this may take a minute on first run)...", string(dbType)), models.LogLevelInfo)
+	createLog(envID, fmt.Sprintf("Pulling %s database image (this may take a minute on first run)...", string(dbType)), models.LogLevelInfo)
 
 	pullOpts := docker.PullImageOptions{
 		Repository: image,
 	}
 	_ = dockerClient.PullImage(pullOpts, docker.AuthConfiguration{})
 
-	createLog(envID, entityType, fmt.Sprintf("Starting sidecar database container (%s)...", containerName), models.LogLevelInfo)
+	createLog(envID, fmt.Sprintf("Starting sidecar database container (%s)...", containerName), models.LogLevelInfo)
 
 	opts := docker.CreateContainerOptions{
 		Name: containerName,
@@ -577,9 +571,9 @@ func StartSidecarDatabase(ctx context.Context, envID string, entityType string, 
 		return "", fmt.Errorf("failed to start db container: %v", err)
 	}
 
-	createLog(envID, entityType, "Waiting for database to initialize and accept connections...", models.LogLevelInfo)
+	createLog(envID, "Waiting for database to initialize and accept connections...", models.LogLevelInfo)
 
-	err = waitForDatabaseReady(ctx, container.ID, dbType, envID, entityType)
+	err = waitForDatabaseReady(ctx, container.ID, dbType, envID)
 	if err != nil {
 		return "", fmt.Errorf("database readiness check failed: %v", err)
 	}
@@ -587,7 +581,7 @@ func StartSidecarDatabase(ctx context.Context, envID string, entityType string, 
 	return dbURL, nil
 }
 
-func waitForDatabaseReady(ctx context.Context, containerID string, dbType DBType, envID string, entityType string) error {
+func waitForDatabaseReady(ctx context.Context, containerID string, dbType DBType, envID string) error {
 	var cmd []string
 	switch dbType {
 	case DBTypeMySQL:
@@ -634,7 +628,7 @@ func waitForDatabaseReady(ctx context.Context, containerID string, dbType DBType
 
 			inspect, err := dockerClient.InspectExec(exec.ID)
 			if err == nil && inspect.ExitCode == 0 {
-				createLog(envID, entityType, fmt.Sprintf("Database %s is fully initialized and ready.", string(dbType)), models.LogLevelInfo)
+				createLog(envID, fmt.Sprintf("Database %s is fully initialized and ready.", string(dbType)), models.LogLevelInfo)
 				return nil
 			}
 		}

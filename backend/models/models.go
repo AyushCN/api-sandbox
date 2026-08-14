@@ -156,7 +156,7 @@ type Environment struct {
 	Port              *int              `gorm:"type:integer" json:"port"`
 	CreatedAt         time.Time         `gorm:"default:current_timestamp" json:"createdAt"`
 	UpdatedAt         time.Time         `gorm:"default:current_timestamp" json:"updatedAt"`
-	ExpiresAt         *time.Time        `gorm:"type:timestamp(3) without time zone" json:"expiresAt"`
+	ExpiresAt         *time.Time        `gorm:"type:timestamp" json:"expiresAt"`
 
 	// Code changes tracking
 	HasUncommittedChanges bool       `gorm:"default:false" json:"hasUncommittedChanges"`
@@ -215,8 +215,6 @@ type Log struct {
 	ID            string       `gorm:"type:text;primaryKey" json:"id"`
 	EnvironmentID *string      `gorm:"type:text;index" json:"environmentId"`
 	Environment   *Environment `json:"-"`
-	DeploymentID  *string      `gorm:"type:text;index" json:"deploymentId"`
-	Deployment    *Deployment  `json:"-"`
 	Message       string       `gorm:"type:text;not null" json:"message"`
 	Level         LogLevel     `gorm:"type:text;default:info;not null" json:"level"`
 	Timestamp     time.Time    `gorm:"default:current_timestamp" json:"timestamp"`
@@ -233,8 +231,6 @@ type Metric struct {
 	ID            string       `gorm:"type:text;primaryKey" json:"id"`
 	EnvironmentID *string      `gorm:"type:text;index" json:"environmentId"`
 	Environment   *Environment `json:"-"`
-	DeploymentID  *string      `gorm:"type:text;index" json:"deploymentId"`
-	Deployment    *Deployment  `json:"-"`
 	CpuUsage      float64      `gorm:"type:double precision;not null" json:"cpuUsage"`
 	MemoryUsage   float64      `gorm:"type:double precision;not null" json:"memoryUsage"`
 	Timestamp     time.Time    `gorm:"default:current_timestamp" json:"timestamp"`
@@ -268,8 +264,6 @@ type EnvironmentChange struct {
 	ID            string       `gorm:"type:text;primaryKey" json:"id"`
 	EnvironmentID *string      `gorm:"type:text;index" json:"environmentId"`
 	Environment   *Environment `json:"-"`
-	DeploymentID  *string      `gorm:"type:text;index" json:"deploymentId"`
-	Deployment    *Deployment  `json:"-"`
 	FilePath      string       `gorm:"type:text;not null" json:"filePath"`
 	ChangeType    string       `gorm:"type:text;not null" json:"changeType"`
 	UserID        string       `gorm:"type:text;not null" json:"userId"`
@@ -290,8 +284,6 @@ type Activity struct {
 	ID            string       `gorm:"type:text;primaryKey" json:"id"`
 	EnvironmentID *string      `gorm:"type:text;index" json:"environmentId"`
 	Environment   *Environment `json:"-"`
-	DeploymentID  *string      `gorm:"type:text;index" json:"deploymentId"`
-	Deployment    *Deployment  `json:"-"`
 	Type          string       `gorm:"type:text;not null" json:"type"` // e.g. "file_edit", "commit", "build"
 	Data          string       `gorm:"type:text" json:"data"`          // JSON encoded string
 	UserID        *string      `gorm:"type:text;index" json:"userId"`
@@ -306,88 +298,9 @@ func (a *Activity) BeforeCreate(tx *gorm.DB) (err error) {
 	return
 }
 
-type Deployment struct {
-	ID             string        `gorm:"type:text;primaryKey" json:"id"`
-	Name           string        `gorm:"type:text;not null;default:'Untitled Deployment'" json:"name"`
-	ProjectID      string        `gorm:"type:text;not null;index" json:"projectId"`
-	Project        Project       `json:"-"`
-	GitURL         string        `gorm:"type:text;not null" json:"gitUrl"`
-	GitBranch      string        `gorm:"type:text;default:main;not null" json:"gitBranch"`
-	CommitHash     string        `gorm:"type:text" json:"commitHash"`
-	Language       string        `gorm:"type:text" json:"language"`
-	Buildpack      string        `gorm:"type:text" json:"buildpack"`
-	ProviderType   string        `gorm:"type:text;not null" json:"providerType"`
-	ProviderConfig string        `gorm:"type:text" json:"providerConfig"`
-	Environment    string        `gorm:"type:text" json:"environment"`
-	ProcessTypes   []ProcessType `gorm:"constraint:OnDelete:CASCADE;" json:"processTypes"`
-	AddOns         []Addon       `gorm:"constraint:OnDelete:CASCADE;" json:"addOns"`
-	Logs           []Log         `gorm:"constraint:OnDelete:CASCADE;" json:"logs,omitempty"`
-	Replicas       int           `gorm:"default:1" json:"replicas"`
-	Status         string        `gorm:"type:text;default:QUEUED;not null" json:"status"`
-	DeployedAt     *time.Time    `json:"deployedAt"`
-	PublicURL      string        `gorm:"type:text" json:"publicUrl"`
-	CustomDomain   string        `gorm:"type:text" json:"customDomain"`
-	CreatedAt      time.Time     `gorm:"default:current_timestamp;index" json:"createdAt"`
-	UpdatedAt      time.Time     `gorm:"default:current_timestamp" json:"updatedAt"`
-}
-
-func (d *Deployment) BeforeCreate(tx *gorm.DB) (err error) {
-	if d.ID == "" {
-		d.ID = uuid.NewString()
-	}
-	return
-}
-
-type ProcessType struct {
-	ID           string `gorm:"type:text;primaryKey" json:"id"`
-	DeploymentID string `gorm:"type:text;not null;index" json:"deploymentId"`
-	Name         string `gorm:"type:text;not null" json:"name"`
-	Command      string `gorm:"type:text" json:"command"`
-	Replicas     int    `gorm:"default:1" json:"replicas"`
-	Resources    string `gorm:"type:text" json:"resources"`
-}
-
-func (p *ProcessType) BeforeCreate(tx *gorm.DB) (err error) {
-	if p.ID == "" {
-		p.ID = uuid.NewString()
-	}
-	return
-}
-
-type Addon struct {
-	ID           string `gorm:"type:text;primaryKey" json:"id"`
-	DeploymentID string `gorm:"type:text;not null;index" json:"deploymentId"`
-	Type         string `gorm:"type:text;not null" json:"type"`
-	Plan         string `gorm:"type:text;default:free" json:"plan"`
-	Config       string `gorm:"type:text" json:"config"`
-}
-
-func (a *Addon) BeforeCreate(tx *gorm.DB) (err error) {
-	if a.ID == "" {
-		a.ID = uuid.NewString()
-	}
-	return
-}
-
-type ProviderConfig struct {
-	ID           string    `gorm:"type:text;primaryKey" json:"id"`
-	UserID       string    `gorm:"type:text;not null;index" json:"userId"`
-	ProviderType string    `gorm:"type:text;not null" json:"providerType"`
-	Credentials  string    `gorm:"type:text" json:"credentials"` // Should be encrypted in a real app
-	Region       string    `gorm:"type:text" json:"region"`
-	CreatedAt    time.Time `gorm:"default:current_timestamp" json:"createdAt"`
-}
-
-func (p *ProviderConfig) BeforeCreate(tx *gorm.DB) (err error) {
-	if p.ID == "" {
-		p.ID = uuid.NewString()
-	}
-	return
-}
-
 type BenchmarkRun struct {
 	ID             string    `gorm:"type:text;primaryKey" json:"id"`
-	DeploymentID   string    `gorm:"type:text;index" json:"deploymentId"`
+	EnvironmentID  string    `gorm:"type:text;index" json:"environmentId"`
 	Repo           string    `gorm:"type:text" json:"repo"`
 	Condition      string    `gorm:"type:text" json:"condition"`
 	Stage          string    `gorm:"type:text" json:"stage"`

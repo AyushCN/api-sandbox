@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/http"
 	"os/exec"
 	"strings"
@@ -107,7 +108,8 @@ func SetupRoutes(router *gin.Engine) {
 
 func PrometheusMetrics(c *gin.Context) {
 	clientIP := c.ClientIP()
-	if clientIP != "127.0.0.1" && clientIP != "::1" && !strings.HasPrefix(clientIP, "10.") && !strings.HasPrefix(clientIP, "172.") && !strings.HasPrefix(clientIP, "192.168.") {
+	ip := net.ParseIP(clientIP)
+	if ip == nil || (!ip.IsLoopback() && !ip.IsPrivate()) {
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Metrics are internal-only"})
 		return
 	}
@@ -403,6 +405,12 @@ func StreamLogs(c *gin.Context) {
 	var lastTimestamp time.Time
 
 	c.Stream(func(w io.Writer) bool {
+		select {
+		case <-c.Request.Context().Done():
+			return false
+		default:
+		}
+
 		var logs []models.Log
 		// Query logs after the last seen timestamp
 		query := db.DB.Where("environment_id = ?", envID).Order("timestamp asc")
@@ -419,9 +427,13 @@ func StreamLogs(c *gin.Context) {
 		}
 
 		// Check if environment is still building, if not, we can close the stream eventually
-		// For now, keep it open and polling
-		time.Sleep(1 * time.Second)
-		return true
+		// For now, keep it open and polling but allow clean disconnect
+		select {
+		case <-c.Request.Context().Done():
+			return false
+		case <-time.After(1 * time.Second):
+			return true
+		}
 	})
 }
 

@@ -7,30 +7,34 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/api-sandbox/backend/db"
 	"github.com/api-sandbox/backend/models"
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
 
+func generateTestToken(userId string) string {
+	os.Setenv("JWT_SECRET", "test-secret-key-12345")
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"userId": userId,
+		"exp":    time.Now().Add(time.Hour * 24).Unix(),
+	})
+	tokenString, _ := token.SignedString([]byte("test-secret-key-12345"))
+	return tokenString
+}
+
+
+
 func setupEnvironmentTestRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.Default()
 
-	// Mock AuthMiddleware
-	r.Use(func(c *gin.Context) {
-		userID := c.GetHeader("X-User-ID")
-		if userID != "" {
-			c.Set("userId", userID)
-		} else {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-			return
-		}
-		c.Next()
-	})
+	r.Use(AuthMiddleware())
 
 	r.POST("/api/environments", CreateEnvironment)
 	r.GET("/api/environments/:id", GetEnvironment)
@@ -91,8 +95,11 @@ func TestEnvironmentAuthz(t *testing.T) {
 	// -- Tests for User 2 (Unauthorized) --
 
 	// Test GetEnvironment
-	req, _ := http.NewRequest("GET", "/api/environments/"+env.ID, nil)
-	req.Header.Set("X-User-ID", user2.ID)
+	req, _ := http.NewRequest(http.MethodGet, "/api/environments/"+env.ID, nil)
+	req.AddCookie(&http.Cookie{
+		Name:  "token",
+		Value: generateTestToken(user2.ID),
+	})
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusNotFound {
@@ -100,19 +107,25 @@ func TestEnvironmentAuthz(t *testing.T) {
 	}
 
 	// Test RestartEnvironment
-	reqRestart, _ := http.NewRequest("POST", "/api/environments/"+env.ID+"/restart", nil)
-	reqRestart.Header.Set("X-User-ID", user2.ID)
+	req, _ = http.NewRequest(http.MethodPost, "/api/environments/"+env.ID+"/restart", nil)
+	req.AddCookie(&http.Cookie{
+		Name:  "token",
+		Value: generateTestToken(user2.ID),
+	})
 	wRestart := httptest.NewRecorder()
-	r.ServeHTTP(wRestart, reqRestart)
+	r.ServeHTTP(wRestart, req)
 	if wRestart.Code != http.StatusNotFound {
 		t.Errorf("User2 should get 404 for User1's environment restart. Got %d", wRestart.Code)
 	}
 
 	// Test DeleteEnvironment
-	reqDelete, _ := http.NewRequest("DELETE", "/api/environments/"+env.ID, nil)
-	reqDelete.Header.Set("X-User-ID", user2.ID)
+	req, _ = http.NewRequest(http.MethodDelete, "/api/environments/"+env.ID, nil)
+	req.AddCookie(&http.Cookie{
+		Name:  "token",
+		Value: generateTestToken(user2.ID),
+	})
 	wDelete := httptest.NewRecorder()
-	r.ServeHTTP(wDelete, reqDelete)
+	r.ServeHTTP(wDelete, req)
 	if wDelete.Code != http.StatusNotFound {
 		t.Errorf("User2 should get 404 for User1's environment delete. Got %d", wDelete.Code)
 	}
@@ -123,12 +136,15 @@ func TestEnvironmentAuthz(t *testing.T) {
 		GitURL:       "https://github.com/test/repo",
 		ProjectID:    projectA.ID,
 	}
-	body, _ := json.Marshal(createReq)
-	reqCreate, _ := http.NewRequest("POST", "/api/environments", bytes.NewBuffer(body))
-	reqCreate.Header.Set("X-User-ID", user2.ID)
-	reqCreate.Header.Set("Content-Type", "application/json")
+	payload, _ := json.Marshal(createReq)
+	req, _ = http.NewRequest(http.MethodPost, "/api/environments", bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{
+		Name:  "token",
+		Value: generateTestToken(user2.ID),
+	})
 	wCreate := httptest.NewRecorder()
-	r.ServeHTTP(wCreate, reqCreate)
+	r.ServeHTTP(wCreate, req)
 
 	// Depending on implementation, it might be 403 or 404. Let's check for non-2xx
 	if wCreate.Code == http.StatusCreated {

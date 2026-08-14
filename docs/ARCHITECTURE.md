@@ -23,3 +23,15 @@ The following tables were dropped from PostgreSQL:
 - `process_types`
 - `addons`
 - `provider_configs`
+
+## Editor Strategy: GitHub-First (Non-Live)
+
+**Decision**: The web editor acts as a view/preparation environment. To run new code, users must commit and sync (push) to GitHub, which triggers a rebuild and restart of the sandbox.
+
+### Context
+Since the API Sandbox leverages Nixpacks to build immutable OCI Docker images, all dependencies and build steps are baked into the image. Implementing real-time "live" edits via bind-mounting host directories into these containers contradicts the immutable buildpack architecture and introduces significant fragility. 
+
+### Implementation
+- **Non-Live Editor**: Do not imply "save and it runs live" in the UI.
+- **Workflow**: Edits -> Commit/Push -> Rebuild -> Restart.
+- If true live-reloading is required in the future, it should be built as a separate "Dev Mode" (e.g., using Devcontainers or simple volume mounts with process managers) rather than compromising the current robust Nixpacks workflow.

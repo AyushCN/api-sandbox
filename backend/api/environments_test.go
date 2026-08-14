@@ -40,6 +40,7 @@ func setupEnvironmentTestRouter() *gin.Engine {
 	r.GET("/api/environments/:id", GetEnvironment)
 	r.POST("/api/environments/:id/restart", RestartEnvironment)
 	r.DELETE("/api/environments/:id", DeleteEnvironment)
+	r.GET("/api/ws/environments/:id", ServeWS)
 
 	return r
 }
@@ -128,6 +129,19 @@ func TestEnvironmentAuthz(t *testing.T) {
 	r.ServeHTTP(wDelete, req)
 	if wDelete.Code != http.StatusNotFound {
 		t.Errorf("User2 should get 404 for User1's environment delete. Got %d", wDelete.Code)
+	}
+
+	// Test WebSocket access
+	req, _ = http.NewRequest(http.MethodGet, "/api/ws/environments/"+env.ID, nil)
+	req.AddCookie(&http.Cookie{
+		Name:  "token",
+		Value: generateTestToken(user2.ID),
+	})
+	// We must mock the websocket upgrade, but a simple 404/403/400 check works since Upgrader fails or Auth fails first.
+	wWs := httptest.NewRecorder()
+	r.ServeHTTP(wWs, req)
+	if wWs.Code != http.StatusNotFound && wWs.Code != http.StatusForbidden {
+		t.Errorf("User2 should get 403 or 404 for User1's environment WS. Got %d", wWs.Code)
 	}
 
 	// Test CreateEnvironment authorization (User 2 trying to create in User 1's project)

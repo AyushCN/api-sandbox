@@ -13,7 +13,6 @@ import (
 
 	"github.com/api-sandbox/backend/db"
 	"github.com/api-sandbox/backend/models"
-	"github.com/api-sandbox/backend/provider"
 	"github.com/gin-gonic/gin"
 )
 
@@ -255,35 +254,8 @@ func UpdateWorkspaceFileContent(c *gin.Context) {
 	// Broadcast to team via WebSocket
 	BroadcastToProjectMembers(env.ID, data)
 
-	// Restart container gracefully to reload server process with updated code
-	if env.ContainerID != nil && *env.ContainerID != "" {
-		db.DB.Create(&models.Log{
-			EnvironmentID: &env.ID,
-			Message:       fmt.Sprintf("File %s modified. Restarting container to apply updates...", cleanPath),
-			Level:         models.LogLevelInfo,
-		})
-		err = provider.RestartContainer(c.Request.Context(), *env.ContainerID)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to reload sandbox container: %v", err)})
-			return
-		}
-
-		// Wait a small delay and query new port mapping from container, saving to DB
-		time.Sleep(500 * time.Millisecond)
-		newPort, err := provider.GetContainerPort(*env.ContainerID)
-		if err == nil && newPort > 0 {
-			env.Port = &newPort
-			db.DB.Save(env)
-			db.DB.Create(&models.Log{
-				EnvironmentID: &env.ID,
-				Message:       fmt.Sprintf("Container restarted and bound to new port %d.", newPort),
-				Level:         models.LogLevelInfo,
-			})
-		}
-	}
-
 	c.JSON(http.StatusOK, gin.H{
-		"message": "File updated and environment reloaded successfully",
+		"message": "Changes saved locally. Commit and sync to deploy.",
 		"diff":    string(diffOut),
 	})
 }
@@ -408,22 +380,9 @@ func DeleteWorkspaceFileOrFolder(c *gin.Context) {
 
 	db.DB.Create(&models.Log{
 		EnvironmentID: &env.ID,
-		Message:       fmt.Sprintf("Deleted: %s. Restarting container to apply updates...", cleanPath),
+		Message:       fmt.Sprintf("Deleted: %s.", cleanPath),
 		Level:         models.LogLevelInfo,
 	})
 
-	// Restart container gracefully to reload server process with updated files
-	if env.ContainerID != nil && *env.ContainerID != "" {
-		err = provider.RestartContainer(c.Request.Context(), *env.ContainerID)
-		if err == nil {
-			time.Sleep(500 * time.Millisecond)
-			newPort, err := provider.GetContainerPort(*env.ContainerID)
-			if err == nil && newPort > 0 {
-				env.Port = &newPort
-				db.DB.Save(env)
-			}
-		}
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "Deleted successfully and environment reloaded"})
+	c.JSON(http.StatusOK, gin.H{"message": "Changes saved locally. Commit and sync to deploy."})
 }

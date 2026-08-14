@@ -85,6 +85,8 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 					Message:       fmt.Sprintf("Failed to provision database: %v", err),
 					Level:         models.LogLevelError,
 				})
+				db.DB.Model(&env).Update("status", models.StatusFailed)
+				return err
 			} else {
 				dbURL = url
 			}

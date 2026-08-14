@@ -426,8 +426,17 @@ func StreamLogs(c *gin.Context) {
 			}
 		}
 
-		// Check if environment is still building, if not, we can close the stream eventually
-		// For now, keep it open and polling but allow clean disconnect
+		// Check environment status
+		var currentEnv models.Environment
+		if err := db.DB.Select("status").First(&currentEnv, "id = ?", envID).Error; err == nil {
+			if currentEnv.Status != models.StatusBuilding {
+				// Wait briefly to allow any final logs to flush, then terminate
+				time.Sleep(2 * time.Second)
+				return false
+			}
+		}
+
+		// Keep polling while building
 		select {
 		case <-c.Request.Context().Done():
 			return false
@@ -454,6 +463,9 @@ func DeleteEnvironment(c *gin.Context) {
 	}
 	// Also attempt to cleanup by predictable name, in case it was created but ContainerID wasn't saved
 	_ = provider.CleanupContainer(c.Request.Context(), fmt.Sprintf("api-sandbox-env-%s", env.ID))
+
+	// Cleanup database sidecar if it exists
+	_ = provider.CleanupContainer(c.Request.Context(), fmt.Sprintf("api-sandbox-db-%s", env.ID))
 
 	// Cleanup workspace folder on host
 	_ = provider.CleanupWorkspace(env.ID)
@@ -505,6 +517,9 @@ func RestartEnvironment(c *gin.Context) {
 	}
 	// Also attempt to cleanup by predictable name, in case it was created but ContainerID wasn't saved
 	_ = provider.CleanupContainer(c.Request.Context(), fmt.Sprintf("api-sandbox-env-%s", env.ID))
+
+	// Cleanup database sidecar if it exists
+	_ = provider.CleanupContainer(c.Request.Context(), fmt.Sprintf("api-sandbox-db-%s", env.ID))
 
 	// Delete old logs
 	db.DB.Where("environment_id = ?", env.ID).Delete(&models.Log{})

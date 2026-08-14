@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
@@ -12,7 +13,9 @@ import (
 
 	"github.com/api-sandbox/backend/db"
 	"github.com/api-sandbox/backend/models"
+	"github.com/api-sandbox/backend/queue"
 	"github.com/gin-gonic/gin"
+	"github.com/hibiken/asynq"
 )
 
 type GitActivity struct {
@@ -414,6 +417,26 @@ func SyncEnvironmentWithGitHub(c *gin.Context) {
 		Data:          string(dataBytes),
 		UserID:        &userIDStr,
 	})
+
+	db.DB.Create(&models.AuditLog{
+		UserID:    fmt.Sprintf("%v", userID),
+		Action:    "SYNC_AND_REBUILD",
+		Resource:  env.ID,
+		IPAddress: c.ClientIP(),
+	})
+
+	// Set status to BUILDING before enqueueing
+	db.DB.Model(&env).Updates(map[string]interface{}{
+		"status":       models.StatusBuilding,
+		"container_id": nil,
+	})
+
+	// Enqueue build task
+	payload, err := json.Marshal(map[string]string{"environmentId": env.ID})
+	if err == nil {
+		task := asynq.NewTask(queue.TaskBuildEnvironment, payload)
+		queue.Client.Enqueue(task, asynq.MaxRetry(3))
+	}
 
 	BroadcastToProjectMembers(env.ID, data)
 

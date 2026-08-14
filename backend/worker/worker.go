@@ -14,6 +14,14 @@ import (
 	"github.com/hibiken/asynq"
 )
 
+var (
+	ProviderCleanupContainer         = provider.CleanupContainer
+	ProviderCloneAndBuildImage       = provider.CloneAndBuildImage
+	ProviderDetectDatabaseRequirements = provider.DetectDatabaseRequirements
+	ProviderStartSidecarDatabase     = provider.StartSidecarDatabase
+	ProviderStartContainer           = provider.StartContainer
+)
+
 func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 	var payload map[string]string
 	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
@@ -35,11 +43,11 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 	// Idempotency: cleanup existing container if retrying
 	if env.ContainerID != nil && *env.ContainerID != "" {
 		slog.Info("Cleaning up existing container", "container_id", *env.ContainerID)
-		_ = provider.CleanupContainer(ctx, *env.ContainerID)
+		_ = ProviderCleanupContainer(ctx, *env.ContainerID)
 	}
 
 	// 1. Clone & Build
-	imageTag, err := provider.CloneAndBuildImage(ctx, env.ID, env.GitURL, env.GithubBranch)
+	imageTag, err := ProviderCloneAndBuildImage(ctx, env.ID, env.GitURL, env.GithubBranch)
 	if err != nil {
 		slog.Error("Build failed", "env_id", envID, "error", err)
 		db.DB.Model(&env).Update("status", models.StatusFailed)
@@ -64,7 +72,7 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 		wd, _ := os.Getwd()
 		workspaceDir := filepath.Join(wd, "workspaces", env.ID)
 
-		dbType, _ := provider.DetectDatabaseRequirements(workspaceDir)
+		dbType, _ := ProviderDetectDatabaseRequirements(workspaceDir)
 		if dbType != provider.DBTypeNone {
 			db.DB.Create(&models.Log{
 				EnvironmentID: &env.ID,
@@ -77,7 +85,7 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 				netID = env.UserID
 			}
 
-			url, err := provider.StartSidecarDatabase(ctx, env.ID, netID, dbType)
+			url, err := ProviderStartSidecarDatabase(ctx, env.ID, netID, dbType)
 			if err != nil {
 				slog.Error("Failed to start sidecar db", "env_id", envID, "error", err)
 				db.DB.Create(&models.Log{
@@ -98,7 +106,7 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 	if netID == "" {
 		netID = env.UserID
 	}
-	containerID, port, err := provider.StartContainer(ctx, env.ID, imageTag, netID, dbURL)
+	containerID, port, err := ProviderStartContainer(ctx, env.ID, imageTag, netID, dbURL)
 	if err != nil {
 		slog.Error("Start failed", "env_id", envID, "error", err)
 		db.DB.Model(&env).Update("status", models.StatusFailed)

@@ -34,7 +34,10 @@ type User struct {
 	Location          string     `gorm:"type:text" json:"location"`
 	Website           string     `gorm:"type:text" json:"website"`
 	Twitter           string     `gorm:"type:text" json:"twitter"`
-	Github            string     `gorm:"type:text" json:"github"`
+	Github            string     `gorm:"type:text" json:"github"` // Public github profile link
+	GithubID          string     `gorm:"type:text;index" json:"githubId,omitempty"`
+	GithubUsername    string     `gorm:"type:text" json:"githubUsername,omitempty"`
+	GithubToken       string     `gorm:"type:text" json:"-"`
 	CreatedAt         time.Time  `gorm:"default:current_timestamp" json:"createdAt"`
 	UpdatedAt         time.Time  `gorm:"default:current_timestamp" json:"updatedAt"`
 }

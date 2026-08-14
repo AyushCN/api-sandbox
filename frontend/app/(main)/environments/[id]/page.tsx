@@ -174,6 +174,29 @@ export default function EnvironmentDetail() {
       setIsCommitting(false);
     }
   };
+
+  const [isPushing, setIsPushing] = useState(false);
+  const handlePush = async () => {
+    setIsPushing(true);
+    try {
+      const res = await fetch(`/api/environments/${id}/push`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${localStorage.getItem("token")}`
+        }
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast.success("Successfully pushed to GitHub!");
+      } else {
+        throw new Error(data.error || "Push failed");
+      }
+    } catch(err: any) {
+      toast.error(err.message);
+    } finally {
+      setIsPushing(false);
+    }
+  };
   
   // Tab control
   const [activeTab, setActiveTab] = useState<"logs" | "workspace" | "collaborators" | "team-activity">("logs");
@@ -499,7 +522,11 @@ export default function EnvironmentDetail() {
   }, [env?.logs?.length, activeTab]);
 
   const handleDelete = async () => {
-    if (!confirm("Are you sure you want to delete this sandbox? This cannot be undone.")) return;
+    if (hasUncommittedChanges) {
+      if (!confirm("WARNING: You have uncommitted changes. These will be PERMANENTLY LOST if you delete this sandbox without pushing to GitHub. Are you sure you want to delete?")) return;
+    } else {
+      if (!confirm("Are you sure you want to delete this sandbox? This cannot be undone.")) return;
+    }
     setIsDeleting(true);
     try {
       const token = localStorage.getItem("token");
@@ -517,7 +544,7 @@ export default function EnvironmentDetail() {
   };
 
   const handleRestart = async () => {
-    if (!confirm("Are you sure you want to restart this sandbox? It will pull the latest code and rebuild the image.")) return;
+    if (!confirm("Are you sure you want to restart this sandbox? It will pull the latest code and start the dev runtime.")) return;
     setIsRestarting(true);
     try {
       const token = localStorage.getItem("token");
@@ -556,7 +583,10 @@ export default function EnvironmentDetail() {
               <Box className="w-5 h-5 text-primary-fixed" />
             </div>
             <div className="min-w-0">
-              <h1 className="text-xl font-bold text-on-surface tracking-tight truncate">{env.name}</h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-xl font-bold text-on-surface tracking-tight truncate">{env.name}</h1>
+                <span className="px-2 py-0.5 rounded text-[10px] uppercase font-bold bg-primary-fixed/10 text-primary-fixed tracking-wider">Live Testing Sandbox</span>
+              </div>
               <div className="flex items-center gap-3 mt-1 flex-wrap">
                 <div className="flex items-center gap-1.5 text-xs text-on-surface-variant/70 font-mono">
                   <GitBranch className="w-3.5 h-3.5" />
@@ -589,7 +619,7 @@ export default function EnvironmentDetail() {
             )}
             {env.publicUrl && env.status === 'RUNNING' && (
               <a href={env.publicUrl} target="_blank" rel="noreferrer" className="px-4 py-1.5 rounded-lg border border-outline-variant text-on-surface-variant hover:text-on-surface hover:border-primary-fixed/30 flex items-center gap-1.5 text-xs font-semibold transition-colors">
-                Open App <ExternalLink className="w-3.5 h-3.5" />
+                Ephemeral Preview URL <ExternalLink className="w-3.5 h-3.5" />
               </a>
             )}
             <button
@@ -618,6 +648,14 @@ export default function EnvironmentDetail() {
                 Commit Changes
               </button>
             )}
+            <button
+              onClick={handlePush}
+              disabled={isPushing}
+              className="px-4 py-1.5 rounded-lg border border-[#2ea44f]/30 bg-[#2ea44f]/10 text-[#2ea44f] hover:bg-[#2ea44f]/20 flex items-center gap-1.5 transition-colors disabled:opacity-50 text-xs font-semibold"
+            >
+              {isPushing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <GitBranch className="w-3.5 h-3.5" />}
+              Push to GitHub
+            </button>
             <button
               onClick={handleDelete}
               disabled={isDeleting}

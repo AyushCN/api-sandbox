@@ -468,3 +468,59 @@ func getEnvId(p *string) string {
 	}
 	return *p
 }
+
+func PushChanges(c *gin.Context) {
+	id := c.Param("id")
+	env, err := checkWorkspaceAccess(c, id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+
+	userID, _ := c.Get("userId")
+	userIDStr := userID.(string)
+	var user models.User
+	if err := db.DB.First(&user, "id = ?", userIDStr).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User not found"})
+		return
+	}
+
+	githubToken := ""
+	if user.GithubToken != "" {
+		decrypted, err := Decrypt(user.GithubToken)
+		if err == nil {
+			githubToken = decrypted
+		}
+	}
+
+	if githubToken == "" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "GitHub token not found. Please re-authenticate with GitHub."})
+		return
+	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get working directory"})
+		return
+	}
+	workspaceDir := filepath.Join(wd, "workspaces", env.ID)
+
+	// Ensure token is configured locally in git
+	cmdConfig := exec.Command("git", "config", "--local", "url.https://x-access-token:"+githubToken+"@github.com/.insteadOf", "https://github.com/")
+	cmdConfig.Dir = workspaceDir
+	cmdConfig.Run()
+
+	// Push
+	cmdPush := exec.Command("git", "push", "origin", env.GithubBranch)
+	cmdPush.Dir = workspaceDir
+	pushOut, err := cmdPush.CombinedOutput()
+	if err != nil {
+		c.JSON(http.StatusConflict, gin.H{
+			"error":   "Push failed. You may need to sync (pull) latest changes first.",
+			"details": string(pushOut),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Successfully pushed to GitHub"})
+}

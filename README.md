@@ -1,53 +1,58 @@
-# API Sandbox Orchestration Platform
+# Live Testing Sandbox Platform
 
-An experimental, single-host orchestration platform for provisioning sandboxed environments. This project allows users to deploy and manage containerized GitHub repositories, utilizing Nixpacks for dynamic build plans. 
+A high-utility orchestration platform for ephemeral, high-speed development sandboxes. This project provides backend developers with instant, safe, and disposable cloud-based development environments to test server-side applications with live hot-reloading and automated database provisioning.
 
-Suitable as a research/prototype platform; not a drop-in commercial PaaS.
+Instead of deploying static images, this platform mounts your code into language-specific development runtimes with sidecar databases, enabling live code edits via an integrated web IDE synced directly to your GitHub repository.
+
+## ✨ Core Features
+
+1. **Ephemeral Dev Runtimes**: Instant orchestration of hot-reloading containers (Node.js, Python, Go, etc.) via host-level bind mounts.
+2. **GitHub-First Source of Truth**: End-to-end GitHub OAuth integration. The sandbox acts as a temporary mirror. You can commit and push directly to GitHub from the browser.
+3. **Zero-Config Databases**: Automatic provisioning of isolated sidecar databases (PostgreSQL, MySQL, Redis) strictly tied to the lifecycle of the ephemeral sandbox.
+4. **Browser IDE & Terminal**: Integrated file editing and terminal access to instantly test backend APIs before pushing.
 
 ## ⚠️ Known Limitations & Security Caveats
 
 **This system is an experimental prototype and is NOT a security boundary for hostile multi-tenant public internet traffic without further hardening.**
 
 1. **Single host** — The platform relies on one Docker daemon and has no multi-node scheduler or federation capabilities.
-2. **Docker socket = host root equivalent** — The control plane (Go backend) mounts `/var/run/docker.sock` to spin up environments, granting it host-level root privileges. 
-3. **No multi-tenant production hardening claim** — It provides best-effort container isolation (via networks and capabilities), but does not use hypervisor isolation (e.g., Firecracker).
-4. **Editor is non-live** — The web editor is not bound to a live container. Edits are local and must go through a GitHub commit/sync + rebuild cycle to run.
-5. **Redis is a hard dependency** — The platform enforces fail-closed rate limits; without Redis, the API will not function.
-6. **Email verification blocks onboarding** — The system requires an SMTP provider to send verification emails, which blocks new user onboarding if unconfigured.
-7. **Not public-PaaS-safe** — It is not intended for multi-tenant production hosting of fully untrusted workloads.
-
-## Architecture
-
-The system uses a Go backend, `asynq` worker, Traefik reverse proxy, and dynamically provisioned Docker bridge networks per Organization. For a full breakdown of the architecture, trust boundaries, and environment lifecycle, see [ARCHITECTURE.md](docs/ARCHITECTURE.md).
+2. **Best-Effort Container Isolation** — Environments run with dropped capabilities and no `docker.sock` access, but do not use hypervisor-level isolation (e.g., Firecracker).
+3. **GitHub OAuth Requirement** — You must set up a GitHub OAuth App to use the platform as pushing and pulling depend entirely on GitHub as the source of truth.
 
 ## 🏃 Quick Start
 
-### 1. Start Infrastructure Services
+### 1. Set up GitHub OAuth
+1. Go to your GitHub Developer Settings -> OAuth Apps.
+2. Create a new app with the callback URL: `http://localhost:8080/api/auth/github/callback`
+3. Add the Client ID and Secret to your `backend/.env` file.
+
+### 2. Start Infrastructure Services
 The project uses Docker Compose to run PostgreSQL, Redis, and the Traefik proxy.
 ```bash
 docker compose up -d
 ```
 
-### 2. Run the Next.js Frontend
+### 3. Run the Next.js Frontend
 ```bash
 cd frontend
+npm install
 npm run dev
 ```
 
-### 3. Run the Go Backend & Worker
-Ensure you have the required environment variables (`JWT_SECRET`, `DOMAIN`, etc.) set in `.env`.
+### 4. Run the Go Backend & Worker
+Ensure you have the required environment variables (`GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `TOKEN_ENCRYPTION_KEY`, `DOMAIN`, etc.) set in `backend/.env`.
 ```bash
 cd backend
 go build -o server .
-./server
+sudo ./server # Sudo may be required to configure bind-mount directories properly
 ```
 
 Open `http://localhost:3000` in your browser.
 
 ## 📚 Documentation Index
+- [Product North Star](PRODUCT_NORTH_STAR.md)
 - [Architecture & Trust Boundaries](docs/ARCHITECTURE.md)
 - [Deployment Guide](docs/DEPLOYMENT.md)
-- [Evaluation Plan](docs/EVALUATION.md)
 - [OpenAPI Specification](docs/openapi.yaml)
 
 ## License

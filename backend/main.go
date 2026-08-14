@@ -26,8 +26,10 @@ func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
 
-	// Load .env file if exists
-	_ = godotenv.Load()
+	// Load .env file if exists (try local first, then root directory)
+	if err := godotenv.Load(); err != nil {
+		_ = godotenv.Load("../.env")
+	}
 
 	// Initialize singletons
 	db.InitDB()

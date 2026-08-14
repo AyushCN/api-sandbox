@@ -48,6 +48,8 @@ func SetupRoutes(router *gin.Engine) {
 		api.GET("/auth/verify", RateLimitVerifyEmail(), VerifyEmail)
 		api.POST("/auth/forgot-password", RateLimitPasswordReset(), ForgotPassword)
 		api.POST("/auth/reset-password", RateLimitPasswordReset(), ResetPassword)
+		api.GET("/auth/github", GithubLogin)
+		api.GET("/auth/github/callback", GithubCallback)
 
 		projects := api.Group("/projects")
 		projects.Use(AuthMiddleware(), RateLimitAPI())
@@ -92,6 +94,7 @@ func SetupRoutes(router *gin.Engine) {
 			protected.GET("/:id/git-tree", GetGitTree)
 			protected.POST("/:id/commit", CommitChanges)
 			protected.POST("/:id/sync", SyncEnvironmentWithGitHub)
+			protected.POST("/:id/push", PushChanges)
 		}
 
 		wsGroup := api.Group("/ws/environments")

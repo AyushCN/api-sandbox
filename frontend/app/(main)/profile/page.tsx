@@ -48,6 +48,18 @@ interface AuditLog {
   timestamp: string;
 }
 
+interface Invite {
+  projectId: string;
+  userId: string;
+  role: string;
+  invitedByUserId: string;
+  project: {
+    id: string;
+    name: string;
+    description: string;
+  };
+}
+
 /* ─── Contribution Graph ─── */
 function ContributionGraph({ activities = [] }: { activities: AuditLog[] }) {
   const activityCounts = activities.reduce((acc: Record<string, number>, log) => {
@@ -235,6 +247,7 @@ export default function ProfilePage() {
   const { data: user, error, isLoading, mutate: mutateUser } = useSWR<UserProfile>("/api/user/me", fetcher);
   const { data: environments } = useSWR<Environment[]>("/api/environments", fetcher);
   const { data: activities } = useSWR<AuditLog[]>("/api/user/activity", fetcher);
+  const { data: invites, mutate: mutateInvites } = useSWR<Invite[]>("/api/user/invites", fetcher);
   
   const [activeTab, setActiveTab] = useState('overview');
   const [showEditModal, setShowEditModal] = useState(false);
@@ -402,6 +415,65 @@ export default function ProfilePage() {
                   <span className="text-xs text-on-surface-variant">No organizations</span>
                 )}
               </div>
+            </div>
+
+            <div className="pt-6 border-t border-outline-variant">
+              <h3 className="text-sm font-semibold text-on-surface mb-3 flex items-center justify-between">
+                Pending Invites
+                {invites && invites.length > 0 && (
+                  <span className="bg-primary-fixed text-on-primary-fixed text-[10px] px-2 rounded-full font-bold">{invites.length}</span>
+                )}
+              </h3>
+              {(!invites || invites.length === 0) ? (
+                <span className="text-xs text-on-surface-variant">No pending invites</span>
+              ) : (
+                <div className="space-y-3">
+                  {invites.map((invite) => (
+                    <div key={invite.projectId} className="bg-surface-container border border-outline-variant rounded-lg p-3 hover:border-primary-fixed/30 transition-colors">
+                      <div className="flex items-center gap-2 min-w-0 mb-3">
+                        <Package className="w-4 h-4 text-primary-fixed shrink-0" />
+                        <span className="text-sm font-bold text-on-surface truncate">{invite.project?.name || "Unknown Project"}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-mono font-bold text-on-surface-variant bg-surface-container-high px-1.5 py-0.5 rounded uppercase tracking-widest">{invite.role}</span>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={async () => {
+                              try {
+                                await fetchWithAuth(`/api/projects/${invite.projectId}/invites/accept`, { method: "POST" });
+                                toast.success("Invite accepted!");
+                                mutateInvites();
+                                mutateUser();
+                              } catch (err: any) {
+                                toast.error(err.message || "Failed to accept");
+                              }
+                            }}
+                            className="w-7 h-7 flex items-center justify-center bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded transition-colors"
+                            title="Accept"
+                          >
+                            <CheckCircle2 className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={async () => {
+                              try {
+                                await fetchWithAuth(`/api/projects/${invite.projectId}/invites/decline`, { method: "POST" });
+                                toast.success("Invite declined");
+                                mutateInvites();
+                              } catch (err: any) {
+                                toast.error(err.message || "Failed to decline");
+                              }
+                            }}
+                            className="w-7 h-7 flex items-center justify-center bg-error/10 hover:bg-error/20 text-error rounded transition-colors"
+                            title="Decline"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>

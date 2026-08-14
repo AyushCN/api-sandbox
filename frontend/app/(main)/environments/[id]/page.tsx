@@ -348,12 +348,6 @@ export default function EnvironmentDetail() {
       setOriginalFileContent(fileContent);
       setIsEditingFile(false);
       
-      // Clear logs to reflect container restart log sequence
-      if (xtermRef.current) {
-        xtermRef.current.clear();
-        xtermRef.current._logCount = 0;
-      }
-      
       // Mutate env cache to update environment status immediately
       mutate(`/api/environments/${id}`);
     } catch (e: any) {
@@ -588,6 +582,11 @@ export default function EnvironmentDetail() {
               {env.status === 'RUNNING' && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_6px_#34d399]" />}
               {env.status}
             </div>
+            {env.status === 'FAILED' && (
+              <span className="text-xs text-red-400 font-semibold flex items-center gap-1">
+                <AlertCircle className="w-3.5 h-3.5" /> Check Build Logs
+              </span>
+            )}
             {env.publicUrl && env.status === 'RUNNING' && (
               <a href={env.publicUrl} target="_blank" rel="noreferrer" className="px-4 py-1.5 rounded-lg border border-outline-variant text-on-surface-variant hover:text-on-surface hover:border-primary-fixed/30 flex items-center gap-1.5 text-xs font-semibold transition-colors">
                 Open App <ExternalLink className="w-3.5 h-3.5" />
@@ -891,7 +890,7 @@ export default function EnvironmentDetail() {
                 <Code className="w-12 h-12 mb-4 text-white/10" />
                 <h3 className="text-base font-semibold text-white/60 mb-1">Live Editor Workspace</h3>
                 <p className="text-xs max-w-sm text-white/30">
-                  Select a file from the sidebar tree explorer to view or modify its contents inside the running environment container.
+                  Select a file from the sidebar tree explorer to view or modify its contents. Edits are local until you Commit and Sync.
                 </p>
               </div>
             )}

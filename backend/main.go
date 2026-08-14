@@ -12,6 +12,7 @@ import (
 	"github.com/api-sandbox/backend/api"
 	"github.com/api-sandbox/backend/db"
 	"github.com/api-sandbox/backend/models"
+	"github.com/api-sandbox/backend/cron"
 	"github.com/api-sandbox/backend/provider"
 	"github.com/api-sandbox/backend/queue"
 	"github.com/api-sandbox/backend/worker"
@@ -30,6 +31,7 @@ func main() {
 
 	// Initialize singletons
 	db.InitDB()
+	cron.StartIdleCleanup(db.DB)
 
 	// Recover environments stuck in BUILDING from previous runs
 	var stuckEnvs []models.Environment

@@ -20,7 +20,8 @@ var (
 func InitDB() {
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
-		dsn = "postgresql://postgres:postgres@localhost:5432/api_sandbox?sslmode=disable"
+		slog.Error("DATABASE_URL environment variable is required")
+		os.Exit(1)
 	}
 
 	var err error
@@ -126,7 +127,8 @@ func InitDB() {
 
 	redisUrl := os.Getenv("REDIS_URL")
 	if redisUrl == "" {
-		redisUrl = "redis://localhost:6379"
+		slog.Error("REDIS_URL environment variable is required")
+		os.Exit(1)
 	}
 
 	opt, err := redis.ParseURL(redisUrl)

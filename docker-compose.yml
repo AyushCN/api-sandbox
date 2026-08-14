@@ -77,6 +77,7 @@ services:
       - SMTP_FROM=${SMTP_FROM:-noreply@api-sandbox.com}
       - SENDGRID_API_KEY=${SENDGRID_API_KEY:-}
       - SKIP_EMAIL_VERIFICATION=${SKIP_EMAIL_VERIFICATION:-false}
+      - IDLE_TIMEOUT_HOURS=${IDLE_TIMEOUT_HOURS:-6}
     volumes:
       # CRITICAL WARNING: Mounting the Docker socket gives the backend host-level root control.
       # This is inherent to the architecture to provision environments.

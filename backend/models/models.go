@@ -157,6 +157,7 @@ type Environment struct {
 	CreatedAt         time.Time         `gorm:"default:current_timestamp" json:"createdAt"`
 	UpdatedAt         time.Time         `gorm:"default:current_timestamp" json:"updatedAt"`
 	ExpiresAt         *time.Time        `gorm:"type:timestamp" json:"expiresAt"`
+	LastActivityAt    *time.Time        `gorm:"type:timestamp;default:current_timestamp" json:"lastActivityAt"`
 
 	// Code changes tracking
 	HasUncommittedChanges bool       `gorm:"default:false" json:"hasUncommittedChanges"`

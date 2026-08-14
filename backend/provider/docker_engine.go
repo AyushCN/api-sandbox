@@ -553,7 +553,15 @@ func StartSidecarDatabase(ctx context.Context, envID string, orgID string, dbTyp
 			Env:   env,
 		},
 		HostConfig: &docker.HostConfig{
-			Memory: 256 * 1024 * 1024, // 256MB for DB
+			Memory:          256 * 1024 * 1024, // 256MB for DB
+			MemorySwap:      -1,
+			CPUQuota:        100000,
+			CPUPeriod:       100000,
+			CPUShares:       512,
+			PidsLimit:       &pidsLimit,
+			SecurityOpt:     []string{"no-new-privileges:true"},
+			CapDrop:         []string{"ALL"},
+			CapAdd:          []string{"CHOWN", "SETUID", "SETGID", "DAC_OVERRIDE"}, // DBs usually need these to initialize
 		},
 		NetworkingConfig: &docker.NetworkingConfig{
 			EndpointsConfig: map[string]*docker.EndpointConfig{

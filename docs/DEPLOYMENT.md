@@ -91,6 +91,19 @@ Traefik handles TLS automatically, but it is disabled by default for local devel
 > [!NOTE]
 > The Traefik dashboard is insecure and disabled by default. Do not enable it (`TRAEFIK_DASHBOARD=true`) on a public IP without adding basic auth middleware to the compose file.
 
+## 6. Observability & Alerting
+
+The API Sandbox backend exposes a Prometheus-compatible metrics endpoint at `/metrics`.
+
+**Scraping Requirements:**
+- **Private Network Only**: Do NOT expose `/metrics` to the public internet. It contains internal operational data.
+- Configure your Prometheus scraper to target the backend container internally (e.g., `http://backend:8080/metrics` from within the Docker network, or bound to `localhost` on the host).
+
+**Key Metrics to Monitor:**
+- `asynq_queue_size`: To monitor build queue backlog.
+- API HTTP response times and `429 Too Many Requests` frequency.
+- Go runtime memory/GC stats.
+
 ## Architecture Limitations
 
 Before deploying to production, please be aware of the following architectural limits:

@@ -23,6 +23,12 @@ import (
 	"gorm.io/gorm"
 )
 
+// TouchEnvironmentActivity updates the LastActivityAt timestamp for an environment
+func TouchEnvironmentActivity(envID string) {
+	now := time.Now()
+	db.DB.Model(&models.Environment{}).Where("id = ?", envID).Update("last_activity_at", &now)
+}
+
 type CreateEnvironmentRequest struct {
 	Name         string `json:"name" binding:"required"`
 	GitURL       string `json:"gitUrl" binding:"required,url"`
@@ -518,6 +524,8 @@ func RestartEnvironment(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Environment not found"})
 		return
 	}
+
+	TouchEnvironmentActivity(env.ID)
 
 	// Try to stop and remove old docker container if it exists
 	if env.ContainerID != nil && *env.ContainerID != "" {

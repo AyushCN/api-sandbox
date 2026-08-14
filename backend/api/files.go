@@ -86,6 +86,9 @@ func checkWorkspaceAccess(c *gin.Context, envID string) (*models.Environment, er
 		return nil, fmt.Errorf("environment not found or access denied")
 	}
 
+	// Update last activity timestamp
+	TouchEnvironmentActivity(env.ID)
+
 	return &env, nil
 }
 

@@ -344,8 +344,7 @@ export default function EnvironmentDetail() {
         })
       });
       if (!res.ok) throw new Error("Failed to save changes");
-      
-      toast.success("File saved and container reloaded!");
+      toast.success("File saved locally. Commit and sync to deploy changes.");
       setOriginalFileContent(fileContent);
       setIsEditingFile(false);
       

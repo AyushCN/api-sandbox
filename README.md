@@ -4,9 +4,10 @@ A powerful, full-stack environment provisioning and sandboxing platform. This pr
 
 ## 🚀 Key Features
 
-### 📦 Zero-Config Deployments (Nixpacks)
+### 📦 Zero-Config Environments (Nixpacks)
 *   **No Dockerfile Required:** Automatically detects the language (Node.js, Python, Go, Rust, etc.) and generates an optimized, cached build plan using **Nixpacks**.
-*   **Deep Subdirectory Support:** Users can deploy specific folders inside monorepos directly (e.g. `https://github.com/org/repo/tree/main/examples/api`).
+*   **Environment-Only Architecture:** The platform focuses purely on sandbox environments. Legacy "production deployments" features have been removed to prioritize speed, simplicity, and core sandboxing. For more context on this design decision, see [ARCHITECTURE.md](ARCHITECTURE.md).
+*   **GitHub-First Workflow:** Files can be viewed and edited in the dashboard, but changes are saved locally and must be committed and synced back to GitHub to trigger a fresh image build. The editor is non-live to ensure reproducibility.
 
 ### 🔒 Security Features
 *   **Strict Container & Addon Isolation:** Each user workspace is assigned a dynamically generated, dedicated Docker bridge network (`api-sandbox-net-<orgId>`). Both sandbox application containers and dynamically provisioned database addons (PostgreSQL, MongoDB, Redis) are bound exclusively to this network, preventing lateral movement and inter-tenant communication.
@@ -17,7 +18,7 @@ A powerful, full-stack environment provisioning and sandboxing platform. This pr
 *   **Path Traversal & SSRF Prevention:** Strict bounds-checking on subdirectory cloning and explicit enforcement of `https://github.com/` URLs.
 *   **Hardened Authentication & SMTP:** JWT-based system enforcing 12-character complex passwords. Verification and password resets utilize generic `net/smtp` to send real emails via any provider (SendGrid, SES, Mailgun).
 *   **Strict API Rate Limiting:** Powered by Redis, registration/login endpoints, password reset flows, and all authenticated data-fetching endpoints (e.g. `/environments`) are heavily rate-limited (e.g., max 200 reqs/min) to prevent database exhaustion.
-*   **Resource Quotas:** Database-enforced deployment quotas (e.g., max 5 running sandboxes, max 10 builds per hour per user) to prevent platform abuse.
+*   **Resource Quotas:** Database-enforced sandbox quotas (e.g., max 5 running sandboxes, max 10 builds per hour per user) to prevent platform abuse.
 *   **Organizations & Teams:** Built-in multi-tenancy grouping. Workspaces are isolated by `OrganizationID`. Teammates can be invited to an Organization, automatically sharing access to the same dashboard, logs, and internal Docker networks for seamless microservice composition.
 *   **Comprehensive Audit Logging:** High-impact mutations (Environment Create/Delete/Restart) are immutably logged with `UserID`, `Action`, `Resource`, and `IPAddress` for operational visibility.
 

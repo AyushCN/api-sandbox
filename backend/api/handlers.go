@@ -339,7 +339,13 @@ func CreateEnvironment(c *gin.Context) {
 	task := asynq.NewTask(queue.TaskBuildEnvironment, payload)
 	_, err = queue.Client.Enqueue(task, asynq.MaxRetry(3))
 	if err != nil {
-		// Log error, but don't fail the response since DB record is created
+		// Enqueue failed, roll back status to FAILED
+		db.DB.Model(&env).Update("status", models.StatusFailed)
+		db.DB.Create(&models.Log{
+			EnvironmentID: &env.ID,
+			Message:       fmt.Sprintf("Failed to enqueue build: %v", err),
+			Level:         models.LogLevelError,
+		})
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to enqueue build task"})
 		return
 	}
@@ -549,6 +555,13 @@ func RestartEnvironment(c *gin.Context) {
 	task := asynq.NewTask(queue.TaskBuildEnvironment, payload)
 	_, err = queue.Client.Enqueue(task, asynq.MaxRetry(3))
 	if err != nil {
+		// Enqueue failed, roll back status to FAILED
+		db.DB.Model(&env).Update("status", models.StatusFailed)
+		db.DB.Create(&models.Log{
+			EnvironmentID: &env.ID,
+			Message:       fmt.Sprintf("Failed to enqueue restart task: %v", err),
+			Level:         models.LogLevelError,
+		})
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to enqueue restart task"})
 		return
 	}

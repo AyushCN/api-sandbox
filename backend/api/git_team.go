@@ -292,9 +292,9 @@ func CommitChanges(c *gin.Context) {
 		return
 	}
 
-	var env models.Environment
-	if err := db.DB.Preload("User").First(&env, "id = ?", envID).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Environment not found"})
+	env, err := checkWorkspaceAccess(c, envID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -435,7 +435,22 @@ func SyncEnvironmentWithGitHub(c *gin.Context) {
 	payload, err := json.Marshal(map[string]string{"environmentId": env.ID})
 	if err == nil {
 		task := asynq.NewTask(queue.TaskBuildEnvironment, payload)
-		queue.Client.Enqueue(task, asynq.MaxRetry(3))
+		_, err = queue.Client.Enqueue(task, asynq.MaxRetry(3))
+		if err != nil {
+			db.DB.Model(&env).Update("status", models.StatusFailed)
+			db.DB.Create(&models.Log{
+				EnvironmentID: &env.ID,
+				Message:       fmt.Sprintf("Failed to enqueue sync build task: %v", err),
+				Level:         models.LogLevelError,
+			})
+		}
+	} else {
+		db.DB.Model(&env).Update("status", models.StatusFailed)
+		db.DB.Create(&models.Log{
+			EnvironmentID: &env.ID,
+			Message:       fmt.Sprintf("Failed to serialize task payload: %v", err),
+			Level:         models.LogLevelError,
+		})
 	}
 
 	BroadcastToProjectMembers(env.ID, data)

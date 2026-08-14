@@ -40,6 +40,14 @@ func setupEnvironmentTestRouter() *gin.Engine {
 	r.GET("/api/environments/:id", GetEnvironment)
 	r.POST("/api/environments/:id/restart", RestartEnvironment)
 	r.DELETE("/api/environments/:id", DeleteEnvironment)
+	r.GET("/api/environments/:id/files", GetWorkspaceFiles)
+	r.GET("/api/environments/:id/files/content", GetWorkspaceFileContent)
+	r.POST("/api/environments/:id/files/content", UpdateWorkspaceFileContent)
+	r.POST("/api/environments/:id/files/create", CreateWorkspaceFileOrFolder)
+	r.POST("/api/environments/:id/files/delete", DeleteWorkspaceFileOrFolder)
+	r.POST("/api/environments/:id/commit", CommitChanges)
+	r.POST("/api/environments/:id/sync", SyncEnvironmentWithGitHub)
+	r.GET("/api/environments/:id/docker-logs", GetDockerLogs)
 	r.GET("/api/ws/environments/:id", ServeWS)
 
 	return r
@@ -142,6 +150,82 @@ func TestEnvironmentAuthz(t *testing.T) {
 	r.ServeHTTP(wWs, req)
 	if wWs.Code != http.StatusNotFound && wWs.Code != http.StatusForbidden {
 		t.Errorf("User2 should get 403 or 404 for User1's environment WS. Got %d", wWs.Code)
+	}
+
+	// Test Workspace Files (GET)
+	req, _ = http.NewRequest(http.MethodGet, "/api/environments/"+env.ID+"/files", nil)
+	req.AddCookie(&http.Cookie{Name: "token", Value: generateTestToken(user2.ID)})
+	wFiles := httptest.NewRecorder()
+	r.ServeHTTP(wFiles, req)
+	if wFiles.Code != http.StatusNotFound {
+		t.Errorf("User2 should get 404 for User1's environment files. Got %d", wFiles.Code)
+	}
+
+	// Test Workspace File Content (GET)
+	req, _ = http.NewRequest(http.MethodGet, "/api/environments/"+env.ID+"/files/content?path=main.go", nil)
+	req.AddCookie(&http.Cookie{Name: "token", Value: generateTestToken(user2.ID)})
+	wFileContent := httptest.NewRecorder()
+	r.ServeHTTP(wFileContent, req)
+	if wFileContent.Code != http.StatusNotFound {
+		t.Errorf("User2 should get 404 for User1's environment file content. Got %d", wFileContent.Code)
+	}
+
+	// Test Workspace File Content (POST)
+	req, _ = http.NewRequest(http.MethodPost, "/api/environments/"+env.ID+"/files/content", bytes.NewBuffer([]byte(`{"path":"main.go","content":"test"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: "token", Value: generateTestToken(user2.ID)})
+	wUpdateFile := httptest.NewRecorder()
+	r.ServeHTTP(wUpdateFile, req)
+	if wUpdateFile.Code != http.StatusNotFound {
+		t.Errorf("User2 should get 404 for User1's environment update file. Got %d", wUpdateFile.Code)
+	}
+
+	// Test Git Sync (POST)
+	req, _ = http.NewRequest(http.MethodPost, "/api/environments/"+env.ID+"/sync", nil)
+	req.AddCookie(&http.Cookie{Name: "token", Value: generateTestToken(user2.ID)})
+	wSync := httptest.NewRecorder()
+	r.ServeHTTP(wSync, req)
+	if wSync.Code != http.StatusNotFound {
+		t.Errorf("User2 should get 404 for User1's environment sync. Got %d", wSync.Code)
+	}
+
+	// Test Docker Logs (GET)
+	req, _ = http.NewRequest(http.MethodGet, "/api/environments/"+env.ID+"/docker-logs", nil)
+	req.AddCookie(&http.Cookie{Name: "token", Value: generateTestToken(user2.ID)})
+	wLogs := httptest.NewRecorder()
+	r.ServeHTTP(wLogs, req)
+	if wLogs.Code != http.StatusNotFound {
+		t.Errorf("User2 should get 404 for User1's environment docker logs. Got %d", wLogs.Code)
+	}
+
+	// Test Workspace File Create (POST)
+	req, _ = http.NewRequest(http.MethodPost, "/api/environments/"+env.ID+"/files/create", bytes.NewBuffer([]byte(`{"path":"new_dir","isDir":true}`)))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: "token", Value: generateTestToken(user2.ID)})
+	wCreateFile := httptest.NewRecorder()
+	r.ServeHTTP(wCreateFile, req)
+	if wCreateFile.Code != http.StatusNotFound {
+		t.Errorf("User2 should get 404 for User1's environment create file. Got %d", wCreateFile.Code)
+	}
+
+	// Test Workspace File Delete (POST)
+	req, _ = http.NewRequest(http.MethodPost, "/api/environments/"+env.ID+"/files/delete", bytes.NewBuffer([]byte(`{"path":"main.go"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: "token", Value: generateTestToken(user2.ID)})
+	wDeleteFile := httptest.NewRecorder()
+	r.ServeHTTP(wDeleteFile, req)
+	if wDeleteFile.Code != http.StatusNotFound {
+		t.Errorf("User2 should get 404 for User1's environment delete file. Got %d", wDeleteFile.Code)
+	}
+
+	// Test Git Commit (POST)
+	req, _ = http.NewRequest(http.MethodPost, "/api/environments/"+env.ID+"/commit", bytes.NewBuffer([]byte(`{"message":"test commit"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: "token", Value: generateTestToken(user2.ID)})
+	wCommit := httptest.NewRecorder()
+	r.ServeHTTP(wCommit, req)
+	if wCommit.Code != http.StatusNotFound {
+		t.Errorf("User2 should get 404 for User1's environment commit. Got %d", wCommit.Code)
 	}
 
 	// Test CreateEnvironment authorization (User 2 trying to create in User 1's project)

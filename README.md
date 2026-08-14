@@ -1,87 +1,54 @@
 # API Sandbox Orchestration Platform
 
-A powerful, full-stack environment provisioning and sandboxing platform. This project allows users to deploy and manage zero-config GitHub repositories on-demand through a sleek web dashboard, dynamically orchestrating the container lifecycle, networking, and reverse proxying behind the scenes.
+An experimental, single-host orchestration platform for provisioning sandboxed environments. This project allows users to deploy and manage containerized GitHub repositories, utilizing Nixpacks for dynamic build plans. 
 
-## 🚀 Key Features
+Suitable as a research/prototype platform; not a drop-in commercial PaaS.
 
-### 📦 Zero-Config Environments (Nixpacks)
-*   **No Dockerfile Required:** Automatically detects the language (Node.js, Python, Go, Rust, etc.) and generates an optimized, cached build plan using **Nixpacks**.
-*   **Environment-Only Architecture:** The platform focuses purely on sandbox environments. Legacy "production deployments" features have been removed to prioritize speed, simplicity, and core sandboxing. For more context on this design decision, see [ARCHITECTURE.md](ARCHITECTURE.md).
-*   **GitHub-First Workflow:** Files can be viewed and edited in the dashboard, but changes are saved locally and must be committed and synced back to GitHub to trigger a fresh image build. The editor is non-live to ensure reproducibility.
+## ⚠️ Known Limitations & Security Caveats
 
-### 🔒 Security Features
-*   **Strict Container & Addon Isolation:** Each user workspace is assigned a dynamically generated, dedicated Docker bridge network (`api-sandbox-net-<orgId>`). Both sandbox application containers and dynamically provisioned database addons (PostgreSQL, MongoDB, Redis) are bound exclusively to this network, preventing lateral movement and inter-tenant communication.
-*   **Cryptographically Secure Addon Credentials:** Database credentials injected into containers are dynamically generated 16-character secure random hex strings (`crypto/rand`). This eliminates hardcoded defaults and ensures strict scoping to that specific environment's isolated database.
-*   **Container Hardening:** Sandboxes are deployed with `no-new-privileges:true` and `CapDrop: ALL` to neuter privilege escalation and breakout vectors.
-*   **Host Network Protection:** Core platform services are bound strictly to `127.0.0.1` on the host, preventing sandbox containers from exploiting the default Docker gateway to access internal databases.
-*   **Resource Limits:** Hard caps on memory (512MB), CPU quotas, and PIDs (max 256) are strictly enforced at the container level to protect host stability from fork bombs or memory leaks.
-*   **Path Traversal & SSRF Prevention:** Strict bounds-checking on subdirectory cloning and explicit enforcement of `https://github.com/` URLs.
-*   **Hardened Authentication & SMTP:** JWT-based system enforcing 12-character complex passwords. Verification and password resets utilize generic `net/smtp` to send real emails via any provider (SendGrid, SES, Mailgun).
-*   **Strict API Rate Limiting:** Powered by Redis, registration/login endpoints, password reset flows, and all authenticated data-fetching endpoints (e.g. `/environments`) are heavily rate-limited (e.g., max 200 reqs/min) to prevent database exhaustion.
-*   **Resource Quotas:** Database-enforced sandbox quotas (e.g., max 5 running sandboxes, max 10 builds per hour per user) to prevent platform abuse.
-*   **Organizations & Teams:** Built-in multi-tenancy grouping. Workspaces are isolated by `OrganizationID`. Teammates can be invited to an Organization, automatically sharing access to the same dashboard, logs, and internal Docker networks for seamless microservice composition.
-*   **Comprehensive Audit Logging:** High-impact mutations (Environment Create/Delete/Restart) are immutably logged with `UserID`, `Action`, `Resource`, and `IPAddress` for operational visibility.
+**This system is an experimental prototype and is NOT a security boundary for hostile multi-tenant public internet traffic without further hardening.**
 
-### 🌐 Dynamic Reverse Proxy (Traefik)
-*   **Instant Routing with Isolation:** Traefik natively hooks into the Docker socket to map wildcard subdomains instantly. Crucially, the orchestrator dynamically attaches the Traefik proxy to each user's isolated network, guaranteeing secure traffic routing without bridging multi-tenant networks.
-*   **Production Domain Support:** Set the `DOMAIN` environment variable (e.g. `sandbox.yourcompany.com`) and the platform will dynamically provision `https://[env-id].sandbox.yourcompany.com` out of the box.
+1. **Single host** — The platform relies on one Docker daemon and has no multi-node scheduler or federation capabilities.
+2. **Docker socket = host root equivalent** — The control plane (Go backend) mounts `/var/run/docker.sock` to spin up environments, granting it host-level root privileges. 
+3. **No multi-tenant production hardening claim** — It provides best-effort container isolation (via networks and capabilities), but does not use hypervisor isolation (e.g., Firecracker).
+4. **Editor is non-live** — The web editor is not bound to a live container. Edits are local and must go through a GitHub commit/sync + rebuild cycle to run.
+5. **Redis is a hard dependency** — The platform enforces fail-closed rate limits; without Redis, the API will not function.
+6. **Email verification blocks onboarding** — The system requires an SMTP provider to send verification emails, which blocks new user onboarding if unconfigured.
+7. **Not public-PaaS-safe** — It is not intended for multi-tenant production hosting of fully untrusted workloads.
 
-### ⚙️ Backend Orchestration & Operability (Go)
-*   **BuildKit & Docker Engine API:** Interacts directly with the Docker Daemon via `fsouza/go-dockerclient` (API v1.41) to enable advanced BuildKit context generation.
-*   **Asynchronous Task Queue:** Uses `hibiken/asynq` with Redis to handle long-running git clones and Nixpack builds in the background.
-*   **Resilient Database Layer:** Built-in connection pooling (Max Open, Max Idle, Max Lifetime) to gracefully handle high concurrency without exhausting PostgreSQL connections.
-*   **Robust Error Handling:** Features exponential backoff retries (3 attempts) on transient database failures and strict limit-based pagination on heavy database queries.
-*   **Graceful Shutdown:** Implements OS signal trapping (`SIGTERM`/`SIGINT`) to cleanly drain HTTP requests and allow running container builds to finish before exiting, preventing zombie state.
-*   **Structured Logging & Metrics:** Uses Go 1.21 `log/slog` for fully parsable JSON structured logging, and exports vital health metrics (DB connections, active containers) via a `/metrics` Prometheus endpoint.
-*   **Automated Backups:** Includes a production-ready `backup.sh` cron script to perform `pg_dump`, gzip compression, and rolling 30-day automated uploads to an S3 bucket.
+## Architecture
 
-### 🎨 Frontend Dashboard (Next.js / Material Design 3)
-*   **Sleek Modern UI:** Built with dark mode, Material Design 3 tokens, glassmorphism elements, and smooth `framer-motion` animations.
-*   **Route Groups:** Clean Next.js app router architecture separating public auth pages from protected `/(main)/` dashboards.
-*   **Live Terminal Output:** Integrates `xterm.js` to render Docker build logs in a native-feeling terminal window using highly reliable SWR polling.
+The system uses a Go backend, `asynq` worker, Traefik reverse proxy, and dynamically provisioned Docker bridge networks per Organization. For a full breakdown of the architecture, trust boundaries, and environment lifecycle, see [ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-## 🛠️ Tech Stack
-
-*   **Go** (Backend API & Orchestration Worker)
-*   **Gin** (HTTP Router & JWT Middleware)
-*   **GORM** (PostgreSQL ORM)
-*   **Asynq & Redis** (Background Job Queue & Rate Limiting)
-*   **Docker Engine API & Traefik v3** (Containerization & Reverse Proxy)
-*   **Nixpacks** (Zero-config Build System)
-*   **Next.js 14 & React** (Frontend Dashboard & Auth Provider)
-*   **Tailwind CSS & Framer Motion** (Styling & Animation)
-*   **xterm.js** (In-browser Terminal)
-
-## 🏃 Getting Started
+## 🏃 Quick Start
 
 ### 1. Start Infrastructure Services
 The project uses Docker Compose to run PostgreSQL, Redis, and the Traefik proxy.
 ```bash
-cd frontend
 docker compose up -d
 ```
 
-### 2. Run the Go Backend & Worker
-Ensure you have the `DOMAIN` (optional) and `JWT_SECRET` environment variables set.
+### 2. Run the Next.js Frontend
+```bash
+cd frontend
+npm run dev
+```
+
+### 3. Run the Go Backend & Worker
+Ensure you have the required environment variables (`JWT_SECRET`, `DOMAIN`, etc.) set in `.env`.
 ```bash
 cd backend
 go build -o server .
 ./server
 ```
 
-### 3. Run the Next.js Frontend
-In a new terminal:
-```bash
-cd frontend
-npm run dev
-```
 Open `http://localhost:3000` in your browser.
 
-## 📝 Recent Milestones
-*   **Complete Nixpacks Overhaul:** Repos without Dockerfiles now automatically build! Subdirectory cloning properly scopes the build context to prevent host-level path traversal.
-*   **Traefik Integration:** Replaced manual proxy setup with a native Traefik container inside `docker-compose.yml` for seamless, instant URL routing.
-*   **Production Readiness Audit Fixes:** Implemented severe missing limits: Container Network Isolation, Container Memory/CPU limits, DB Connection Pooling, Error Handling with Exponential Backoff, and Endpoint Pagination.
-*   **Operational Hardening:** Integrated Graceful Shutdown, API-wide Rate Limiting, `log/slog` structured JSON logging, a Prometheus `/metrics` endpoint, native SMTP email support, and an automated PostgreSQL S3 Backup script.
-*   **Advanced Security Hardening:** Patched container host access by forcing `127.0.0.1` binds on infrastructure databases, dropped Docker capabilities (`CapDrop`), enforced `no-new-privileges`, introduced strict Password Reset rate-limiting, and established comprehensive Audit Logging.
-*   **Organizations & Collaborative Workspaces:** Upgraded from strict single-user architecture to an `OrganizationID`-based tenancy model. Teammates can now share access to sandbox management and communicate seamlessly across shared, isolated Docker networks.
-*   **Tier 0 Security Overhaul:** Eliminated critical IDOR vulnerabilities across all deployment endpoints, locked down operational `/metrics` to internal networks only, stripped insecure stub providers, and enforced fail-closed API rate limiting.
+## 📚 Documentation Index
+- [Architecture & Trust Boundaries](docs/ARCHITECTURE.md)
+- [Deployment Guide](docs/DEPLOYMENT.md)
+- [Evaluation Plan](docs/EVALUATION.md)
+- [OpenAPI Specification](docs/openapi.yaml)
+
+## License
+MIT License. See [LICENSE](LICENSE) for details.

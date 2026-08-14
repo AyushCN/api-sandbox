@@ -60,3 +60,25 @@ backend/workspaces/
 # Custom Scripts Binaries
 backend/scripts/**/main
 test.db
+
+# Database and Secrets
+*.db
+*.sqlite
+*.sqlite3
+postgres-data/
+redis-data/
+dump.rdb
+acme.json
+
+# Docker overrides
+docker-compose.override.yml
+
+# Frontend specifics
+frontend/.env
+frontend/.env.local
+frontend/.env.*
+.eslintcache
+
+# Archives
+*.tar.gz
+*.zip

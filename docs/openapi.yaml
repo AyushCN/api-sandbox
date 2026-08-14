@@ -1,0 +1,427 @@
+openapi: 3.0.3
+info:
+  title: API Sandbox
+  version: 1.0.0
+  description: Core backend API for the API Sandbox orchestration platform.
+servers:
+  - url: http://localhost:8080/api
+    description: Local development server
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: token
+  responses:
+    UnauthorizedError:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    ForbiddenError:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFoundError:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    RateLimitError:
+      description: Too many requests
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    InternalError:
+      description: Internal Server Error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+    Environment:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+          enum: [IDLE, BUILDING, RUNNING, STOPPED, FAILED]
+        gitUrl:
+          type: string
+        githubBranch:
+          type: string
+        projectId:
+          type: string
+        publicUrl:
+          type: string
+    Project:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        ownerOrganizationId:
+          type: string
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        isEmailVerified:
+          type: boolean
+        maxEnvironments:
+          type: integer
+        maxBuildsPerHour:
+          type: integer
+        envCount:
+          type: integer
+
+security:
+  - cookieAuth: []
+
+paths:
+  /auth/register:
+    post:
+      summary: Register a new user
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '201':
+          description: User registered successfully
+        '429':
+          $ref: '#/components/responses/RateLimitError'
+
+  /auth/login:
+    post:
+      summary: Login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Login successful
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /auth/logout:
+    post:
+      summary: Logout
+      responses:
+        '200':
+          description: Logout successful
+
+  /auth/verify:
+    get:
+      summary: Verify email
+      security: []
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Email verified
+
+  /user/me:
+    get:
+      summary: Get current user profile
+      responses:
+        '200':
+          description: User profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+    put:
+      summary: Update user profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bio: { type: string }
+                location: { type: string }
+      responses:
+        '200':
+          description: Profile updated
+
+  /user/invites:
+    get:
+      summary: Get pending project invites
+      responses:
+        '200':
+          description: List of pending invites
+
+  /projects:
+    get:
+      summary: List user projects
+      responses:
+        '200':
+          description: A list of projects
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Project'
+    post:
+      summary: Create a new project
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                description: { type: string }
+      responses:
+        '201':
+          description: Project created
+
+  /projects/{projectId}/invite:
+    post:
+      summary: Invite a user to the project
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [identifier, role]
+              properties:
+                identifier: { type: string }
+                role: { type: string, enum: [ADMIN, COLLABORATOR, VIEWER] }
+      responses:
+        '200':
+          description: User invited
+
+  /projects/{projectId}/invites/accept:
+    post:
+      summary: Accept a project invite
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Invite accepted
+
+  /projects/{projectId}/invites/decline:
+    post:
+      summary: Decline a project invite
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Invite declined
+
+  /environments:
+    get:
+      summary: List environments
+      responses:
+        '200':
+          description: A list of environments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Environment'
+    post:
+      summary: Create a new environment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, gitUrl, githubBranch]
+              properties:
+                name: { type: string }
+                gitUrl: { type: string }
+                githubBranch: { type: string }
+                projectId: { type: string }
+      responses:
+        '201':
+          description: Environment created
+        '403':
+          description: Environment limit reached
+        '429':
+          description: Builds per hour limit reached
+
+  /environments/{id}:
+    get:
+      summary: Get environment details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Environment details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Environment'
+    delete:
+      summary: Delete an environment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Environment deleted
+
+  /environments/{id}/restart:
+    post:
+      summary: Restart environment (Rebuild & Restart)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Restart initiated
+
+  /environments/{id}/files/content:
+    get:
+      summary: Get file content
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: path
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: File content
+    post:
+      summary: Update file content
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path, content]
+              properties:
+                path: { type: string }
+                content: { type: string }
+      responses:
+        '200':
+          description: File saved locally
+
+  /environments/{id}/commit:
+    post:
+      summary: Commit local changes to git
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message: { type: string }
+      responses:
+        '200':
+          description: Commit successful
+
+  /environments/{id}/sync:
+    post:
+      summary: Push to remote and rebuild
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Sync initiated
+
+  /health:
+    get:
+      summary: Platform health check
+      security: []
+      responses:
+        '200':
+          description: OK
+
+  /metrics:
+    get:
+      summary: Prometheus metrics (IP Restricted)
+      security: []
+      responses:
+        '200':
+          description: Metrics payload

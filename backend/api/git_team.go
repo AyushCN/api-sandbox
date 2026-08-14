@@ -443,6 +443,8 @@ func SyncEnvironmentWithGitHub(c *gin.Context) {
 				Message:       fmt.Sprintf("Failed to enqueue sync build task: %v", err),
 				Level:         models.LogLevelError,
 			})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to enqueue sync build task"})
+			return
 		}
 	} else {
 		db.DB.Model(&env).Update("status", models.StatusFailed)
@@ -451,6 +453,8 @@ func SyncEnvironmentWithGitHub(c *gin.Context) {
 			Message:       fmt.Sprintf("Failed to serialize task payload: %v", err),
 			Level:         models.LogLevelError,
 		})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to serialize task payload"})
+		return
 	}
 
 	BroadcastToProjectMembers(env.ID, data)

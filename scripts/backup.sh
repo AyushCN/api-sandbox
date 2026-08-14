@@ -4,7 +4,7 @@
 set -e
 
 # Configuration
-DB_CONTAINER=${DB_CONTAINER:-"frontend-postgres-1"}
+DB_CONTAINER=${DB_CONTAINER:-"api-sandbox-postgres-1"}
 DB_USER=${DB_USER:-"postgres"}
 DB_NAME=${DB_NAME:-"api_sandbox"}
 BACKUP_DIR=${BACKUP_DIR:-"$HOME/backups/api_sandbox"}

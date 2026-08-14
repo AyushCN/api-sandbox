@@ -1,0 +1,123 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: api-sandbox-postgres-1
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${DB_NAME:-api_sandbox}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - traefik-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-api_sandbox}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: api-sandbox-redis-1
+    networks:
+      - traefik-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  traefik:
+    image: traefik:v3.0
+    container_name: api-sandbox-traefik
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      # Enable dashboard ONLY if explicitly requested
+      - "--api.insecure=${TRAEFIK_DASHBOARD:-false}"
+      # Enable ACME (Let's Encrypt) ONLY if ENABLE_TLS is true
+      - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
+      - "--certificatesresolvers.myresolver.acme.email=${ACME_EMAIL:-admin@example.com}"
+      - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+      # Dashboard port (only accessible if TRAEFIK_DASHBOARD=true)
+      - "8081:8080"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "traefik_certs:/letsencrypt"
+    networks:
+      - traefik-net
+
+  backend:
+    build: 
+      context: ./backend
+    container_name: api-sandbox-backend-1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - PORT=8080
+      - DATABASE_URL=postgres://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@postgres:5432/${DB_NAME:-api_sandbox}?sslmode=disable
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=${JWT_SECRET}
+      - DOMAIN=${DOMAIN:-localhost}
+      - APP_URL=${APP_URL:-http://localhost}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - SMTP_FROM=${SMTP_FROM:-noreply@api-sandbox.com}
+      - SENDGRID_API_KEY=${SENDGRID_API_KEY:-}
+      - SKIP_EMAIL_VERIFICATION=${SKIP_EMAIL_VERIFICATION:-false}
+    volumes:
+      # CRITICAL WARNING: Mounting the Docker socket gives the backend host-level root control.
+      # This is inherent to the architecture to provision environments.
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    networks:
+      - traefik-net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.backend.rule=Host(`${DOMAIN:-localhost}`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.backend.entrypoints=${TRAEFIK_ENTRYPOINT:-web}"
+      - "traefik.http.services.backend.loadbalancer.server.port=8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 10s
+      retries: 5
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: api-sandbox-frontend-1
+    depends_on:
+      - backend
+    environment:
+      - BACKEND_URL=http://backend:8080
+    networks:
+      - traefik-net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=Host(`${DOMAIN:-localhost}`)"
+      - "traefik.http.routers.frontend.entrypoints=${TRAEFIK_ENTRYPOINT:-web}"
+      - "traefik.http.services.frontend.loadbalancer.server.port=3000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000"]
+      interval: 10s
+      retries: 5
+
+networks:
+  traefik-net:
+    name: traefik-net
+    driver: bridge
+
+volumes:
+  postgres_data:
+  traefik_certs:

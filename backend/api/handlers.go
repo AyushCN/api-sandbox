@@ -34,6 +34,8 @@ type CreateEnvironmentRequest struct {
 func SetupRoutes(router *gin.Engine) {
 	api := router.Group("/api")
 	{
+		api.GET("/health", HealthCheck)
+		
 		api.POST("/auth/register", RateLimitRegister(), Register)
 		api.POST("/auth/login", RateLimitLogin(), Login)
 		api.POST("/auth/logout", Logout)

@@ -1,90 +1,101 @@
 # API Sandbox Deployment Guide
 
-This guide details how to run the API Sandbox in a production environment.
+This guide covers deploying the API Sandbox platform to a single production host.
 
-## 1. Prerequisites
+> [!WARNING]
+> **CRITICAL SECURITY WARNING: Docker Socket Access**
+>
+> The `backend` container requires the Docker socket (`/var/run/docker.sock`) mounted as a volume. This is inherent to the architecture because the backend must orchestrate isolated user environments on the host machine. 
+> 
+> **Mounting the Docker socket gives the backend container host-level root control.** If the API backend is compromised, the attacker essentially gains root access to the host server. 
+> 
+> You should deploy this platform on an isolated, dedicated host/VM. Do not run other sensitive workloads on the same machine.
 
-- A Linux server (e.g. Linode, DigitalOcean, AWS EC2)
-- Docker and Docker Compose installed
-- A domain name pointing to your server's IP address (e.g., `api.yourdomain.com` and `*.yourdomain.com` for environments)
+## Prerequisites
 
-## 2. Environment Variables
+- A dedicated Linux VM/Host
+- Docker and Docker Compose (v2) installed
+- (Optional but recommended) A domain name pointing to your server's IP address (e.g. `sandbox.yourdomain.com` and a wildcard `*.sandbox.yourdomain.com`).
 
-Create `.env.production` files in both `frontend` and `backend` directories.
+## 1. Initial Setup
 
-**Backend `.env`:**
-```env
-# Database & Cache
-DATABASE_URL=postgresql://postgres:postgres@postgres:5432/api_sandbox?sslmode=disable
-REDIS_URL=redis://redis:6379
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/api-sandbox/backend.git api-sandbox
+   cd api-sandbox
+   ```
 
-# Auth
-JWT_SECRET=your_super_secure_jwt_secret_here
+2. **Configure Environment Variables:**
+   Copy the example config to `.env`:
+   ```bash
+   cp .env.example .env
+   ```
+   Open `.env` in a text editor and fill in the required values:
+   - `JWT_SECRET`: Must be a long, secure random string. (e.g. generate via `openssl rand -base64 32`)
+   - `DOMAIN`: Your root domain (e.g. `sandbox.example.com`). Environments will be assigned subdomains of this.
+   - `APP_URL`: The URL where the frontend is reachable (e.g. `https://sandbox.example.com`).
 
-# App URL & Traefik Routing
-APP_URL=https://api.yourdomain.com
-DOMAIN=yourdomain.com
+## 2. First Boot & Email Configuration
 
-# Email Configuration (SendGrid Recommended)
-SENDGRID_API_KEY=SG.your_key_here
-# SMTP Fallback (If SendGrid not used)
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=your_email@gmail.com
-SMTP_PASS=your_app_password
-SMTP_FROM=no-reply@yourdomain.com
-```
+User registration requires email verification by default. You have two options for the first boot:
 
-## 3. Infrastructure (docker-compose)
+**Option A (Production): Configure SMTP or SendGrid**
+In your `.env` file, configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, and `SMTP_PASS` (or `SENDGRID_API_KEY`).
 
-The infrastructure services (Traefik, PostgreSQL, Redis) are defined in `frontend/docker-compose.yml`.
+**Option B (Testing/Local): Disable Verification**
+If you don't have SMTP credentials yet, you can temporarily disable email verification so you can register your admin account immediately:
+Set `SKIP_EMAIL_VERIFICATION=true` in `.env`.
 
-To enable HTTPS with Let's Encrypt:
-1. Ensure `traefik` is configured with ACME challenges in `docker-compose.yml`.
-2. Map a volume for `acme.json` to persist certificates.
+## 3. Starting the Services
 
-Run the infrastructure:
+Once your `.env` is configured, start the stack:
+
 ```bash
-cd frontend
 docker compose up -d
 ```
 
-## 4. Run the Backend
+This will automatically pull base images, build the Go backend and Next.js frontend, and initialize the PostgreSQL and Redis containers alongside the Traefik proxy.
 
-The backend is compiled via Go and run on the host (or inside another Docker container).
-For host-based deployments (as the orchestrator connects to the Docker socket):
+### Verify Health
 
+You can check if the core dependencies (DB and Redis) successfully initialized:
 ```bash
-cd backend
-go build -o server .
-# Run with GIN_MODE=release to enforce Secure cookies
-GIN_MODE=release ./server
+curl http://localhost:8080/health
 ```
+You should see a `{"status":"ok", "db":"ok", "redis":"ok"}` response.
 
-## 5. Run the Frontend
+## 4. First User Registration
 
-Create a `.env.production` file in the `frontend` directory:
+1. Navigate to your `APP_URL` in a browser.
+2. Register a new account.
+3. If `SKIP_EMAIL_VERIFICATION` was true, you can log in immediately. Otherwise, check your email for the verification link.
+4. Try creating your first Sandbox Environment to verify the backend can successfully orchestrate Docker containers via the socket.
 
-```env
-# Required for the Next.js API proxy to route requests to your backend
-BACKEND_URL=http://localhost:8080
-```
+## 5. Enable HTTPS (Let's Encrypt / ACME)
 
-Build and start the Next.js app:
-```bash
-cd frontend
-npm run build
-npm start
-```
+Traefik handles TLS automatically, but it is disabled by default for local development. To enable it on a public server:
 
-## 6. Backups
+1. Ensure your server is accessible on ports 80 and 443.
+2. Edit `.env` and set:
+   ```env
+   ENABLE_TLS=true
+   ACME_EMAIL=your-email@example.com
+   TRAEFIK_ENTRYPOINT=websecure
+   ```
+3. Restart the stack:
+   ```bash
+   docker compose down
+   docker compose up -d
+   ```
 
-A backup script is provided in `scripts/backup.sh`.
-To run it daily, add it to your crontab:
+> [!NOTE]
+> The Traefik dashboard is insecure and disabled by default. Do not enable it (`TRAEFIK_DASHBOARD=true`) on a public IP without adding basic auth middleware to the compose file.
 
-```bash
-crontab -e
-# Add the following line to run at 2 AM daily
-0 2 * * * /path/to/api-sandbox/scripts/backup.sh
-```
-Ensure you have the AWS CLI configured if you wish to upload backups to S3.
+## Architecture Limitations
+
+Before deploying to production, please be aware of the following architectural limits:
+
+- **Single Host:** The orchestration design is tightly coupled to the local Docker socket. Multi-node clusters (Swarm/K8s) are not supported by this compose setup.
+- **Socket Trust:** As warned above, the backend assumes total trust over the host Docker daemon.
+- **Non-Live Editor:** The in-app editor is asynchronous. Code must be saved, committed via the API, and explicitly re-synced (triggering a container rebuild) to take effect. Live-reloading is not built in.
+- **Redis Required:** The Asynq worker queue relies heavily on Redis for job scheduling and state consistency. Do not attempt to strip Redis from the stack.

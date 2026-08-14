@@ -1,6 +1,6 @@
 module github.com/api-sandbox/backend
 
-go 1.26.5
+go 1.22.0
 
 require (
 	github.com/fsouza/go-dockerclient v1.13.2

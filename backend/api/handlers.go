@@ -96,6 +96,7 @@ func SetupRoutes(router *gin.Engine) {
 			protected.POST("/:id/sync", SyncEnvironmentWithGitHub)
 			protected.POST("/:id/push", PushChanges)
 			protected.GET("/:id/git/status", GitStatus)
+			protected.GET("/:id/git/branches", GitListBranches)
 			protected.POST("/:id/git/branch", GitBranch)
 			protected.POST("/:id/git/checkout", GitCheckout)
 			protected.POST("/:id/git/pull", GitPull)

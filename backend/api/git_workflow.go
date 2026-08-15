@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/api-sandbox/backend/db"
 	"github.com/gin-gonic/gin"
 )
 
@@ -75,13 +76,47 @@ func GitStatus(c *gin.Context) {
 	})
 }
 
+// GitListBranches returns all local and remote branches
+func GitListBranches(c *gin.Context) {
+	id := c.Param("id")
+	_, err := checkWorkspaceAccess(c, id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+
+	wd, _ := os.Getwd()
+	workspaceDir := filepath.Join(wd, "workspaces", id)
+
+	cmd := exec.Command("git", "branch", "-a", "--format=%(refname:short)")
+	cmd.Dir = workspaceDir
+	out, err := cmd.Output()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list branches"})
+		return
+	}
+
+	var branches []string
+	lines := strings.Split(string(out), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" && line != "HEAD" {
+			// Deduplicate origin/ branches if they have a local counterpart?
+			// For simplicity, we just return all distinct names.
+			branches = append(branches, line)
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"branches": branches})
+}
+
 type GitBranchRequest struct {
 	Branch string `json:"branch" binding:"required"`
 }
 
 func GitBranch(c *gin.Context) {
 	id := c.Param("id")
-	_, err := checkWorkspaceAccess(c, id)
+	env, err := checkWorkspaceAccess(c, id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
@@ -104,6 +139,10 @@ func GitBranch(c *gin.Context) {
 		return
 	}
 
+	// Update DB
+	env.GithubBranch = req.Branch
+	db.DB.Save(env)
+
 	c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Created and checked out branch %s", req.Branch)})
 }
 
@@ -114,7 +153,7 @@ type GitCheckoutRequest struct {
 
 func GitCheckout(c *gin.Context) {
 	id := c.Param("id")
-	_, err := checkWorkspaceAccess(c, id)
+	env, err := checkWorkspaceAccess(c, id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
@@ -154,7 +193,17 @@ func GitCheckout(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Checked out %s", req.Ref)})
+	// Verify the actual checked out branch
+	cmdVerify := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	cmdVerify.Dir = workspaceDir
+	verifyOut, _ := cmdVerify.Output()
+	actualBranch := strings.TrimSpace(string(verifyOut))
+
+	// Update DB
+	env.GithubBranch = actualBranch
+	db.DB.Save(env)
+
+	c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Checked out %s", req.Ref), "branch": actualBranch})
 }
 
 func GitPull(c *gin.Context) {

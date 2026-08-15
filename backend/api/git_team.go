@@ -327,6 +327,11 @@ func CommitChanges(c *gin.Context) {
 	cmdEmail.Dir = workspaceDir
 	cmdEmail.Run()
 
+	// Add all changes
+	cmdAdd := exec.Command("git", "add", "-A")
+	cmdAdd.Dir = workspaceDir
+	cmdAdd.Run()
+
 	// Commit
 	cmdCommit := exec.Command("git", "commit", "-m", req.Message)
 	cmdCommit.Dir = workspaceDir
@@ -510,8 +515,8 @@ func PushChanges(c *gin.Context) {
 	cmdConfig.Dir = workspaceDir
 	cmdConfig.Run()
 
-	// Push
-	cmdPush := exec.Command("git", "push", "origin", env.GithubBranch)
+	// Push the current branch (HEAD) and set upstream
+	cmdPush := exec.Command("git", "push", "-u", "origin", "HEAD")
 	cmdPush.Dir = workspaceDir
 	pushOut, err := cmdPush.CombinedOutput()
 	if err != nil {

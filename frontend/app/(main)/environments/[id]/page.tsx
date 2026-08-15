@@ -16,6 +16,7 @@ import { fetchWithAuth } from "@/lib/auth";
 import TeamCollaborationDashboard from "@/components/TeamCollaborationDashboard";
 import { useEnvironmentChanges } from "@/hooks/useEnvironmentChanges";
 import ActiveEditors from "@/components/ActiveEditors";
+import { CommitModal, BranchPicker } from "@/components/GitUI";
 
 const fetcher = async (url: string) => {
   return fetchWithAuth(url);
@@ -147,10 +148,10 @@ export default function EnvironmentDetail() {
     }
   };
 
-  const handleCommit = async () => {
-    const msg = prompt("Enter commit message:");
+  const [isCommitModalOpen, setIsCommitModalOpen] = useState(false);
+
+  const handleCommit = async (msg: string) => {
     if (!msg || !msg.trim()) return;
-    
     setIsCommitting(true);
     try {
       const res = await fetch(`/api/environments/${id}/commit`, {
@@ -162,7 +163,8 @@ export default function EnvironmentDetail() {
         body: JSON.stringify({ message: msg.trim() })
       });
       const data = await res.json();
-      if (data.success) {
+      // the backend returns message not success field
+      if (res.ok) {
         toast.success("Changes committed successfully!");
         setHasUncommittedChanges(false);
       } else {
@@ -170,6 +172,7 @@ export default function EnvironmentDetail() {
       }
     } catch(err: any) {
       toast.error(err.message);
+      throw err; // Re-throw to prevent pushing if commit failed
     } finally {
       setIsCommitting(false);
     }
@@ -193,8 +196,19 @@ export default function EnvironmentDetail() {
       }
     } catch(err: any) {
       toast.error(err.message);
+      throw err;
     } finally {
       setIsPushing(false);
+    }
+  };
+
+  const handleCommitAndPush = async (msg: string) => {
+    try {
+      await handleCommit(msg);
+      await handlePush();
+      setIsCommitModalOpen(false);
+    } catch (e) {
+      // Errors are toasted in the individual handlers
     }
   };
   
@@ -225,9 +239,7 @@ export default function EnvironmentDetail() {
 
   const fetchDockerLogs = async () => {
     setIsLoadingDockerLogs(true);
-    setIsDockerLogsOpen(true);
     try {
-      const token = localStorage.getItem("token");
       const res = await fetch(`/api/environments/${id}/docker-logs`, {
         credentials: "include"
       });
@@ -243,6 +255,14 @@ export default function EnvironmentDetail() {
       setIsLoadingDockerLogs(false);
     }
   };
+
+  useEffect(() => {
+    if (activeTab === "logs") {
+      fetchDockerLogs();
+      const interval = setInterval(fetchDockerLogs, 3000);
+      return () => clearInterval(interval);
+    }
+  }, [activeTab]);
 
   const handleInvite = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -573,6 +593,15 @@ export default function EnvironmentDetail() {
 
   return (
     <>
+    <CommitModal
+      isOpen={isCommitModalOpen}
+      onClose={() => setIsCommitModalOpen(false)}
+      onCommit={handleCommit}
+      onCommitAndPush={handleCommitAndPush}
+      isCommitting={isCommitting}
+      isPushing={isPushing}
+      hasUncommittedChanges={hasUncommittedChanges}
+    />
     <div className="space-y-4">
       {/* Header Card */}
       <div className="bg-surface-container-lowest border border-outline-variant rounded-xl px-6 py-4">
@@ -594,7 +623,7 @@ export default function EnvironmentDetail() {
                     {env.gitUrl.replace('https://github.com/', '')}
                   </a>
                   <span className="text-outline-variant">·</span>
-                  <span className="font-bold text-on-surface">{env.githubBranch}</span>
+                  <BranchPicker envId={id} currentBranch={env.githubBranch} onBranchChanged={() => mutate(`/api/environments/${id}`)} />
                 </div>
                 <div className="flex items-center gap-1 text-[10px] text-on-surface-variant/50 font-mono">
                   <Clock className="w-3 h-3" />
@@ -638,23 +667,16 @@ export default function EnvironmentDetail() {
               {isRestarting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
               Restart
             </button>
-            {hasUncommittedChanges && (
-              <button
-                onClick={handleCommit}
-                disabled={isCommitting}
-                className="px-4 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-500 hover:bg-amber-500/20 flex items-center gap-1.5 transition-colors disabled:opacity-50 text-xs font-semibold shadow-[0_0_8px_rgba(245,158,11,0.2)]"
-              >
-                {isCommitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                Commit Changes
-              </button>
-            )}
             <button
-              onClick={handlePush}
-              disabled={isPushing}
-              className="px-4 py-1.5 rounded-lg border border-[#2ea44f]/30 bg-[#2ea44f]/10 text-[#2ea44f] hover:bg-[#2ea44f]/20 flex items-center gap-1.5 transition-colors disabled:opacity-50 text-xs font-semibold"
+              onClick={() => setIsCommitModalOpen(true)}
+              className={`px-4 py-1.5 rounded-lg border flex items-center gap-1.5 transition-colors text-xs font-semibold ${
+                hasUncommittedChanges 
+                  ? "border-amber-500/30 bg-amber-500/10 text-amber-500 hover:bg-amber-500/20 shadow-[0_0_8px_rgba(245,158,11,0.2)]"
+                  : "border-[#2ea44f]/30 bg-[#2ea44f]/10 text-[#2ea44f] hover:bg-[#2ea44f]/20"
+              }`}
             >
-              {isPushing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <GitBranch className="w-3.5 h-3.5" />}
-              Push to GitHub
+              <Save className="w-3.5 h-3.5" />
+              {hasUncommittedChanges ? "Review & Commit" : "Git Actions"}
             </button>
             <button
               onClick={handleDelete}
@@ -726,15 +748,41 @@ export default function EnvironmentDetail() {
 
       {/* Logs View */}
       {activeTab === "logs" && (
-        <div className="bg-surface-container-lowest border border-outline-variant rounded-xl overflow-hidden flex flex-col" style={{ height: 'calc(100vh - 260px)', minHeight: '420px' }}>
-          <div className="bg-surface-container/60 border-b border-outline-variant px-4 py-3 flex items-center gap-2">
-            <TerminalIcon className="w-4 h-4 text-on-surface-variant/50" />
-            <h3 className="font-medium text-on-surface-variant text-sm">Build Logs & Output</h3>
+        <div className="flex gap-4" style={{ height: 'calc(100vh - 260px)', minHeight: '420px' }}>
+          {/* Build Logs */}
+          <div className="flex-1 bg-surface-container-lowest border border-outline-variant rounded-xl overflow-hidden flex flex-col">
+            <div className="bg-surface-container/60 border-b border-outline-variant px-4 py-3 flex items-center gap-2">
+              <TerminalIcon className="w-4 h-4 text-on-surface-variant/50" />
+              <h3 className="font-medium text-on-surface-variant text-sm">Build Logs</h3>
+            </div>
+            <div 
+              ref={terminalRef} 
+              className="flex-1 w-full bg-[#0a0e17] overflow-hidden p-2"
+            />
           </div>
-          <div 
-            ref={terminalRef} 
-            className="flex-1 w-full bg-[#0a0e17] overflow-hidden p-2"
-          />
+
+          {/* App Output */}
+          <div className="flex-1 bg-surface-container-lowest border border-outline-variant rounded-xl overflow-hidden flex flex-col">
+            <div className="bg-surface-container/60 border-b border-outline-variant px-4 py-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <ScrollText className="w-4 h-4 text-on-surface-variant/50" />
+                <h3 className="font-medium text-on-surface-variant text-sm">App Output</h3>
+              </div>
+              <button
+                onClick={fetchDockerLogs}
+                disabled={isLoadingDockerLogs}
+                className="flex items-center gap-1.5 px-3 py-1 rounded bg-blue-600/10 border border-blue-500/20 text-blue-400 hover:bg-blue-600/20 transition-colors text-[10px] font-semibold tracking-wide uppercase disabled:opacity-50"
+              >
+                {isLoadingDockerLogs ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                Refresh
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto bg-slate-950/90 p-4">
+              <pre className="text-xs leading-6 text-green-300/90 font-mono whitespace-pre-wrap break-all">
+                {dockerLogs || "No output yet."}
+              </pre>
+            </div>
+          </div>
         </div>
       )}
 
@@ -809,14 +857,6 @@ export default function EnvironmentDetail() {
             <div className="px-4 py-2.5 border-b border-outline-variant flex items-center justify-between font-medium text-on-surface-variant text-xs tracking-wider uppercase">
               <span>Files</span>
               <div className="flex items-center gap-1.5 normal-case">
-                <button
-                  onClick={fetchDockerLogs}
-                  className="flex items-center gap-1 px-2 py-0.5 rounded bg-blue-600/20 border border-blue-500/40 text-blue-400 hover:bg-blue-600/40 hover:text-blue-300 transition-all text-xs font-semibold tracking-normal normal-case"
-                  title="View App Logs"
-                >
-                  <ScrollText className="w-3.5 h-3.5" />
-                  App Logs
-                </button>
                 <button
                   onClick={() => handleCreateFileOrFolder(false)}
                   className="p-1 rounded text-white/40 hover:text-white hover:bg-white/5 transition-all"
@@ -937,51 +977,6 @@ export default function EnvironmentDetail() {
       )}
     </div>
 
-      {/* Docker Logs Modal */}
-      {isDockerLogsOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.75)' }}>
-          <div className="w-full max-w-4xl max-h-[85vh] flex flex-col rounded-2xl border border-white/10 bg-slate-900 shadow-2xl overflow-hidden">
-            {/* Modal Header */}
-            <div className="flex items-center justify-between px-5 py-3.5 bg-slate-950/80 border-b border-white/10 shrink-0">
-              <div className="flex items-center gap-2.5">
-                <ScrollText className="w-5 h-5 text-blue-400" />
-                <h2 className="text-sm font-semibold text-white">Container App Logs</h2>
-                <span className="text-xs text-white/40 font-mono">api-sandbox-env-{id}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={fetchDockerLogs}
-                  disabled={isLoadingDockerLogs}
-                  className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-blue-600/20 border border-blue-500/30 text-blue-400 hover:bg-blue-600/30 transition-colors text-xs font-semibold disabled:opacity-50"
-                >
-                  {isLoadingDockerLogs ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-                  Refresh
-                </button>
-                <button
-                  onClick={() => setIsDockerLogsOpen(false)}
-                  className="p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/10 transition-colors"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-
-            {/* Modal Body - Log output */}
-            <div className="flex-1 overflow-y-auto bg-slate-950/90">
-              {isLoadingDockerLogs ? (
-                <div className="flex items-center justify-center h-48 gap-3 text-white/50">
-                  <Loader2 className="w-6 h-6 animate-spin text-blue-400" />
-                  <span className="text-sm">Fetching logs...</span>
-                </div>
-              ) : (
-                <pre className="p-5 text-xs leading-6 text-green-300/90 font-mono whitespace-pre-wrap break-all">
-                  {dockerLogs}
-                </pre>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Team Activity View */}
       {activeTab === "team-activity" && (

@@ -95,6 +95,10 @@ func SetupRoutes(router *gin.Engine) {
 			protected.POST("/:id/commit", CommitChanges)
 			protected.POST("/:id/sync", SyncEnvironmentWithGitHub)
 			protected.POST("/:id/push", PushChanges)
+			protected.GET("/:id/git/status", GitStatus)
+			protected.POST("/:id/git/branch", GitBranch)
+			protected.POST("/:id/git/checkout", GitCheckout)
+			protected.POST("/:id/git/pull", GitPull)
 		}
 
 		wsGroup := api.Group("/ws/environments")
@@ -228,10 +232,15 @@ func CreateEnvironment(c *gin.Context) {
 	userID, _ := c.Get("userId")
 	uid := userID.(string)
 
-	// Fetch user to get quota limits
+	// Fetch user to get quota limits and github token
 	var user models.User
 	if err := db.DB.First(&user, "id = ?", uid).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch user limits"})
+		return
+	}
+
+	if user.GithubToken == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "GitHub authentication required. Please link your GitHub account to create sandboxes."})
 		return
 	}
 

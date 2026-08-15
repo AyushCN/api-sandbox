@@ -82,6 +82,9 @@ func TestHandleBuildEnvironmentTask_SidecarError(t *testing.T) {
 	ProviderCloneOrFetch = func(ctx context.Context, targetDir, repoURL, branch, token string) error {
 		return nil
 	}
+	ProviderCheckContainerHealth = func(containerID string) (bool, string, error) {
+		return true, "", nil
+	}
 	ProviderDetectDatabaseRequirements = func(workspaceDir string) (provider.DBType, error) {
 		return provider.DBTypePostgres, nil
 	}

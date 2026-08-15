@@ -14,8 +14,9 @@ type DevRuntimeConfig struct {
 	BaseImage  string
 	InstallCmd string
 	StartCmd   string
-	WatchHint  string
-	WorkDir    string
+	WatchHint   string
+	WorkDir     string
+	ExposedPort string
 }
 
 func DetectDevRuntime(repoPath string, subDir string) (DevRuntimeConfig, error) {
@@ -49,10 +50,11 @@ func DetectDevRuntime(repoPath string, subDir string) (DevRuntimeConfig, error) 
 	sandboxTomlPath := filepath.Join(appDir, "sandbox.toml")
 	if b, readErr := os.ReadFile(sandboxTomlPath); readErr == nil {
 		var override struct {
-			BaseImage  string `toml:"base_image"`
-			InstallCmd string `toml:"install_cmd"`
-			StartCmd   string `toml:"start_cmd"`
-			WorkDir    string `toml:"work_dir"`
+		BaseImage   string `toml:"base_image"`
+		InstallCmd  string `toml:"install_cmd"`
+		StartCmd    string `toml:"start_cmd"`
+		WorkDir     string `toml:"work_dir"`
+		ExposedPort string `toml:"exposed_port"`
 		}
 		if tomlErr := toml.Unmarshal(b, &override); tomlErr == nil {
 			if override.BaseImage != "" {
@@ -66,6 +68,9 @@ func DetectDevRuntime(repoPath string, subDir string) (DevRuntimeConfig, error) 
 			}
 			if override.WorkDir != "" {
 				config.WorkDir = override.WorkDir
+			}
+			if override.ExposedPort != "" {
+				config.ExposedPort = override.ExposedPort
 			}
 			// If we had no detected config but they provided sandbox.toml, we clear the error if start cmd is provided
 			if override.StartCmd != "" {
@@ -158,11 +163,12 @@ func detectNodeRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
 	}
 
 	return DevRuntimeConfig{
-		BaseImage:  baseImage,
-		InstallCmd: installCmd,
-		StartCmd:   startCmd,
-		WatchHint:  "Node.js detected. Polling enforced via nodemon -L where applicable.",
-		WorkDir:    getWorkDir(subDir),
+		BaseImage:   baseImage,
+		InstallCmd:  installCmd,
+		StartCmd:    startCmd,
+		WatchHint:   "Node.js detected. Polling enforced via nodemon -L where applicable.",
+		WorkDir:     getWorkDir(subDir),
+		ExposedPort: "3000", // Default to 3000 for Node.js (Next.js, Express, etc)
 	}, nil
 }
 
@@ -212,22 +218,23 @@ func detectPythonRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
 	}
 
 	return DevRuntimeConfig{
-		BaseImage:  "python:3.11-slim",
-		InstallCmd: installCmd,
-		StartCmd:   startCmd,
-		WatchHint:  "Python detected. Watchdog installed for polling.",
-		WorkDir:    getWorkDir(subDir),
+		BaseImage:   "python:3.11-slim",
+		InstallCmd:  installCmd,
+		StartCmd:    startCmd,
+		WatchHint:   "Python detected. Watchdog installed for polling.",
+		WorkDir:     getWorkDir(subDir),
+		ExposedPort: "8000",
 	}, nil
 }
 
 func detectGoRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
 	return DevRuntimeConfig{
-		BaseImage:  "golang:1.22-alpine",
-		InstallCmd: "go mod download && go install github.com/air-verse/air@latest",
-		// We will write .air.toml in the start script if it doesn't exist
-		StartCmd:   "if [ ! -f .air.toml ]; then air init && sed -i 's/poll = false/poll = true/' .air.toml; fi && air || go run .",
-		WatchHint:  "Go detected. Air configured with polling enabled.",
-		WorkDir:    getWorkDir(subDir),
+		BaseImage:   "golang:1.22-alpine",
+		InstallCmd:  "go mod download && go install github.com/air-verse/air@latest",
+		StartCmd:    "if [ ! -f .air.toml ]; then air init && sed -i 's/poll = false/poll = true/' .air.toml; fi && air || go run .",
+		WatchHint:   "Go detected. Air configured with polling enabled.",
+		WorkDir:     getWorkDir(subDir),
+		ExposedPort: "8080",
 	}, nil
 }
 
@@ -241,11 +248,12 @@ func detectRubyRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
 	}
 
 	return DevRuntimeConfig{
-		BaseImage:  "ruby:3.3-alpine",
-		InstallCmd: "bundle install",
-		StartCmd:   startCmd,
-		WatchHint:  "Ruby/Rails detected.",
-		WorkDir:    getWorkDir(subDir),
+		BaseImage:   "ruby:3.3-alpine",
+		InstallCmd:  "bundle install",
+		StartCmd:    startCmd,
+		WatchHint:   "Ruby/Rails detected.",
+		WorkDir:     getWorkDir(subDir),
+		ExposedPort: "3000",
 	}, nil
 }
 
@@ -259,22 +267,23 @@ func detectPHPRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
 	}
 
 	return DevRuntimeConfig{
-		BaseImage:  "php:8.2-cli-alpine",
-		// Using alpine package manager to get composer easily
-		InstallCmd: "apk add composer && composer install",
-		StartCmd:   startCmd,
-		WatchHint:  "PHP/Laravel detected.",
-		WorkDir:    getWorkDir(subDir),
+		BaseImage:   "php:8.2-cli-alpine",
+		InstallCmd:  "apk add composer && composer install",
+		StartCmd:    startCmd,
+		WatchHint:   "PHP/Laravel detected.",
+		WorkDir:     getWorkDir(subDir),
+		ExposedPort: "8000",
 	}, nil
 }
 
 func detectRustRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
 	return DevRuntimeConfig{
-		BaseImage:  "rust:1-slim",
-		InstallCmd: "cargo install cargo-watch",
-		StartCmd:   "cargo watch -x run",
-		WatchHint:  "Rust detected. cargo-watch used for live reloading.",
-		WorkDir:    getWorkDir(subDir),
+		BaseImage:   "rust:1-slim",
+		InstallCmd:  "cargo install cargo-watch",
+		StartCmd:    "cargo watch -x run",
+		WatchHint:   "Rust detected. cargo-watch used for live reloading.",
+		WorkDir:     getWorkDir(subDir),
+		ExposedPort: "8000",
 	}, nil
 }
 

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/api-sandbox/backend/api"
 	"github.com/api-sandbox/backend/db"
@@ -16,12 +17,12 @@ import (
 )
 
 var (
-	ProviderCleanupContainer         = provider.CleanupContainer
-	ProviderCloneOrFetch             = provider.CloneOrFetch
+	ProviderCleanupContainer           = provider.CleanupContainer
+	ProviderCloneOrFetch               = provider.CloneOrFetch
 	ProviderDetectDatabaseRequirements = provider.DetectDatabaseRequirements
-	ProviderStartSidecarDatabase     = provider.StartSidecarDatabase
+	ProviderStartSidecarDatabase       = provider.StartSidecarDatabase
+	ProviderCheckContainerHealth       = provider.CheckContainerHealth
 )
-
 func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 	var payload map[string]string
 	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
@@ -44,7 +45,7 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 	if err := db.DB.First(&user, "id = ?", env.UserID).Error; err != nil {
 		slog.Warn("User not found for environment", "user_id", env.UserID)
 	}
-	
+
 	// Try to get token, decrypt it
 	githubToken := ""
 	if user.GithubToken != "" {
@@ -74,7 +75,7 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 		Message:       fmt.Sprintf("Cloning repository %s (branch: %s)...", env.GitURL, env.GithubBranch),
 		Level:         models.LogLevelInfo,
 	})
-	
+
 	err = ProviderCloneOrFetch(ctx, workspaceDir, env.GitURL, env.GithubBranch, githubToken)
 	if err != nil {
 		slog.Error("Clone failed", "env_id", envID, "error", err)
@@ -158,7 +159,7 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 	if netID == "" {
 		netID = env.UserID
 	}
-	
+
 	containerID, port, err := provider.ProvisionDevSandbox(ctx, env.ID, devConfig, netID, dbURL)
 	if err != nil {
 		slog.Error("Dev Sandbox start failed", "env_id", envID, "error", err)
@@ -171,7 +172,23 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 		return err
 	}
 
-	// 5. Update DB to RUNNING
+	// 5. Container Health Check on Boot
+	time.Sleep(3 * time.Second)
+	isRunning, crashLogs, checkErr := ProviderCheckContainerHealth(containerID)
+	if checkErr != nil {
+		slog.Error("Failed to check container health", "env_id", envID, "error", checkErr)
+	} else if !isRunning {
+		slog.Error("Dev Sandbox crashed immediately after start", "env_id", envID)
+		db.DB.Model(&env).Update("status", models.StatusFailed)
+		db.DB.Create(&models.Log{
+			EnvironmentID: &env.ID,
+			Message:       fmt.Sprintf("Sandbox crashed on boot:\n%s", crashLogs),
+			Level:         models.LogLevelError,
+		})
+		return fmt.Errorf("container crashed on boot")
+	}
+
+	// 6. Update DB to RUNNING
 	domain := os.Getenv("DOMAIN")
 	if domain == "" {
 		domain = "localhost"

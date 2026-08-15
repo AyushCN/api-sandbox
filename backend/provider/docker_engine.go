@@ -136,7 +136,10 @@ func ProvisionDevSandbox(ctx context.Context, envID string, config DevRuntimeCon
 		domain = "localhost"
 	}
 
-	exposedPort := "5000" // We will default to exposing 5000 for sandboxes unless configured otherwise
+	exposedPort := config.ExposedPort
+	if exposedPort == "" {
+		exposedPort = "5000" // Fallback
+	}
 
 	labels := map[string]string{
 		"traefik.enable": "true",

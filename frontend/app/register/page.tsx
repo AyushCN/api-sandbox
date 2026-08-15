@@ -297,118 +297,20 @@ export default function SignupPage() {
                                 </div>
                             )}
 
-                            <form className="space-y-4" onSubmit={handleSubmit}>
-                                {/* Email */}
-                                <div className="space-y-1">
-                                    <label className="text-xs font-semibold text-on-surface-variant uppercase tracking-wider" htmlFor="email">Email Address</label>
-                                    <input 
-                                        className="w-full bg-surface-container-highest border border-outline-variant/50 rounded-lg px-4 py-2.5 text-on-surface placeholder:text-outline/70 focus:outline-none focus:ring-2 focus:ring-primary-fixed-dim/40 focus:border-primary-fixed-dim transition-all text-sm" 
-                                        id="email" 
-                                        placeholder="dev@company.com" 
-                                        type="email" 
-                                        value={email}
-                                        onChange={(e) => setEmail(e.target.value)}
-                                        required
-                                    />
-                                </div>
-
-                                {/* Password */}
-                                <div className="space-y-1">
-                                    <label className="text-xs font-semibold text-on-surface-variant uppercase tracking-wider" htmlFor="password">Password</label>
-                                    <div className="relative">
-                                        <input 
-                                            className="w-full bg-surface-container-highest border border-outline-variant/50 rounded-lg px-4 py-2.5 pr-10 text-on-surface placeholder:text-outline/70 focus:outline-none focus:ring-2 focus:ring-primary-fixed-dim/40 focus:border-primary-fixed-dim transition-all text-sm" 
-                                            id="password" 
-                                            placeholder="••••••••" 
-                                            type={showPassword ? "text" : "password"} 
-                                            value={password}
-                                            onChange={(e) => setPassword(e.target.value)}
-                                            required
-                                            minLength={12}
-                                        />
-                                        <button 
-                                            className="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-primary transition-colors" 
-                                            type="button"
-                                            onClick={() => setShowPassword(!showPassword)}
-                                        >
-                                            <span className="material-symbols-outlined text-lg">{showPassword ? "visibility_off" : "visibility"}</span>
-                                        </button>
-                                    </div>
-                                    
-                                    {/* Strength Indicator */}
-                                    {password && (
-                                        <div className="flex gap-1 mt-2 items-center">
-                                            {[...Array(4)].map((_, i) => (
-                                                <div 
-                                                    key={i} 
-                                                    className={`h-1 flex-1 rounded-full transition-all duration-300 ${
-                                                        i < strength 
-                                                            ? (strength <= 1 ? 'bg-error' : strength <= 3 ? 'bg-primary-fixed-dim' : 'bg-tertiary-fixed-dim') 
-                                                            : 'bg-surface-variant'
-                                                    }`}
-                                                ></div>
-                                            ))}
-                                            <span className="text-[10px] font-semibold text-on-surface-variant uppercase ml-2 tracking-wider">
-                                                {strengthLabels[strength]}
-                                            </span>
-                                        </div>
-                                    )}
-                                </div>
-
-                                {/* Confirm Password */}
-                                <div className="space-y-1">
-                                    <label className="text-xs font-semibold text-on-surface-variant uppercase tracking-wider" htmlFor="confirm-password">Confirm Password</label>
-                                    <input 
-                                        className="w-full bg-surface-container-highest border border-outline-variant/50 rounded-lg px-4 py-2.5 text-on-surface placeholder:text-outline/70 focus:outline-none focus:ring-2 focus:ring-primary-fixed-dim/40 focus:border-primary-fixed-dim transition-all text-sm" 
-                                        id="confirm-password" 
-                                        placeholder="••••••••" 
-                                        type="password" 
-                                        value={confirmPassword}
-                                        onChange={(e) => setConfirmPassword(e.target.value)}
-                                        required
-                                        minLength={12}
-                                    />
-                                </div>
-
-                                {/* Submit Button */}
-                                <button 
-                                    className="w-full bg-primary-container text-on-primary font-bold text-base py-3 rounded-lg hover:brightness-110 active:scale-95 transition-all duration-200 mt-6 shadow-[0_0_20px_rgba(0,240,255,0.15)] flex justify-center items-center" 
-                                    type="submit"
-                                    disabled={isSubmitting}
-                                >
-                                    {isSubmitting ? (
-                                        <span className="material-symbols-outlined animate-spin text-xl">progress_activity</span>
-                                    ) : (
-                                        "Create Account"
-                                    )}
-                                </button>
-                            </form>
-
-                            {/* Divider */}
-                            <div className="relative py-2 flex items-center gap-4">
-                                <div className="flex-grow border-t border-outline-variant/20"></div>
-                                <span className="text-[10px] font-bold text-outline uppercase tracking-widest shrink-0">Or continue with</span>
-                                <div className="flex-grow border-t border-outline-variant/20"></div>
-                            </div>
-
-                            {/* Social Signups */}
-                            <div className="grid grid-cols-2 gap-3">
-                                <a href="/api/auth/github" className="flex items-center justify-center gap-2 bg-[#24292e] hover:bg-[#2f363d] border border-outline-variant/30 text-white text-xs font-semibold py-2.5 px-4 rounded-lg transition-all duration-200 cursor-pointer">
-                                    <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
-                                        <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"></path>
-                                    </svg>
-                                    <span>GitHub</span>
-                                </a>
-                                <button type="button" disabled className="flex items-center justify-center gap-2 bg-surface-container-highest border border-outline-variant/50 opacity-50 cursor-not-allowed text-on-surface text-xs font-semibold py-2.5 px-4 rounded-lg transition-all duration-200">
-                                    <svg className="w-4 h-4" viewBox="0 0 48 48">
-                                        <path d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" fill="#EA4335"></path>
-                                        <path d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" fill="#4285F4"></path>
-                                        <path d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" fill="#FBBC05"></path>
-                                        <path d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" fill="#34A853"></path>
-                                    </svg>
-                                    <span>Google</span>
-                                </button>
-                            </div>
+                        <div className="space-y-4 mb-8">
+                            <a 
+                                href="/api/auth/github"
+                                className="w-full flex items-center justify-center gap-3 bg-[#24292e] text-white font-bold py-4 rounded-lg hover:bg-[#2f363d] active:scale-95 transition-all duration-200 text-lg border border-outline-variant/30 shadow-[0_0_20px_rgba(0,240,255,0.15)]"
+                            >
+                                <svg height="24" aria-hidden="true" viewBox="0 0 16 16" version="1.1" width="24" data-view-component="true" className="fill-current">
+                                    <path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"></path>
+                                </svg>
+                                Continue with GitHub
+                            </a>
+                        </div>
+                        <div className="mt-8 text-center text-on-surface-variant text-sm">
+                            <p>We've moved fully to GitHub. Email/password registration is disabled.</p>
+                        </div>
                         </div>
 
                         {/* Bottom Links */}

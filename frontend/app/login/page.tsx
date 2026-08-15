@@ -310,76 +310,8 @@ export default function LoginPage() {
                             </a>
                         </div>
                         
-                        <div className="relative flex items-center justify-center mb-8">
-                            <div className="border-t border-outline-variant/30 w-full"></div>
-                            <div className="absolute bg-surface px-4 text-xs font-bold text-outline uppercase tracking-widest">
-                                OR
-                            </div>
-                        </div>
-
-                        <form className="space-y-6" onSubmit={handleLogin}>
-                            {error && (
-                                <div className="p-4 bg-error-container text-on-error-container border border-error/50 rounded-lg text-sm font-semibold text-center animate-in fade-in slide-in-from-top-2">
-                                    {error}
-                                </div>
-                            )}
-
-                            <div className="space-y-2 animate-in fade-in slide-in-from-left-4">
-                                <label className="text-xs font-bold text-on-surface-variant px-1 uppercase tracking-widest" htmlFor="email">Email Address</label>
-                                <div className="relative group">
-                                    <input 
-                                        className="w-full bg-surface-container-low border border-outline-variant/50 rounded-lg px-6 py-4 text-on-surface focus:border-primary-container focus:ring-1 focus:ring-primary-container transition-all outline-none" 
-                                        id="email" 
-                                        name="email" 
-                                        value={email}
-                                        onChange={(e) => setEmail(e.target.value)}
-                                        placeholder="name@company.com" 
-                                        type="email" 
-                                        required 
-                                    />
-                                </div>
-                            </div>
-                            
-                            <div className="space-y-2 animate-in fade-in slide-in-from-left-4 delay-75">
-                                <div className="flex justify-between items-center px-1">
-                                    <label className="text-xs font-bold text-on-surface-variant uppercase tracking-widest" htmlFor="password">Password</label>
-                                    <Link className="text-xs font-bold text-primary-fixed-dim hover:underline uppercase tracking-widest" href="/forgot-password">Forgot Password?</Link>
-                                </div>
-                                <div className="relative group">
-                                    <input 
-                                        className="w-full bg-surface-container-low border border-outline-variant/50 rounded-lg px-6 py-4 text-on-surface focus:border-primary-container focus:ring-1 focus:ring-primary-container transition-all outline-none" 
-                                        id="password" 
-                                        name="password" 
-                                        value={password}
-                                        onChange={(e) => setPassword(e.target.value)}
-                                        placeholder="••••••••" 
-                                        type="password" 
-                                        required 
-                                    />
-                                </div>
-                            </div>
-                            
-                            <button 
-                                className="w-full flex items-center justify-center gap-2 bg-primary-container text-on-primary font-bold py-4 rounded-lg glow-effect hover:opacity-90 active:scale-95 transition-all duration-200 text-lg disabled:opacity-50 disabled:active:scale-100" 
-                                type="submit"
-                                disabled={loading}
-                            >
-                                {loading ? (
-                                    <>
-                                        <span className="material-symbols-outlined animate-spin" style={{ fontVariationSettings: "'FILL' 1" }}>progress_activity</span>
-                                        Signing In...
-                                    </>
-                                ) : (
-                                    <>Sign In</>
-                                )}
-                            </button>
-                        </form>
-                        
-                        <div className="mt-16 text-center">
-                            <p className="text-base text-on-surface-variant">
-                                Don't have an account?{' '}
-                                <Link className="text-primary-fixed-dim font-semibold hover:underline" href="/register">Sign up</Link>
-                            </p>
+                        <div className="mt-8 text-center text-on-surface-variant text-sm">
+                            <p>We've moved fully to GitHub. Email/password login is disabled.</p>
                         </div>
                     </div>
                     

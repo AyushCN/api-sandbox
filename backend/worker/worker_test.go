@@ -42,9 +42,9 @@ func TestHandleBuildEnvironmentTask_CloneError(t *testing.T) {
 	}
 	db.DB.Create(&env)
 
-	// Mock ProviderCloneAndBuildImage to fail
-	ProviderCloneAndBuildImage = func(ctx context.Context, envID, gitURL, branch string) (string, error) {
-		return "", fmt.Errorf("mock clone failure")
+	// Mock ProviderCloneOrFetch to fail
+	ProviderCloneOrFetch = func(ctx context.Context, targetDir, repoURL, branch, token string) error {
+		return fmt.Errorf("mock clone failure")
 	}
 
 	payload, _ := json.Marshal(map[string]string{"environmentId": env.ID})
@@ -79,20 +79,14 @@ func TestHandleBuildEnvironmentTask_SidecarError(t *testing.T) {
 	db.DB.Create(&env)
 
 	// Mock providers
-	ProviderCloneAndBuildImage = func(ctx context.Context, envID, gitURL, branch string) (string, error) {
-		return "mock-image:latest", nil
+	ProviderCloneOrFetch = func(ctx context.Context, targetDir, repoURL, branch, token string) error {
+		return nil
 	}
 	ProviderDetectDatabaseRequirements = func(workspaceDir string) (provider.DBType, error) {
 		return provider.DBTypePostgres, nil
 	}
 	ProviderStartSidecarDatabase = func(ctx context.Context, envID, netID string, dbType provider.DBType) (string, error) {
 		return "", fmt.Errorf("mock sidecar provision failure")
-	}
-	// Verify StartContainer is not called
-	startContainerCalled := false
-	ProviderStartContainer = func(ctx context.Context, envID, imageTag, netID, dbURL string) (string, int, error) {
-		startContainerCalled = true
-		return "", 0, nil
 	}
 
 	payload, _ := json.Marshal(map[string]string{"environmentId": env.ID})
@@ -101,10 +95,6 @@ func TestHandleBuildEnvironmentTask_SidecarError(t *testing.T) {
 	err := HandleBuildEnvironmentTask(context.Background(), task)
 	if err == nil {
 		t.Errorf("Expected error from HandleBuildEnvironmentTask, got nil")
-	}
-
-	if startContainerCalled {
-		t.Errorf("StartContainer should not be called if sidecar fails")
 	}
 
 	// Verify DB status is FAILED

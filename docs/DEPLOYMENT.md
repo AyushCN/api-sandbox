@@ -110,5 +110,5 @@ Before deploying to production, please be aware of the following architectural l
 
 - **Single Host:** The orchestration design is tightly coupled to the local Docker socket. Multi-node clusters (Swarm/K8s) are not supported by this compose setup.
 - **Socket Trust:** As warned above, the backend assumes total trust over the host Docker daemon.
-- **Non-Live Editor:** The in-app editor is asynchronous. Code must be saved, committed via the API, and explicitly re-synced (triggering a container rebuild) to take effect. Live-reloading is not built in.
+- **Live Editor:** The in-app editor is fully live! Changes you make in the editor are immediately synced to the container via host volume bind-mounts, triggering hot-reloading (via nodemon, watchdog, or air) depending on your language runtime.
 - **Redis Required:** The Asynq worker queue relies heavily on Redis for job scheduling and state consistency. Do not attempt to strip Redis from the stack.

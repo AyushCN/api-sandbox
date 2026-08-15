@@ -1,21 +1,16 @@
 package provider
 
 import (
-	"archive/tar"
 	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/api-sandbox/backend/db"
@@ -53,7 +48,7 @@ func recordBenchmark(id string, timings []buildTiming, totalDuration time.Durati
 	if condition == "" {
 		condition = "cold"
 	}
-	
+
 	var imageSizeBytes int64
 	if inspect, err := dockerClient.InspectImage(imageTag); err == nil {
 		imageSizeBytes = inspect.Size
@@ -109,7 +104,7 @@ func CloneOrFetch(ctx context.Context, dir, gitURL, branch, githubToken string) 
 	if err := exec.CommandContext(ctx, "git", "-C", dir, "remote", "add", "origin", gitURL).Run(); err != nil {
 		return err
 	}
-	
+
 	fetchCmd := exec.CommandContext(ctx, "git", "-C", dir, "fetch", "--depth", "1", "origin", branch)
 	if out, err := fetchCmd.CombinedOutput(); err != nil {
 		// Fallback to fetch all if branch isn't found
@@ -121,326 +116,6 @@ func CloneOrFetch(ctx context.Context, dir, gitURL, branch, githubToken string) 
 		return exec.CommandContext(ctx, "git", "-C", dir, "checkout", "FETCH_HEAD").Run()
 	}
 	return exec.CommandContext(ctx, "git", "-C", dir, "checkout", branch).Run()
-}
-
-func CloneAndBuildImage(ctx context.Context, envID string, gitURL string, branch string) (string, error) {
-	var timings []buildTiming
-	start := time.Now()
-
-	wd, err := os.Getwd()
-	if err != nil {
-		return "", fmt.Errorf("failed to get working directory: %v", err)
-	}
-	workspacesRoot := filepath.Join(wd, "workspaces")
-	_ = os.MkdirAll(workspacesRoot, 0755)
-	tmpDir := filepath.Join(workspacesRoot, envID)
-	imageTag := fmt.Sprintf("api-sandbox-%s", strings.ToLower(envID))
-
-	subDir := ""
-	gitURL = strings.TrimSuffix(gitURL, "/")
-
-	re := regexp.MustCompile(`^https://github\.com/([^/]+)/([^/]+)(?:/tree/([^/]+)/(.*))?$`)
-	matches := re.FindStringSubmatch(gitURL)
-	if len(matches) == 5 && matches[3] != "" {
-		gitURL = fmt.Sprintf("https://github.com/%s/%s", matches[1], strings.TrimSuffix(matches[2], ".git"))
-		branch = matches[3]
-		subDir = matches[4]
-	}
-
-	repoForBenchmark := gitURL
-
-	createLog(envID, fmt.Sprintf("Cloning repository %s (branch: %s, subdir: %s)...", gitURL, branch, subDir), models.LogLevelInfo)
-
-	// clone/fetch stage
-	t0 := time.Now()
-
-	// 1. Clone Repo
-	// For build check path we might not have the user's token directly, so we pass empty string for now,
-	// unless we fetch the user's token. (Since CloneAndBuildImage is just the build check mode now)
-	if err := CloneOrFetch(ctx, tmpDir, gitURL, branch, ""); err != nil {
-		_ = os.RemoveAll(tmpDir)
-		return "", err
-	}
-	timings = append(timings, buildTiming{"clone", time.Since(t0)})
-
-	createLog(envID, fmt.Sprintf("Building Docker image %s...", imageTag), models.LogLevelInfo)
-
-	// detect stage
-	t1 := time.Now()
-
-	// Set the build directory to the subdirectory if specified
-	buildDir := tmpDir
-	if subDir != "" {
-		buildDir = filepath.Clean(filepath.Join(tmpDir, subDir))
-
-		// Prevent path traversal
-		if !strings.HasPrefix(buildDir, filepath.Clean(tmpDir)+string(os.PathSeparator)) && buildDir != filepath.Clean(tmpDir) {
-			errMsg := fmt.Sprintf("Invalid subdirectory path: %s", subDir)
-			createLog(envID, errMsg, models.LogLevelError)
-			return "", fmt.Errorf("%s", errMsg)
-		}
-
-		// Check if the subdirectory actually exists in the cloned repo
-		if info, err := os.Stat(buildDir); os.IsNotExist(err) || !info.IsDir() {
-			errMsg := fmt.Sprintf("Subdirectory '%s' does not exist in the repository.", subDir)
-			createLog(envID, errMsg, models.LogLevelError)
-			return "", fmt.Errorf("%s", errMsg)
-		}
-	}
-
-	// Pre-build analysis: Check if Dockerfile exists in the build directory
-	dockerfilePath := filepath.Join(buildDir, "Dockerfile")
-	dockerfileInfo, err := os.Stat(dockerfilePath)
-	hasDockerfile := err == nil && !dockerfileInfo.IsDir()
-
-	if !hasDockerfile {
-		// Use Buildpack Manager to auto-detect and generate a Dockerfile
-		manager := NewBuildpackManager()
-		bp, bpErr := manager.Detect(buildDir)
-
-		if bpErr == nil {
-			createLog(envID, "Detected language buildpack. Generating optimized Dockerfile...", models.LogLevelInfo)
-
-			_, buildErr := bp.Build(ctx, buildDir)
-			if buildErr != nil {
-				return "", fmt.Errorf("buildpack generation failed: %v", buildErr)
-			}
-			dockerfilePath = filepath.Join(buildDir, "Dockerfile")
-		} else {
-			// Fallback to Nixpacks
-			createLog(envID, "No supported buildpack found. Generating build plan using Nixpacks...", models.LogLevelInfo)
-
-			nixpacksPath := "nixpacks"
-			if home, err := os.UserHomeDir(); err == nil {
-				localBin := filepath.Join(home, ".local", "bin", "nixpacks")
-				if _, err := os.Stat(localBin); err == nil {
-					nixpacksPath = localBin
-				}
-			}
-
-			cmd := exec.CommandContext(ctx, nixpacksPath, "build", buildDir, "--out", buildDir, "--no-error-without-start")
-			out, err := cmd.CombinedOutput()
-			if err != nil {
-				return "", fmt.Errorf("nixpacks build failed: %s - %v", string(out), err)
-			}
-
-			createLog(envID, "Nixpacks build plan generated successfully.", models.LogLevelInfo)
-
-			// Move .nixpacks/Dockerfile to root Dockerfile so we don't need to specify opts.Dockerfile
-			err = os.Rename(filepath.Join(buildDir, ".nixpacks", "Dockerfile"), filepath.Join(buildDir, "Dockerfile"))
-			if err != nil {
-				return "", fmt.Errorf("failed to move Nixpacks Dockerfile: %v", err)
-			}
-			dockerfilePath = filepath.Join(buildDir, "Dockerfile")
-		}
-	}
-
-	if content, err := os.ReadFile(dockerfilePath); err == nil {
-		if !strings.Contains(strings.ToUpper(string(content)), "EXPOSE ") {
-			// Append EXPOSE 5000 as a fallback so PublishAllPorts works
-			newContent := string(content) + "\n# Auto-injected by API Sandbox\nEXPOSE 5000\n"
-			os.WriteFile(dockerfilePath, []byte(newContent), 0644)
-			createLog(envID, "No EXPOSE instruction found in Dockerfile. Auto-injecting 'EXPOSE 5000'...", models.LogLevelWarn)
-		}
-	}
-
-	timings = append(timings, buildTiming{"detect", time.Since(t1)})
-
-	// build stage
-	t2 := time.Now()
-	// 2. Tar the directory for build context
-	tarStream, err := tarballDir(buildDir)
-	if err != nil {
-		return "", fmt.Errorf("failed to tar build context: %v", err)
-	}
-
-	// 3. Build Image
-	buf := new(bytes.Buffer)
-	opts := docker.BuildImageOptions{
-		Name:         imageTag,
-		InputStream:  tarStream,
-		OutputStream: buf,
-		ContextDir:   "", // Root of the tarball
-		Version:      docker.BuilderBuildKit,
-	}
-
-	if os.Getenv("BERTH_CACHE_MODE") == "warm" {
-		opts.CacheFrom = []string{imageTag}
-		opts.BuildArgs = []docker.BuildArg{
-			{Name: "BUILDKIT_INLINE_CACHE", Value: "1"},
-		}
-	}
-
-	if err := dockerClient.BuildImage(opts); err != nil {
-		return "", fmt.Errorf("failed to build image: %v", err)
-	}
-
-	timings = append(timings, buildTiming{"build", time.Since(t2)})
-
-	// Log output
-	createLog(envID, buf.String(), models.LogLevelInfo)
-
-	createLog(envID, "Image built successfully.", models.LogLevelInfo)
-
-	recordBenchmark(envID, timings, time.Since(start), imageTag, repoForBenchmark)
-
-	return imageTag, nil
-}
-
-func StartContainer(ctx context.Context, envID string, imageTag string, orgID string, dbURL string) (string, int, error) {
-	createLog(envID, fmt.Sprintf("Starting container for image %s...", imageTag), models.LogLevelInfo)
-
-	// Pre-cleanup in case a zombie container with this name exists from a previous failed run
-	_ = CleanupContainer(ctx, fmt.Sprintf("api-sandbox-env-%s", envID))
-
-	// Inspect image to find the exposed port
-	imageInfo, err := dockerClient.InspectImage(imageTag)
-	var exposedPort string
-	if err == nil && imageInfo.Config != nil {
-		for port := range imageInfo.Config.ExposedPorts {
-			exposedPort = port.Port()
-			break
-		}
-	}
-	if exposedPort == "" {
-		exposedPort = "5000"
-	}
-
-	var originalCmd []string
-	if imageInfo != nil && imageInfo.Config != nil {
-		originalCmd = imageInfo.Config.Cmd
-	}
-
-	domain := os.Getenv("DOMAIN")
-	if domain == "" {
-		domain = "localhost"
-	}
-
-	labels := map[string]string{
-		"traefik.enable": "true",
-		fmt.Sprintf("traefik.http.routers.env-%s.rule", envID):                      fmt.Sprintf("Host(`%s.%s`)", envID, domain),
-		fmt.Sprintf("traefik.http.services.env-%s.loadbalancer.server.port", envID): exposedPort,
-		"traefik.docker.network": fmt.Sprintf("api-sandbox-net-%s", orgID),
-	}
-
-	if domain != "localhost" {
-		labels[fmt.Sprintf("traefik.http.routers.env-%s.entrypoints", envID)] = "websecure"
-		labels[fmt.Sprintf("traefik.http.routers.env-%s.tls.certresolver", envID)] = "myresolver"
-	} else {
-		labels[fmt.Sprintf("traefik.http.routers.env-%s.entrypoints", envID)] = "web"
-	}
-
-	networkName, networkID, err := EnsureOrgNetwork(ctx, orgID)
-	if err != nil {
-		createLog(envID, err.Error(), models.LogLevelError)
-		return "", 0, err
-	}
-
-	// Always ensure Traefik proxy is connected to this user's network for routing
-	if networkID != "" {
-		_ = dockerClient.ConnectNetwork(networkID, docker.NetworkConnectionOptions{
-			Container: "traefik-proxy",
-		})
-	}
-
-	wd, err := os.Getwd()
-	if err != nil {
-		return "", 0, fmt.Errorf("failed to get working directory: %v", err)
-	}
-	workspaceDir := filepath.Join(wd, "workspaces", envID)
-
-	pidsLimit := int64(256)
-	opts := docker.CreateContainerOptions{
-		Name: fmt.Sprintf("api-sandbox-env-%s", envID),
-		Config: &docker.Config{
-			Image: imageTag,
-			Env: func() []string {
-				e := []string{fmt.Sprintf("PORT=%s", exposedPort), "HOST=0.0.0.0"}
-				if dbURL != "" {
-					e = append(e, fmt.Sprintf("DATABASE_URL=%s", dbURL), fmt.Sprintf("MONGO_URI=%s", dbURL))
-					if u, err := url.Parse(dbURL); err == nil {
-						e = append(e, fmt.Sprintf("DB_HOST=%s", u.Hostname()))
-						if u.Port() != "" {
-							e = append(e, fmt.Sprintf("DB_PORT=%s", u.Port()))
-						}
-						if u.User != nil {
-							e = append(e, fmt.Sprintf("DB_USER=%s", u.User.Username()))
-							if p, ok := u.User.Password(); ok {
-								e = append(e, fmt.Sprintf("DB_PASSWORD=%s", p))
-							}
-						}
-						dbName := strings.TrimPrefix(u.Path, "/")
-						if dbName != "" {
-							e = append(e, fmt.Sprintf("DB_NAME=%s", dbName))
-						}
-					}
-				}
-				return e
-			}(),
-			Labels: labels,
-		},
-		HostConfig: &docker.HostConfig{
-			Memory:          512 * 1024 * 1024,
-			MemorySwap:      -1,
-			CPUQuota:        100000,
-			CPUPeriod:       100000,
-			CPUShares:       1024,
-			PidsLimit:       &pidsLimit,
-			RestartPolicy:   docker.RestartOnFailure(3),
-			PublishAllPorts: true,
-			SecurityOpt:     []string{"no-new-privileges:true"},
-			CapDrop:         []string{"ALL"},
-			CapAdd:          []string{"NET_BIND_SERVICE", "CHOWN", "SETUID", "SETGID", "DAC_OVERRIDE"},
-			Binds: []string{
-				fmt.Sprintf("%s:/app", workspaceDir),
-				"/app/node_modules",
-			},
-		},
-		NetworkingConfig: &docker.NetworkingConfig{
-			EndpointsConfig: map[string]*docker.EndpointConfig{
-				networkName: {},
-			},
-		},
-	}
-
-	if len(originalCmd) > 0 {
-		cmdStr := strings.Join(originalCmd, " ")
-		opts.Config.Cmd = []string{"sh", "-c", fmt.Sprintf("%s || true; sleep infinity", cmdStr)}
-	} else {
-		opts.Config.Cmd = []string{"sh", "-c", "sleep infinity"}
-	}
-
-	container, err := dockerClient.CreateContainer(opts)
-	if err != nil {
-		return "", 0, fmt.Errorf("failed to create container: %v", err)
-	}
-
-	if err := dockerClient.StartContainer(container.ID, nil); err != nil {
-		return "", 0, fmt.Errorf("failed to start container: %v", err)
-	}
-
-	// Inspect to get dynamic port
-	inspect, err := dockerClient.InspectContainer(container.ID)
-	if err != nil {
-		return container.ID, 0, fmt.Errorf("failed to inspect container: %v", err)
-	}
-
-	var assignedPort int
-	for _, bindings := range inspect.NetworkSettings.Ports {
-		if len(bindings) > 0 {
-			port, _ := strconv.Atoi(bindings[0].HostPort)
-			assignedPort = port
-			break
-		}
-	}
-
-	if assignedPort == 0 {
-		return container.ID, 0, fmt.Errorf("container started but no ports were mapped")
-	}
-
-	createLog(envID, fmt.Sprintf("Container started successfully on port %d (Container ID: %s).", assignedPort, container.ID[:12]), models.LogLevelInfo)
-
-	return container.ID, assignedPort, nil
 }
 
 func ProvisionDevSandbox(ctx context.Context, envID string, config DevRuntimeConfig, orgID string, dbURL string) (string, int, error) {
@@ -570,40 +245,6 @@ func CleanupContainer(ctx context.Context, containerID string) error {
 }
 
 // Helper to create tarball from a directory
-func tarballDir(src string) (io.Reader, error) {
-	buf := new(bytes.Buffer)
-	tw := tar.NewWriter(buf)
-	defer tw.Close()
-
-	err := filepath.Walk(src, func(file string, fi os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if !fi.Mode().IsRegular() {
-			return nil
-		}
-		header, err := tar.FileInfoHeader(fi, fi.Name())
-		if err != nil {
-			return err
-		}
-		header.Name = strings.TrimPrefix(strings.Replace(file, src, "", -1), string(filepath.Separator))
-		if err := tw.WriteHeader(header); err != nil {
-			return err
-		}
-		f, err := os.Open(file)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		_, err = io.Copy(tw, f)
-		return err
-	})
-
-	if err != nil {
-		return nil, err
-	}
-	return buf, nil
-}
 
 func CleanupWorkspace(envID string) error {
 	wd, err := os.Getwd()
@@ -701,15 +342,15 @@ func StartSidecarDatabase(ctx context.Context, envID string, orgID string, dbTyp
 			Env:   env,
 		},
 		HostConfig: &docker.HostConfig{
-			Memory:          256 * 1024 * 1024, // 256MB for DB
-			MemorySwap:      -1,
-			CPUQuota:        100000,
-			CPUPeriod:       100000,
-			CPUShares:       512,
-			PidsLimit:       &pidsLimit,
-			SecurityOpt:     []string{"no-new-privileges:true"},
-			CapDrop:         []string{"ALL"},
-			CapAdd:          []string{"CHOWN", "SETUID", "SETGID", "DAC_OVERRIDE"}, // DBs usually need these to initialize
+			Memory:      256 * 1024 * 1024, // 256MB for DB
+			MemorySwap:  -1,
+			CPUQuota:    100000,
+			CPUPeriod:   100000,
+			CPUShares:   512,
+			PidsLimit:   &pidsLimit,
+			SecurityOpt: []string{"no-new-privileges:true"},
+			CapDrop:     []string{"ALL"},
+			CapAdd:      []string{"CHOWN", "SETUID", "SETGID", "DAC_OVERRIDE"}, // DBs usually need these to initialize
 		},
 		NetworkingConfig: &docker.NetworkingConfig{
 			EndpointsConfig: map[string]*docker.EndpointConfig{
@@ -820,5 +461,11 @@ func EnsureOrgNetwork(ctx context.Context, orgID string) (string, string, error)
 			networkID = net.ID
 		}
 	}
+
+	// Ensure Traefik is connected to this network so it can route traffic to the sandbox
+	_ = dockerClient.ConnectNetwork(networkID, docker.NetworkConnectionOptions{
+		Container: "api-sandbox-traefik",
+	})
+
 	return networkName, networkID, nil
 }

@@ -17,10 +17,9 @@ import (
 
 var (
 	ProviderCleanupContainer         = provider.CleanupContainer
-	ProviderCloneAndBuildImage       = provider.CloneAndBuildImage
+	ProviderCloneOrFetch             = provider.CloneOrFetch
 	ProviderDetectDatabaseRequirements = provider.DetectDatabaseRequirements
 	ProviderStartSidecarDatabase     = provider.StartSidecarDatabase
-	ProviderStartContainer           = provider.StartContainer
 )
 
 func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
@@ -76,7 +75,7 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 		Level:         models.LogLevelInfo,
 	})
 	
-	err = provider.CloneOrFetch(ctx, workspaceDir, env.GitURL, env.GithubBranch, githubToken)
+	err = ProviderCloneOrFetch(ctx, workspaceDir, env.GitURL, env.GithubBranch, githubToken)
 	if err != nil {
 		slog.Error("Clone failed", "env_id", envID, "error", err)
 		db.DB.Model(&env).Update("status", models.StatusFailed)

@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"github.com/pelletier/go-toml/v2"
 )
 
 type DevRuntimeConfig struct {
@@ -17,102 +20,267 @@ type DevRuntimeConfig struct {
 
 func DetectDevRuntime(repoPath string, subDir string) (DevRuntimeConfig, error) {
 	appDir := filepath.Join(repoPath, subDir)
+	var config DevRuntimeConfig
+	var err error
 	
 	// Node.js detection
 	packageJsonPath := filepath.Join(appDir, "package.json")
-	if _, err := os.Stat(packageJsonPath); err == nil {
-		return detectNodeRuntime(packageJsonPath, subDir)
+	if _, errStat := os.Stat(packageJsonPath); errStat == nil {
+		config, err = detectNodeRuntime(appDir, subDir)
+	} else if _, errStat := os.Stat(filepath.Join(appDir, "requirements.txt")); errStat == nil {
+		config, err = detectPythonRuntime(appDir, subDir)
+	} else if _, errStat := os.Stat(filepath.Join(appDir, "pyproject.toml")); errStat == nil {
+		config, err = detectPythonRuntime(appDir, subDir)
+	} else if _, errStat := os.Stat(filepath.Join(appDir, "Pipfile")); errStat == nil {
+		config, err = detectPythonRuntime(appDir, subDir)
+	} else if _, errStat := os.Stat(filepath.Join(appDir, "go.mod")); errStat == nil {
+		config, err = detectGoRuntime(appDir, subDir)
+	} else if _, errStat := os.Stat(filepath.Join(appDir, "Gemfile")); errStat == nil {
+		config, err = detectRubyRuntime(appDir, subDir)
+	} else if _, errStat := os.Stat(filepath.Join(appDir, "composer.json")); errStat == nil {
+		config, err = detectPHPRuntime(appDir, subDir)
+	} else if _, errStat := os.Stat(filepath.Join(appDir, "Cargo.toml")); errStat == nil {
+		config, err = detectRustRuntime(appDir, subDir)
+	} else {
+		err = fmt.Errorf("no supported language detected")
 	}
 
-	// Python detection
-	requirementsTxtPath := filepath.Join(appDir, "requirements.txt")
-	if _, err := os.Stat(requirementsTxtPath); err == nil {
-		return detectPythonRuntime(appDir, subDir)
+	// Read sandbox.toml for overrides
+	sandboxTomlPath := filepath.Join(appDir, "sandbox.toml")
+	if b, readErr := os.ReadFile(sandboxTomlPath); readErr == nil {
+		var override struct {
+			BaseImage  string `toml:"base_image"`
+			InstallCmd string `toml:"install_cmd"`
+			StartCmd   string `toml:"start_cmd"`
+			WorkDir    string `toml:"work_dir"`
+		}
+		if tomlErr := toml.Unmarshal(b, &override); tomlErr == nil {
+			if override.BaseImage != "" {
+				config.BaseImage = override.BaseImage
+			}
+			if override.InstallCmd != "" {
+				config.InstallCmd = override.InstallCmd
+			}
+			if override.StartCmd != "" {
+				config.StartCmd = override.StartCmd
+			}
+			if override.WorkDir != "" {
+				config.WorkDir = override.WorkDir
+			}
+			// If we had no detected config but they provided sandbox.toml, we clear the error if start cmd is provided
+			if override.StartCmd != "" {
+				err = nil
+			}
+		}
 	}
 
-	// Go detection
-	goModPath := filepath.Join(appDir, "go.mod")
-	if _, err := os.Stat(goModPath); err == nil {
-		return detectGoRuntime(appDir, subDir)
-	}
-
-	return DevRuntimeConfig{}, fmt.Errorf("no supported language detected (missing package.json, requirements.txt, or go.mod)")
+	return config, err
 }
 
-func detectNodeRuntime(packageJsonPath, subDir string) (DevRuntimeConfig, error) {
-	// Parse package.json
-	content, err := os.ReadFile(packageJsonPath)
-	var startCmd = "npx nodemon -L index.js" // -L enables legacy watch (polling) for bind mounts
-	var installCmd = "npm install" // In production, might want --ignore-scripts
+func getWorkDir(subDir string) string {
+	if subDir != "" {
+		return "/app/" + subDir
+	}
+	return "/app"
+}
 
+func detectNodeRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
+	packageJsonPath := filepath.Join(appDir, "package.json")
+	content, err := os.ReadFile(packageJsonPath)
+	
+	installCmd := "npm install"
+	startCmd := "npx nodemon -L index.js" // fallback
+	
+	// Detect package manager
+	if _, err := os.Stat(filepath.Join(appDir, "yarn.lock")); err == nil {
+		installCmd = "yarn install"
+	} else if _, err := os.Stat(filepath.Join(appDir, "pnpm-lock.yaml")); err == nil {
+		installCmd = "pnpm install"
+	} else if _, err := os.Stat(filepath.Join(appDir, "bun.lockb")); err == nil {
+		installCmd = "bun install"
+	}
+
+	isNextJs := false
 	if err == nil {
 		var pkg map[string]interface{}
 		if err := json.Unmarshal(content, &pkg); err == nil {
+			// Check dependencies for next
+			if deps, ok := pkg["dependencies"].(map[string]interface{}); ok {
+				if _, hasNext := deps["next"]; hasNext {
+					isNextJs = true
+				}
+			}
+			
 			if scripts, ok := pkg["scripts"].(map[string]interface{}); ok {
-				if dev, ok := scripts["dev"].(string); ok && dev != "" {
-					startCmd = "npm run dev" // We assume 'dev' script uses nodemon or similar
+				if isNextJs {
+					startCmd = "npm run dev"
+					if strings.HasPrefix(installCmd, "yarn") { startCmd = "yarn dev" }
+					if strings.HasPrefix(installCmd, "pnpm") { startCmd = "pnpm dev" }
+					if strings.HasPrefix(installCmd, "bun") { startCmd = "bun run dev" }
+				} else if dev, ok := scripts["dev"].(string); ok && dev != "" {
+					startCmd = "npm run dev"
+					if strings.HasPrefix(installCmd, "yarn") { startCmd = "yarn dev" }
+					if strings.HasPrefix(installCmd, "pnpm") { startCmd = "pnpm dev" }
+					if strings.HasPrefix(installCmd, "bun") { startCmd = "bun run dev" }
 				} else if start, ok := scripts["start"].(string); ok && start != "" {
-					// Wrap start script with nodemon for polling
-					startCmd = "npx nodemon -L --exec \"npm run start\""
+					startCmd = "npx nodemon -L --exec \"npm start\""
+					if strings.HasPrefix(installCmd, "yarn") { startCmd = "npx nodemon -L --exec \"yarn start\"" }
+					if strings.HasPrefix(installCmd, "pnpm") { startCmd = "npx nodemon -L --exec \"pnpm start\"" }
+					if strings.HasPrefix(installCmd, "bun") { startCmd = "npx nodemon -L --exec \"bun start\"" }
 				}
 			}
 		}
 	}
 
-	workDir := "/app"
-	if subDir != "" {
-		workDir = "/app/" + subDir
+	// Check if typescript and not nextjs, maybe we need ts-node
+	if !isNextJs {
+		if _, err := os.Stat(filepath.Join(appDir, "tsconfig.json")); err == nil {
+			if startCmd == "npx nodemon -L index.js" {
+				// Try to find index.ts or src/index.ts
+				if _, err := os.Stat(filepath.Join(appDir, "src", "index.ts")); err == nil {
+					startCmd = "npx nodemon -L src/index.ts"
+				} else if _, err := os.Stat(filepath.Join(appDir, "index.ts")); err == nil {
+					startCmd = "npx nodemon -L index.ts"
+				}
+			}
+		} else {
+			if startCmd == "npx nodemon -L index.js" {
+				if _, err := os.Stat(filepath.Join(appDir, "src", "index.js")); err == nil {
+					startCmd = "npx nodemon -L src/index.js"
+				}
+			}
+		}
+	}
+
+	baseImage := "node:20-alpine"
+	if strings.HasPrefix(installCmd, "bun") {
+		baseImage = "oven/bun:1-alpine"
 	}
 
 	return DevRuntimeConfig{
-		BaseImage:  "node:20-alpine",
+		BaseImage:  baseImage,
 		InstallCmd: installCmd,
 		StartCmd:   startCmd,
-		WatchHint:  "Use nodemon --legacy-watch (-L) if standard file watchers fail over bind mounts.",
-		WorkDir:    workDir,
+		WatchHint:  "Node.js detected. Polling enforced via nodemon -L where applicable.",
+		WorkDir:    getWorkDir(subDir),
 	}, nil
 }
 
 func detectPythonRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
-	workDir := "/app"
-	if subDir != "" {
-		workDir = "/app/" + subDir
+	installCmd := "pip install -r requirements.txt"
+	if _, err := os.Stat(filepath.Join(appDir, "requirements.txt")); err != nil {
+		if _, err := os.Stat(filepath.Join(appDir, "pyproject.toml")); err == nil {
+			installCmd = "pip install ."
+		} else if _, err := os.Stat(filepath.Join(appDir, "Pipfile")); err == nil {
+			installCmd = "pip install pipenv && pipenv install --system"
+		}
 	}
+
+	installCmd += " watchdog" // Ensure polling works
 
 	startCmd := "python main.py"
 	
-	if _, err := os.Stat(filepath.Join(appDir, "main.py")); err == nil {
-		startCmd = "python main.py"
-	} else if _, err := os.Stat(filepath.Join(appDir, "app.py")); err == nil {
-		startCmd = "python app.py"
+	// Scan requirements for frameworks
+	reqs, _ := os.ReadFile(filepath.Join(appDir, "requirements.txt"))
+	reqStr := strings.ToLower(string(reqs))
+	
+	if strings.Contains(reqStr, "fastapi") {
+		startCmd = "uvicorn main:app --host 0.0.0.0 --reload --reload-dir ."
+		if _, err := os.Stat(filepath.Join(appDir, "app", "main.py")); err == nil {
+			startCmd = "uvicorn app.main:app --host 0.0.0.0 --reload --reload-dir ."
+		}
+	} else if strings.Contains(reqStr, "django") || fileExists(filepath.Join(appDir, "manage.py")) {
+		startCmd = "python manage.py runserver 0.0.0.0:8000"
+	} else if strings.Contains(reqStr, "flask") {
+		if fileExists(filepath.Join(appDir, "app.py")) {
+			startCmd = "FLASK_APP=app.py flask run --host=0.0.0.0 --reload"
+		} else if fileExists(filepath.Join(appDir, "main.py")) {
+			startCmd = "FLASK_APP=main.py flask run --host=0.0.0.0 --reload"
+		} else {
+			// Try to find a single .py file
+			files, _ := filepath.Glob(filepath.Join(appDir, "*.py"))
+			if len(files) == 1 {
+				startCmd = fmt.Sprintf("FLASK_APP=%s flask run --host=0.0.0.0 --reload", filepath.Base(files[0]))
+			} else {
+				startCmd = "flask run --host=0.0.0.0 --reload"
+			}
+		}
+	} else {
+		if fileExists(filepath.Join(appDir, "app.py")) {
+			startCmd = "python app.py"
+		}
 	}
-
-	// We can't automatically install uvicorn if it's not in requirements, 
-	// but we'll try to run watchdog or rely on the user's framework
 
 	return DevRuntimeConfig{
 		BaseImage:  "python:3.11-slim",
-		InstallCmd: "pip install -r requirements.txt",
+		InstallCmd: installCmd,
 		StartCmd:   startCmd,
-		WatchHint:  "Consider using uvicorn --reload or watchdog for polling over bind mounts.",
-		WorkDir:    workDir,
+		WatchHint:  "Python detected. Watchdog installed for polling.",
+		WorkDir:    getWorkDir(subDir),
 	}, nil
 }
 
 func detectGoRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
-	workDir := "/app"
-	if subDir != "" {
-		workDir = "/app/" + subDir
+	return DevRuntimeConfig{
+		BaseImage:  "golang:1.22-alpine",
+		InstallCmd: "go mod download && go install github.com/air-verse/air@latest",
+		// We will write .air.toml in the start script if it doesn't exist
+		StartCmd:   "if [ ! -f .air.toml ]; then air init && sed -i 's/poll = false/poll = true/' .air.toml; fi && air || go run .",
+		WatchHint:  "Go detected. Air configured with polling enabled.",
+		WorkDir:    getWorkDir(subDir),
+	}, nil
+}
+
+func detectRubyRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
+	startCmd := "ruby main.rb"
+	gemfile, _ := os.ReadFile(filepath.Join(appDir, "Gemfile"))
+	gemStr := strings.ToLower(string(gemfile))
+	
+	if strings.Contains(gemStr, "rails") {
+		startCmd = "bin/rails server -b 0.0.0.0"
 	}
 
 	return DevRuntimeConfig{
-		BaseImage:  "golang:1.22-alpine",
-		// Download dependencies and install Air for live reloading
-		InstallCmd: "go mod download && go install github.com/air-verse/air@latest",
-		StartCmd:   "air -c .air.toml || go run .",
-		WatchHint:  "Using air for live reloading. Provide .air.toml with poll=true if reload fails.",
-		WorkDir:    workDir,
+		BaseImage:  "ruby:3.3-alpine",
+		InstallCmd: "bundle install",
+		StartCmd:   startCmd,
+		WatchHint:  "Ruby/Rails detected.",
+		WorkDir:    getWorkDir(subDir),
 	}, nil
+}
+
+func detectPHPRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
+	startCmd := "php -S 0.0.0.0:8000"
+	composer, _ := os.ReadFile(filepath.Join(appDir, "composer.json"))
+	compStr := strings.ToLower(string(composer))
+	
+	if strings.Contains(compStr, "laravel/framework") {
+		startCmd = "php artisan serve --host=0.0.0.0 --port=8000"
+	}
+
+	return DevRuntimeConfig{
+		BaseImage:  "php:8.2-cli-alpine",
+		// Using alpine package manager to get composer easily
+		InstallCmd: "apk add composer && composer install",
+		StartCmd:   startCmd,
+		WatchHint:  "PHP/Laravel detected.",
+		WorkDir:    getWorkDir(subDir),
+	}, nil
+}
+
+func detectRustRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
+	return DevRuntimeConfig{
+		BaseImage:  "rust:1-slim",
+		InstallCmd: "cargo install cargo-watch",
+		StartCmd:   "cargo watch -x run",
+		WatchHint:  "Rust detected. cargo-watch used for live reloading.",
+		WorkDir:    getWorkDir(subDir),
+	}, nil
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func GenerateSandboxStartScript(config DevRuntimeConfig) string {

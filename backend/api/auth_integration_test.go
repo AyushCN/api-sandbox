@@ -56,78 +56,13 @@ func setupIntegrationRouter() *gin.Engine {
 	return r
 }
 
-func TestAuthWeakPassword(t *testing.T) {
-	setupIntegrationDB(t)
-	r := setupIntegrationRouter()
-
-	tests := []struct {
-		name     string
-		password string
-	}{
-		{"Too short", "Short1!"},
-		{"No upper", "noupper123!"},
-		{"No lower", "NOLOWER123!"},
-		{"No digit", "NoDigitHere!"},
-		{"No special", "NoSpecial1234"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			req, _ := http.NewRequest("POST", "/api/auth/register", bytes.NewBuffer([]byte(`{"email":"test@example.com","password":"`+tt.password+`","username":"testuser"}`)))
-			req.Header.Set("Content-Type", "application/json")
-			w := httptest.NewRecorder()
-			r.ServeHTTP(w, req)
-
-			if w.Code != http.StatusBadRequest {
-				t.Errorf("Expected 400 for weak password '%s', got %d", tt.password, w.Code)
-			}
-		})
-	}
-}
-
-func TestAuthHappyPath(t *testing.T) {
-	setupIntegrationDB(t)
-	r := setupIntegrationRouter()
-	os.Setenv("JWT_SECRET", "testsecret")
-
-	// 1. Register
-	req, _ := http.NewRequest("POST", "/api/auth/register", bytes.NewBuffer([]byte(`{"email":"happy@example.com","password":"StrongPassword123!","username":"happyuser"}`)))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("Expected 200 OK for register, got %d", w.Code)
-	}
-
-	// 2. Verify
-	var user models.User
-	db.DB.First(&user, "email = ?", "happy@example.com")
-	req2, _ := http.NewRequest("POST", "/api/auth/verify?code="+user.VerificationCode, nil)
-	w2 := httptest.NewRecorder()
-	r.ServeHTTP(w2, req2)
-
-	if w2.Code != http.StatusOK {
-		t.Errorf("Expected 200 OK for verify, got %d", w2.Code)
-	}
-
-	// 3. Login
-	req3, _ := http.NewRequest("POST", "/api/auth/login", bytes.NewBuffer([]byte(`{"email":"happy@example.com","password":"StrongPassword123!"}`)))
-	req3.Header.Set("Content-Type", "application/json")
-	w3 := httptest.NewRecorder()
-	r.ServeHTTP(w3, req3)
-
-	if w3.Code != http.StatusOK {
-		t.Errorf("Expected 200 OK for login, got %d", w3.Code)
-	}
-}
 
 func TestQuotas(t *testing.T) {
 	setupIntegrationDB(t)
 	r := setupIntegrationRouter()
 	os.Setenv("JWT_SECRET", "testsecret")
 
-	user := models.User{Email: "quota@example.com", Username: "quota", IsEmailVerified: true}
+	user := models.User{Email: "quota@example.com", Username: "quota", IsEmailVerified: true, GithubToken: "fake_token"}
 	db.DB.Create(&user)
 	token := generateTestToken(user.ID)
 

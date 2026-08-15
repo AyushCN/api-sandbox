@@ -237,6 +237,45 @@ export default function EnvironmentDetail() {
   const [inviteRole, setInviteRole] = useState("COLLABORATOR");
   const [isInviting, setIsInviting] = useState(false);
 
+  const [userSearchResults, setUserSearchResults] = useState<any[]>([]);
+  const [isSearchingUsers, setIsSearchingUsers] = useState(false);
+  const [showUserDropdown, setShowUserDropdown] = useState(false);
+
+  useEffect(() => {
+    if (!inviteIdentifier.trim() || inviteIdentifier.trim().length < 2) {
+      setUserSearchResults([]);
+      setShowUserDropdown(false);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setIsSearchingUsers(true);
+      try {
+        const token = localStorage.getItem("token");
+        const res = await fetch(`/api/users/search?q=${encodeURIComponent(inviteIdentifier.trim())}`, {
+           headers: {
+             "Authorization": `Bearer ${token}`
+           }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.length === 1 && data[0].email === inviteIdentifier.trim()) {
+             setShowUserDropdown(false);
+          } else {
+             setUserSearchResults(data || []);
+             setShowUserDropdown(true);
+          }
+        }
+      } catch (err) {
+        // fail silently for search
+      } finally {
+        setIsSearchingUsers(false);
+      }
+    }, 300); // 300ms debounce
+
+    return () => clearTimeout(timer);
+  }, [inviteIdentifier]);
+
   const fetchDockerLogs = async () => {
     setIsLoadingDockerLogs(true);
     try {
@@ -996,16 +1035,43 @@ export default function EnvironmentDetail() {
               </button>
             </div>
             <form onSubmit={handleInvite} className="p-5 space-y-4">
-              <div>
+              <div className="relative">
                 <label className="block text-xs font-medium text-on-surface-variant mb-1.5">Email or Username</label>
-                <input
-                  type="text"
-                  required
-                  value={inviteIdentifier}
-                  onChange={(e) => setInviteIdentifier(e.target.value)}
-                  placeholder="e.g. user@example.com or username"
-                  className="w-full bg-surface-container border border-outline-variant rounded-lg px-3 py-2 text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:border-primary-fixed/50"
-                />
+                <div className="relative">
+                  <input
+                    type="text"
+                    required
+                    value={inviteIdentifier}
+                    onChange={(e) => setInviteIdentifier(e.target.value)}
+                    onFocus={() => { if (userSearchResults.length > 0) setShowUserDropdown(true); }}
+                    onBlur={() => setTimeout(() => setShowUserDropdown(false), 200)}
+                    placeholder="e.g. user@example.com or username"
+                    className="w-full bg-surface-container border border-outline-variant rounded-lg px-3 py-2 text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:border-primary-fixed/50"
+                  />
+                  {isSearchingUsers && (
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                      <Loader2 className="w-4 h-4 animate-spin text-on-surface-variant/50" />
+                    </div>
+                  )}
+                </div>
+                {showUserDropdown && userSearchResults.length > 0 && (
+                  <div className="absolute z-10 w-full mt-1 bg-surface-container border border-outline-variant rounded-lg shadow-lg overflow-hidden max-h-48 overflow-y-auto">
+                    {userSearchResults.map((u) => (
+                      <button
+                        key={u.id}
+                        type="button"
+                        onClick={() => {
+                          setInviteIdentifier(u.email);
+                          setShowUserDropdown(false);
+                        }}
+                        className="w-full text-left px-3 py-2 hover:bg-surface-container-high transition-colors flex flex-col border-b border-outline-variant/30 last:border-0"
+                      >
+                        <span className="text-sm font-medium text-on-surface">{u.username}</span>
+                        <span className="text-xs text-on-surface-variant">{u.email}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
               <div>
                 <label className="block text-xs font-medium text-on-surface-variant mb-1.5">Role</label>

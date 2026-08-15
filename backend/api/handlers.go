@@ -117,6 +117,12 @@ func SetupRoutes(router *gin.Engine) {
 			userGroup.PUT("/me/password", ChangePassword)
 			userGroup.GET("/invites", GetUserInvites)
 		}
+
+		usersGroup := api.Group("/users")
+		usersGroup.Use(AuthMiddleware(), RateLimitAPI())
+		{
+			usersGroup.GET("/search", SearchUsers)
+		}
 	}
 
 	router.GET("/metrics", PrometheusMetrics)

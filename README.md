@@ -8,7 +8,7 @@ Instead of deploying static images, this platform mounts your code into language
 
 1. **Ephemeral Dev Runtimes**: Instant orchestration of hot-reloading containers (Node.js, Python, Go, etc.) via host-level bind mounts.
 2. **GitHub-First Source of Truth**: End-to-end GitHub OAuth integration. The sandbox acts as a temporary mirror. You can commit and push directly to GitHub from the browser.
-3. **Zero-Config Databases**: Automatic provisioning of isolated sidecar databases (PostgreSQL, MySQL, Redis) strictly tied to the lifecycle of the ephemeral sandbox.
+3. **Zero-Config Databases**: Automatic provisioning of isolated sidecar databases (PostgreSQL, MySQL, Redis) strictly tied to the lifecycle of the ephemeral sandbox. Fine-grained connection variables (e.g., `DB_HOST`, `DB_PORT`, `DB_USER`) are automatically injected into the sandbox container.
 4. **Browser IDE & Terminal**: Integrated file editing and terminal access to instantly test backend APIs before pushing.
 
 ## ⚠️ Known Limitations & Security Caveats

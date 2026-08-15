@@ -199,16 +199,16 @@ func detectPythonRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
 		startCmd = "python manage.py runserver 0.0.0.0:8000"
 	} else if strings.Contains(reqStr, "flask") {
 		if fileExists(filepath.Join(appDir, "app.py")) {
-			startCmd = "FLASK_APP=app.py flask run --host=0.0.0.0 --reload"
+			startCmd = "FLASK_APP=app.py flask run --host=0.0.0.0 --port=8000 --reload"
 		} else if fileExists(filepath.Join(appDir, "main.py")) {
-			startCmd = "FLASK_APP=main.py flask run --host=0.0.0.0 --reload"
+			startCmd = "FLASK_APP=main.py flask run --host=0.0.0.0 --port=8000 --reload"
 		} else {
 			// Try to find a single .py file
 			files, _ := filepath.Glob(filepath.Join(appDir, "*.py"))
 			if len(files) == 1 {
-				startCmd = fmt.Sprintf("FLASK_APP=%s flask run --host=0.0.0.0 --reload", filepath.Base(files[0]))
+				startCmd = fmt.Sprintf("FLASK_APP=%s flask run --host=0.0.0.0 --port=8000 --reload", filepath.Base(files[0]))
 			} else {
-				startCmd = "flask run --host=0.0.0.0 --reload"
+				startCmd = "flask run --host=0.0.0.0 --port=8000 --reload"
 			}
 		}
 	} else {

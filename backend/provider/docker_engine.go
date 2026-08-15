@@ -11,7 +11,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
+	"net/url"
 
 	"github.com/api-sandbox/backend/db"
 	"github.com/api-sandbox/backend/models"
@@ -183,6 +185,15 @@ func ProvisionDevSandbox(ctx context.Context, envID string, config DevRuntimeCon
 				e := []string{fmt.Sprintf("PORT=%s", exposedPort), "HOST=0.0.0.0"}
 				if dbURL != "" {
 					e = append(e, fmt.Sprintf("DATABASE_URL=%s", dbURL), fmt.Sprintf("MONGO_URI=%s", dbURL))
+					if u, err := url.Parse(dbURL); err == nil {
+						e = append(e, fmt.Sprintf("DB_HOST=%s", u.Hostname()))
+						e = append(e, fmt.Sprintf("DB_PORT=%s", u.Port()))
+						e = append(e, fmt.Sprintf("DB_USER=%s", u.User.Username()))
+						if pwd, ok := u.User.Password(); ok {
+							e = append(e, fmt.Sprintf("DB_PASSWORD=%s", pwd))
+						}
+						e = append(e, fmt.Sprintf("DB_NAME=%s", strings.TrimPrefix(u.Path, "/")))
+					}
 				}
 				return e
 			}(),

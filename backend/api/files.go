@@ -92,6 +92,33 @@ func checkWorkspaceAccess(c *gin.Context, envID string) (*models.Environment, er
 	return &env, nil
 }
 
+func checkWorkspaceWriteAccess(c *gin.Context, envID string) (*models.Environment, error) {
+	env, err := checkWorkspaceAccess(c, envID)
+	if err != nil {
+		return nil, err
+	}
+
+	userID, _ := c.Get("userId")
+	userIDStr := userID.(string)
+
+	// If the user created the environment, they have write access
+	if env.UserID == userIDStr {
+		return env, nil
+	}
+
+	// Check project collaborator role
+	if env.ProjectID != "" {
+		var collab models.ProjectCollaborator
+		if err := db.DB.Where("project_id = ? AND user_id = ?", env.ProjectID, userIDStr).First(&collab).Error; err == nil {
+			if collab.Role == models.ProjectRoleViewer {
+				return nil, fmt.Errorf("viewers cannot modify environments or use git commands")
+			}
+		}
+	}
+
+	return env, nil
+}
+
 func GetWorkspaceFiles(c *gin.Context) {
 	id := c.Param("id")
 	_, err := checkWorkspaceAccess(c, id)
@@ -176,9 +203,9 @@ func UpdateWorkspaceFileContent(c *gin.Context) {
 		return
 	}
 
-	env, err := checkWorkspaceAccess(c, id)
+	env, err := checkWorkspaceWriteAccess(c, id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -276,9 +303,9 @@ func CreateWorkspaceFileOrFolder(c *gin.Context) {
 		return
 	}
 
-	env, err := checkWorkspaceAccess(c, id)
+	env, err := checkWorkspaceWriteAccess(c, id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -355,9 +382,9 @@ func DeleteWorkspaceFileOrFolder(c *gin.Context) {
 		return
 	}
 
-	env, err := checkWorkspaceAccess(c, id)
+	env, err := checkWorkspaceWriteAccess(c, id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		return
 	}
 

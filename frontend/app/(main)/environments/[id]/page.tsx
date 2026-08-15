@@ -348,11 +348,15 @@ export default function EnvironmentDetail() {
   );
 
   const { data: project } = useSWR(
-    activeTab === "collaborators" && env?.projectId ? `/api/projects/${env.projectId}` : null,
+    env?.projectId ? `/api/projects/${env.projectId}` : null,
     fetcher
   );
 
   const { data: currentUser } = useSWR("/api/user/me", fetcher);
+
+  const isEnvOwner = currentUser && env && currentUser.id === env.userId;
+  const myCollab = project?.collaborators?.find((c: any) => c.userId === currentUser?.id);
+  const isViewerRole = !isEnvOwner && myCollab && myCollab.role === 'VIEWER';
 
   const handleRemoveCollaborator = async (userId: string) => {
     if (!env?.projectId) return;
@@ -662,7 +666,11 @@ export default function EnvironmentDetail() {
                     {env.gitUrl.replace('https://github.com/', '')}
                   </a>
                   <span className="text-outline-variant">·</span>
-                  <BranchPicker envId={id} currentBranch={env.githubBranch} onBranchChanged={() => mutate(`/api/environments/${id}`)} />
+                  {!isViewerRole ? (
+                    <BranchPicker envId={id} currentBranch={env.githubBranch} onBranchChanged={() => mutate(`/api/environments/${id}`)} />
+                  ) : (
+                    <span className="bg-primary-fixed/10 text-primary-fixed px-2 py-0.5 rounded text-[10px]">{env.githubBranch}</span>
+                  )}
                 </div>
                 <div className="flex items-center gap-1 text-[10px] text-on-surface-variant/50 font-mono">
                   <Clock className="w-3 h-3" />
@@ -692,39 +700,43 @@ export default function EnvironmentDetail() {
             )}
             <button
               onClick={handleSync}
-              disabled={isSyncing || env.status === 'BUILDING'}
-              className="px-4 py-1.5 rounded-lg border border-primary-fixed/30 bg-primary-fixed/5 text-primary-fixed hover:bg-primary-fixed/15 flex items-center gap-1.5 transition-colors disabled:opacity-50 text-xs font-semibold"
+              disabled={isSyncing || env.status === 'BUILDING' || isViewerRole}
+              className={`px-4 py-1.5 rounded-lg border bg-primary-fixed/5 flex items-center gap-1.5 transition-colors text-xs font-semibold ${isViewerRole ? 'border-outline-variant/30 text-on-surface-variant/30 cursor-not-allowed' : 'border-primary-fixed/30 text-primary-fixed hover:bg-primary-fixed/15 disabled:opacity-50'}`}
             >
               {isSyncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <DownloadCloud className="w-3.5 h-3.5" />}
               Sync
             </button>
             <button
               onClick={handleRestart}
-              disabled={isRestarting || env.status === 'BUILDING'}
-              className="px-4 py-1.5 rounded-lg border border-primary-fixed/30 bg-primary-fixed/5 text-primary-fixed hover:bg-primary-fixed/15 flex items-center gap-1.5 transition-colors disabled:opacity-50 text-xs font-semibold"
+              disabled={isRestarting || env.status === 'BUILDING' || isViewerRole}
+              className={`px-4 py-1.5 rounded-lg border bg-primary-fixed/5 flex items-center gap-1.5 transition-colors text-xs font-semibold ${isViewerRole ? 'border-outline-variant/30 text-on-surface-variant/30 cursor-not-allowed' : 'border-primary-fixed/30 text-primary-fixed hover:bg-primary-fixed/15 disabled:opacity-50'}`}
             >
               {isRestarting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
               Restart
             </button>
-            <button
-              onClick={() => setIsCommitModalOpen(true)}
-              className={`px-4 py-1.5 rounded-lg border flex items-center gap-1.5 transition-colors text-xs font-semibold ${
-                hasUncommittedChanges 
-                  ? "border-amber-500/30 bg-amber-500/10 text-amber-500 hover:bg-amber-500/20 shadow-[0_0_8px_rgba(245,158,11,0.2)]"
-                  : "border-[#2ea44f]/30 bg-[#2ea44f]/10 text-[#2ea44f] hover:bg-[#2ea44f]/20"
-              }`}
-            >
-              <Save className="w-3.5 h-3.5" />
-              {hasUncommittedChanges ? "Review & Commit" : "Git Actions"}
-            </button>
-            <button
-              onClick={handleDelete}
-              disabled={isDeleting}
-              className="px-4 py-1.5 rounded-lg border border-red-500/30 bg-red-500/5 text-red-400 hover:bg-red-500/15 flex items-center gap-1.5 transition-colors disabled:opacity-50 text-xs font-semibold"
-            >
-              {isDeleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-              Delete
-            </button>
+            {!isViewerRole && (
+              <button
+                onClick={() => setIsCommitModalOpen(true)}
+                className={`px-4 py-1.5 rounded-lg border flex items-center gap-1.5 transition-colors text-xs font-semibold ${
+                  hasUncommittedChanges 
+                    ? "border-amber-500/30 bg-amber-500/10 text-amber-500 hover:bg-amber-500/20 shadow-[0_0_8px_rgba(245,158,11,0.2)]"
+                    : "border-[#2ea44f]/30 bg-[#2ea44f]/10 text-[#2ea44f] hover:bg-[#2ea44f]/20"
+                }`}
+              >
+                <Save className="w-3.5 h-3.5" />
+                {hasUncommittedChanges ? "Review & Commit" : "Git Actions"}
+              </button>
+            )}
+            {isEnvOwner && (
+              <button
+                onClick={handleDelete}
+                disabled={isDeleting}
+                className="px-4 py-1.5 rounded-lg border border-red-500/30 bg-red-500/5 text-red-400 hover:bg-red-500/15 flex items-center gap-1.5 transition-colors disabled:opacity-50 text-xs font-semibold"
+              >
+                {isDeleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                Delete
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -997,8 +1009,8 @@ export default function EnvironmentDetail() {
                     value={fileContent}
                     onChange={(e) => setFileContent(e.target.value)}
                     spellCheck="false"
-                    readOnly={!isEditingFile}
-                    className={`flex-1 resize-none py-4 px-3 text-white/90 outline-none overflow-y-auto text-sm leading-6 select-text selection:bg-primary/30 selection:text-white ${!isEditingFile ? 'bg-transparent cursor-text' : 'bg-slate-900/50'}`}
+                    readOnly={!isEditingFile || isViewerRole}
+                    className={`flex-1 resize-none py-4 px-3 text-white/90 outline-none overflow-y-auto text-sm leading-6 select-text selection:bg-primary/30 selection:text-white ${!isEditingFile || isViewerRole ? 'bg-transparent cursor-text' : 'bg-slate-900/50'}`}
                   />
                 </div>
               </>

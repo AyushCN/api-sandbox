@@ -116,9 +116,9 @@ type GitBranchRequest struct {
 
 func GitBranch(c *gin.Context) {
 	id := c.Param("id")
-	env, err := checkWorkspaceAccess(c, id)
+	env, err := checkWorkspaceWriteAccess(c, id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -153,9 +153,9 @@ type GitCheckoutRequest struct {
 
 func GitCheckout(c *gin.Context) {
 	id := c.Param("id")
-	env, err := checkWorkspaceAccess(c, id)
+	env, err := checkWorkspaceWriteAccess(c, id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -208,9 +208,9 @@ func GitCheckout(c *gin.Context) {
 
 func GitPull(c *gin.Context) {
 	id := c.Param("id")
-	_, err := checkWorkspaceAccess(c, id)
+	_, err := checkWorkspaceWriteAccess(c, id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		return
 	}
 

@@ -292,9 +292,9 @@ func CommitChanges(c *gin.Context) {
 		return
 	}
 
-	env, err := checkWorkspaceAccess(c, envID)
+	env, err := checkWorkspaceWriteAccess(c, envID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -371,9 +371,9 @@ func CommitChanges(c *gin.Context) {
 
 func SyncEnvironmentWithGitHub(c *gin.Context) {
 	id := c.Param("id")
-	env, err := checkWorkspaceAccess(c, id)
+	env, err := checkWorkspaceWriteAccess(c, id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -476,9 +476,9 @@ func getEnvId(p *string) string {
 
 func PushChanges(c *gin.Context) {
 	id := c.Param("id")
-	env, err := checkWorkspaceAccess(c, id)
+	env, err := checkWorkspaceWriteAccess(c, id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		return
 	}
 

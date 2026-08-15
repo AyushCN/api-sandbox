@@ -202,13 +202,12 @@ func ProvisionDevSandbox(ctx context.Context, envID string, config DevRuntimeCon
 		},
 		HostConfig: &docker.HostConfig{
 			Memory:          512 * 1024 * 1024,
-			MemorySwap:      -1,
+			MemorySwap:      512 * 1024 * 1024,
 			CPUQuota:        100000,
 			CPUPeriod:       100000,
 			CPUShares:       1024,
 			PidsLimit:       &pidsLimit,
 			RestartPolicy:   docker.RestartOnFailure(3),
-			PublishAllPorts: true,
 			SecurityOpt:     []string{"no-new-privileges:true"},
 			CapDrop:         []string{"ALL"},
 			Binds: []string{
@@ -357,7 +356,7 @@ func StartSidecarDatabase(ctx context.Context, envID string, orgID string, dbTyp
 		},
 		HostConfig: &docker.HostConfig{
 			Memory:      256 * 1024 * 1024, // 256MB for DB
-			MemorySwap:  -1,
+			MemorySwap:  256 * 1024 * 1024,
 			CPUQuota:    100000,
 			CPUPeriod:   100000,
 			CPUShares:   512,

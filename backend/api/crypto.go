@@ -13,18 +13,11 @@ import (
 func getEncryptionKey() []byte {
 	key := os.Getenv("TOKEN_ENCRYPTION_KEY")
 	if key == "" {
-		// Fallback for local development if not set, but warn
-		key = "default-32-byte-encryption-key!!"
+		panic("TOKEN_ENCRYPTION_KEY environment variable is missing")
 	}
 	// Must be exactly 16, 24, or 32 bytes for AES
-	if len(key) != 32 {
-		// Pad or truncate to 32 bytes
-		if len(key) < 32 {
-			pad := make([]byte, 32-len(key))
-			key = key + string(pad)
-		} else {
-			key = key[:32]
-		}
+	if len(key) != 16 && len(key) != 24 && len(key) != 32 {
+		panic("TOKEN_ENCRYPTION_KEY must be exactly 16, 24, or 32 bytes")
 	}
 	return []byte(key)
 }

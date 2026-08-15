@@ -56,6 +56,17 @@ func main() {
 	go api.WSHub.Run()
 	go api.WatchAllEnvironments()
 
+	// Fail fast on missing critical configurations
+	encryptionKey := os.Getenv("TOKEN_ENCRYPTION_KEY")
+	if encryptionKey == "" {
+		slog.Error("CRITICAL: TOKEN_ENCRYPTION_KEY is missing. Refusing to boot.")
+		os.Exit(1)
+	}
+	if len(encryptionKey) != 16 && len(encryptionKey) != 24 && len(encryptionKey) != 32 {
+		slog.Error("CRITICAL: TOKEN_ENCRYPTION_KEY must be exactly 16, 24, or 32 bytes.")
+		os.Exit(1)
+	}
+
 	mode := os.Getenv("MODE")
 
 	var httpServer *http.Server

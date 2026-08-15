@@ -50,7 +50,6 @@ sudo ./server # Sudo may be required to configure bind-mount directories properl
 Open `http://localhost:3000` in your browser.
 
 ## 📚 Documentation Index
-- [Product North Star](PRODUCT_NORTH_STAR.md)
 - [Architecture & Trust Boundaries](docs/ARCHITECTURE.md)
 - [Deployment Guide](docs/DEPLOYMENT.md)
 - [OpenAPI Specification](docs/openapi.yaml)

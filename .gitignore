@@ -50,6 +50,7 @@ backups/
 .agents/
 .claude/
 .windsurf/
+.gemini/
 skills-lock.json
 AGENTS.md
 CLAUDE.md

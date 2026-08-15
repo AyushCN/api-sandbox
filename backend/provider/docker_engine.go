@@ -383,7 +383,7 @@ func StartSidecarDatabase(ctx context.Context, envID string, orgID string, dbTyp
 
 	createLog(envID, "Waiting for database to initialize and accept connections...", models.LogLevelInfo)
 
-	err = waitForDatabaseReady(ctx, container.ID, dbType, envID)
+	err = waitForDatabaseReady(ctx, container.ID, dbType, envID, securePassword)
 	if err != nil {
 		return "", fmt.Errorf("database readiness check failed: %v", err)
 	}
@@ -391,11 +391,11 @@ func StartSidecarDatabase(ctx context.Context, envID string, orgID string, dbTyp
 	return dbURL, nil
 }
 
-func waitForDatabaseReady(ctx context.Context, containerID string, dbType DBType, envID string) error {
+func waitForDatabaseReady(ctx context.Context, containerID string, dbType DBType, envID string, securePassword string) error {
 	var cmd []string
 	switch dbType {
 	case DBTypeMySQL:
-		cmd = []string{"mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpass123"}
+		cmd = []string{"mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p" + securePassword}
 	case DBTypePostgres:
 		cmd = []string{"pg_isready", "-U", "appuser", "-d", "myapp"}
 	case DBTypeMongo:

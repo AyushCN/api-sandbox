@@ -615,6 +615,11 @@ func GetDockerLogs(c *gin.Context) {
 	cmd := exec.CommandContext(c.Request.Context(), "docker", "logs", "--tail", "500", containerName)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		outStr := string(output)
+		if strings.Contains(outStr, "No such container") {
+			c.String(http.StatusOK, "Container is provisioning. Waiting for initialization...")
+			return
+		}
 		// Log the error but return whatever output we got (or a friendly message if empty)
 		if len(output) == 0 {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch container logs or container is not running."})

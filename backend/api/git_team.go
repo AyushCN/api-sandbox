@@ -139,6 +139,11 @@ func GetProjectActivity(c *gin.Context) {
 				hash = hash[:8]
 			}
 
+			// Skip noisy file watcher events from being shown as Team Activity
+			if actorName == "System/External" {
+				continue
+			}
+
 			activityMap[dbAct.ID] = GitActivity{
 				Timestamp:     dbAct.CreatedAt,
 				TimestampStr:  dbAct.CreatedAt.Format(time.RFC3339),

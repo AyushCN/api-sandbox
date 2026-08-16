@@ -14,7 +14,7 @@ import useSWR from "swr";
 const schema = z.object({
   name: z.string().min(3, "Name must be at least 3 characters").max(50),
   gitUrl: z.string().url("Must be a valid URL").regex(/^https:\/\/github\.com/, "Must be a GitHub repository"),
-  githubBranch: z.string().min(1, "Branch is required").default("main"),
+  githubBranch: z.string().min(1, "Branch is required"),
   projectId: z.string().min(1, "Project is required"),
   newProjectName: z.string().optional(),
 }).refine((data) => {

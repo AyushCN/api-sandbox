@@ -237,6 +237,12 @@ export default function EnvironmentDetail() {
   const [inviteRole, setInviteRole] = useState("COLLABORATOR");
   const [isInviting, setIsInviting] = useState(false);
 
+  // Transfer Modal state
+  const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
+  const [transferProjectId, setTransferProjectId] = useState("");
+  const [isTransferring, setIsTransferring] = useState(false);
+  const { data: projects, isLoading: isProjectsLoading } = useSWR("/api/projects", fetcher);
+
   const [userSearchResults, setUserSearchResults] = useState<any[]>([]);
   const [isSearchingUsers, setIsSearchingUsers] = useState(false);
   const [showUserDropdown, setShowUserDropdown] = useState(false);
@@ -302,6 +308,26 @@ export default function EnvironmentDetail() {
       return () => clearInterval(interval);
     }
   }, [activeTab]);
+
+  const handleTransfer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!transferProjectId) return;
+    setIsTransferring(true);
+    try {
+      await fetchWithAuth(`/api/environments/${id}/transfer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: transferProjectId })
+      });
+      toast.success("Sandbox transferred successfully!");
+      setIsTransferModalOpen(false);
+      mutate(`/api/environments/${id}`);
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setIsTransferring(false);
+    }
+  };
 
   const handleInvite = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -729,14 +755,23 @@ export default function EnvironmentDetail() {
               </button>
             )}
             {isEnvOwner && (
-              <button
-                onClick={handleDelete}
-                disabled={isDeleting}
-                className="px-4 py-1.5 rounded-lg border border-red-500/30 bg-red-500/5 text-red-400 hover:bg-red-500/15 flex items-center gap-1.5 transition-colors disabled:opacity-50 text-xs font-semibold"
-              >
-                {isDeleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-                Delete
-              </button>
+              <>
+                <button
+                  onClick={() => setIsTransferModalOpen(true)}
+                  className="px-4 py-1.5 rounded-lg border border-indigo-500/30 bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 flex items-center gap-1.5 transition-colors text-xs font-semibold"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  Transfer
+                </button>
+                <button
+                  onClick={handleDelete}
+                  disabled={isDeleting}
+                  className="px-4 py-1.5 rounded-lg border border-red-500/30 bg-red-500/5 text-red-400 hover:bg-red-500/15 flex items-center gap-1.5 transition-colors disabled:opacity-50 text-xs font-semibold"
+                >
+                  {isDeleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                  Delete
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -1036,7 +1071,6 @@ export default function EnvironmentDetail() {
           <TeamCollaborationDashboard projectId={env?.projectId} />
         </div>
       )}
-
       {/* Invite Collaborator Modal */}
       {isInviteModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.75)' }}>
@@ -1049,53 +1083,70 @@ export default function EnvironmentDetail() {
             </div>
             <form onSubmit={handleInvite} className="p-5 space-y-4">
               <div className="relative">
-                <label className="block text-xs font-medium text-on-surface-variant mb-1.5">Email or Username</label>
+                <label className="text-sm font-bold tracking-wide text-on-surface-variant uppercase mb-1.5 block">Search User</label>
                 <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface-variant/50" />
                   <input
                     type="text"
-                    required
                     value={inviteIdentifier}
-                    onChange={(e) => setInviteIdentifier(e.target.value)}
-                    onFocus={() => { if (userSearchResults.length > 0) setShowUserDropdown(true); }}
-                    onBlur={() => setTimeout(() => setShowUserDropdown(false), 200)}
-                    placeholder="e.g. user@example.com or username"
-                    className="w-full bg-surface-container border border-outline-variant rounded-lg px-3 py-2 text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:border-primary-fixed/50"
+                    onChange={(e) => {
+                      setInviteIdentifier(e.target.value);
+                      handleUserSearch(e.target.value);
+                    }}
+                    onFocus={() => setShowUserDropdown(true)}
+                    placeholder="Email or username"
+                    className="w-full bg-surface-container pl-9 pr-4 py-3 rounded-lg border border-outline-variant text-on-surface focus:border-primary-fixed focus:ring-1 focus:ring-primary-fixed transition-all"
                   />
                   {isSearchingUsers && (
                     <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                      <Loader2 className="w-4 h-4 animate-spin text-on-surface-variant/50" />
+                      <Loader2 className="w-4 h-4 animate-spin text-primary-fixed" />
                     </div>
                   )}
                 </div>
+
+                {/* Dropdown for search results */}
                 {showUserDropdown && userSearchResults.length > 0 && (
-                  <div className="absolute z-10 w-full mt-1 bg-surface-container border border-outline-variant rounded-lg shadow-lg overflow-hidden max-h-48 overflow-y-auto">
-                    {userSearchResults.map((u) => (
+                  <div className="absolute z-10 w-full mt-1 bg-surface-container-lowest border border-outline-variant rounded-lg shadow-xl max-h-48 overflow-y-auto">
+                    {userSearchResults.map((user) => (
                       <button
-                        key={u.id}
+                        key={user.id}
                         type="button"
                         onClick={() => {
-                          setInviteIdentifier(u.email);
+                          setInviteIdentifier(user.username || user.email);
                           setShowUserDropdown(false);
                         }}
-                        className="w-full text-left px-3 py-2 hover:bg-surface-container-high transition-colors flex flex-col border-b border-outline-variant/30 last:border-0"
+                        className="w-full text-left px-4 py-2.5 hover:bg-primary-fixed/10 transition-colors flex items-center justify-between group"
                       >
-                        <span className="text-sm font-medium text-on-surface">{u.username}</span>
-                        <span className="text-xs text-on-surface-variant">{u.email}</span>
+                        <div className="flex items-center gap-2">
+                          <div className="w-6 h-6 rounded bg-primary-container text-on-primary-fixed flex items-center justify-center text-xs font-bold shrink-0">
+                            {(user.username || user.email || "?")[0].toUpperCase()}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-on-surface truncate group-hover:text-primary-fixed transition-colors">
+                              {user.username || "No Username"}
+                            </p>
+                            <p className="text-xs text-on-surface-variant truncate">
+                              {user.email}
+                            </p>
+                          </div>
+                        </div>
+                        <Plus className="w-4 h-4 text-on-surface-variant group-hover:text-primary-fixed opacity-0 group-hover:opacity-100 transition-all shrink-0 ml-2" />
                       </button>
                     ))}
                   </div>
                 )}
               </div>
+
               <div>
-                <label className="block text-xs font-medium text-on-surface-variant mb-1.5">Role</label>
+                <label className="text-sm font-bold tracking-wide text-on-surface-variant uppercase mb-1.5 block">Role</label>
                 <select
                   value={inviteRole}
                   onChange={(e) => setInviteRole(e.target.value)}
-                  className="w-full bg-surface-container border border-outline-variant rounded-lg px-3 py-2 text-sm text-on-surface focus:outline-none focus:border-primary-fixed/50 appearance-none"
+                  className="w-full bg-surface-container px-4 py-3 rounded-lg border border-outline-variant text-on-surface focus:border-primary-fixed focus:ring-1 focus:ring-primary-fixed transition-all"
                 >
-                  <option value="ADMIN">Admin</option>
-                  <option value="COLLABORATOR">Collaborator</option>
-                  <option value="VIEWER">Viewer</option>
+                  <option value="COLLABORATOR">Collaborator (Edit & Push)</option>
+                  <option value="VIEWER">Viewer (Read Only)</option>
+                  <option value="ADMIN">Admin (Manage Team)</option>
                 </select>
               </div>
               <div className="pt-2 flex justify-end gap-3">
@@ -1109,10 +1160,65 @@ export default function EnvironmentDetail() {
                 <button
                   type="submit"
                   disabled={isInviting || !inviteIdentifier.trim()}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary-fixed text-on-primary-fixed hover:bg-primary-fixed/90 font-medium text-sm transition-colors disabled:opacity-50"
+                  className="px-5 py-2 bg-primary-container text-on-primary-fixed-variant rounded-lg font-bold hover:shadow-[0_0_15px_rgba(0,240,255,0.2)] disabled:opacity-50 disabled:pointer-events-none flex items-center gap-2"
                 >
                   {isInviting && <Loader2 className="w-4 h-4 animate-spin" />}
                   Send Invite
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Transfer Sandbox Modal */}
+      {isTransferModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.75)' }}>
+          <div className="w-full max-w-md bg-surface-container-lowest rounded-2xl border border-outline-variant shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-outline-variant bg-surface-container/30">
+              <h3 className="font-semibold text-on-surface">Transfer Sandbox</h3>
+              <button onClick={() => setIsTransferModalOpen(false)} className="text-on-surface-variant hover:text-on-surface">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={handleTransfer} className="p-5 space-y-4">
+              <div>
+                <label className="text-sm font-bold tracking-wide text-on-surface-variant uppercase mb-1.5 block">Select Destination Project</label>
+                {isProjectsLoading ? (
+                  <div className="w-full bg-surface-container px-4 py-3 rounded-lg border border-outline-variant text-on-surface opacity-50 flex items-center">
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Loading projects...
+                  </div>
+                ) : (
+                  <select
+                    value={transferProjectId}
+                    onChange={(e) => setTransferProjectId(e.target.value)}
+                    className="w-full bg-surface-container px-4 py-3 rounded-lg border border-outline-variant text-on-surface focus:border-primary-fixed focus:ring-1 focus:ring-primary-fixed transition-all"
+                  >
+                    <option value="" disabled>-- Select a Project --</option>
+                    {projects?.filter((p: any) => p.id !== env?.projectId).map((p: any) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                )}
+                <p className="text-xs text-on-surface-variant mt-2">
+                  Transferring this sandbox will instantly grant access to all collaborators in the destination project.
+                </p>
+              </div>
+              <div className="pt-2 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setIsTransferModalOpen(false)}
+                  className="px-4 py-2 text-sm font-medium text-on-surface-variant hover:text-on-surface"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isTransferring || !transferProjectId}
+                  className="px-5 py-2 bg-indigo-500/10 text-indigo-400 border border-indigo-500/30 rounded-lg font-bold hover:bg-indigo-500/20 disabled:opacity-50 disabled:pointer-events-none flex items-center gap-2"
+                >
+                  {isTransferring && <Loader2 className="w-4 h-4 animate-spin" />}
+                  Confirm Transfer
                 </button>
               </div>
             </form>

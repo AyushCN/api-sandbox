@@ -83,6 +83,7 @@ func SetupRoutes(router *gin.Engine) {
 			protected.POST("", CreateEnvironment)
 			protected.GET("/:id", GetEnvironment)
 			protected.POST("/:id/restart", RestartEnvironment)
+			protected.POST("/:id/transfer", TransferEnvironment)
 			protected.DELETE("/:id", DeleteEnvironment)
 			protected.GET("/:id/logs/stream", StreamLogs)
 			protected.GET("/:id/files", GetWorkspaceFiles)
@@ -477,6 +478,54 @@ func StreamLogs(c *gin.Context) {
 			return true
 		}
 	})
+}
+
+type TransferEnvironmentRequest struct {
+	ProjectID string `json:"projectId" binding:"required"`
+}
+
+func TransferEnvironment(c *gin.Context) {
+	envID := c.Param("id")
+	userIDVal, _ := c.Get("userId")
+	userID := userIDVal.(string)
+
+	var req TransferEnvironmentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid payload"})
+		return
+	}
+
+	// Verify user owns the environment
+	var env models.Environment
+	if err := db.DB.First(&env, "id = ?", envID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Environment not found"})
+		return
+	}
+
+	if env.UserID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Only the sandbox owner can transfer it"})
+		return
+	}
+
+	// Verify user has access to target project (Owner or Collaborator)
+	var collab models.ProjectCollaborator
+	if err := db.DB.Where("project_id = ? AND user_id = ? AND accepted_at IS NOT NULL", req.ProjectID, userID).First(&collab).Error; err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "You do not have access to the target project"})
+		return
+	}
+
+	if collab.Role == models.ProjectRoleViewer {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Viewers cannot transfer sandboxes into this project"})
+		return
+	}
+
+	// Update environment
+	if err := db.DB.Model(&env).Update("project_id", req.ProjectID).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to transfer environment"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Environment transferred successfully"})
 }
 
 func DeleteEnvironment(c *gin.Context) {

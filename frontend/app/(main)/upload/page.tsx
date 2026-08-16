@@ -16,7 +16,7 @@ const schema = z.object({
   name: z.string().min(3, "Name must be at least 3 characters").max(50),
   gitUrl: z.string().url("Must be a valid URL").regex(/^https:\/\/github\.com/, "Must be a GitHub repository"),
   githubBranch: z.string().min(1, "Branch is required").default("main"),
-  projectId: z.string().optional(),
+  projectId: z.string().min(1, "Project is required"),
   newProjectName: z.string().optional(),
 }).refine((data) => {
   if (data.projectId === "new") {
@@ -51,6 +51,13 @@ export default function UploadPage() {
 
   const gitUrl = watch("gitUrl");
   const projectId = watch("projectId");
+
+  // Auto-select first project when projects load
+  useEffect(() => {
+    if (projects && projects.length > 0 && !projectId) {
+      setValue("projectId", projects[0].id);
+    }
+  }, [projects, projectId, setValue]);
 
   useEffect(() => {
     const fetchBranches = async () => {
@@ -152,7 +159,6 @@ export default function UploadPage() {
                 {...register("projectId")}
                 className="w-full bg-surface-container px-4 py-3 rounded-lg border border-outline-variant text-on-surface focus:border-primary-fixed focus:ring-1 focus:ring-primary-fixed transition-all appearance-none"
               >
-                <option value="">-- Personal Sandbox (Not Shared) --</option>
                 {projects?.map((p: any) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}

@@ -124,7 +124,7 @@ const (
 type ProjectCollaborator struct {
 	ID              string      `gorm:"type:text;primaryKey" json:"id"`
 	ProjectID       string      `gorm:"type:text;not null;index" json:"projectId"`
-	Project         Project     `json:"-"`
+	Project         Project     `json:"project"`
 	UserID          string      `gorm:"type:text;not null;index" json:"userId"`
 	User            User        `json:"user"`
 	UserOrg         string      `gorm:"type:text;index" json:"userOrganization"` // For reference

@@ -9,7 +9,7 @@ import {
   Activity, Box, Clock, ExternalLink, GitBranch, 
   Terminal as TerminalIcon, Loader2, Trash2, RefreshCw,
   Folder, FolderOpen, File, ChevronRight, ChevronDown, 
-  Save, Code, Check, AlertCircle, FilePlus, FolderPlus, ScrollText, X, Users, DownloadCloud
+  Save, Code, Check, AlertCircle, FilePlus, FolderPlus, ScrollText, X, Users, DownloadCloud, Search, Plus
 } from "lucide-react";
 
 import { fetchWithAuth } from "@/lib/auth";
@@ -322,6 +322,9 @@ export default function EnvironmentDetail() {
       toast.success("Sandbox transferred successfully!");
       setIsTransferModalOpen(false);
       mutate(`/api/environments/${id}`);
+      mutate(`/api/environments?projectId=${env?.projectId}`); // old project
+      mutate(`/api/environments?projectId=${transferProjectId}`); // new project
+      mutate(`/api/environments`); // dashboard list
     } catch (e: any) {
       toast.error(e.message);
     } finally {
@@ -625,6 +628,9 @@ export default function EnvironmentDetail() {
       });
       if (!res.ok) throw new Error("Failed to delete sandbox");
       toast.success("Sandbox deleted successfully");
+      mutate(`/api/environments`);
+      mutate(`/api/environments?projectId=${env?.projectId}`);
+      mutate(`/api/projects/${env?.projectId}`);
       router.push("/dashboard");
     } catch (e: any) {
       toast.error(e.message);
@@ -1091,7 +1097,6 @@ export default function EnvironmentDetail() {
                     value={inviteIdentifier}
                     onChange={(e) => {
                       setInviteIdentifier(e.target.value);
-                      handleUserSearch(e.target.value);
                     }}
                     onFocus={() => setShowUserDropdown(true)}
                     placeholder="Email or username"

@@ -19,6 +19,13 @@ Instead of deploying static images, this platform mounts your code into language
 
 ## 📦 Changelog
 
+### v1.3.3 — 2026-08-16 (Host Security & Cleanup)
+
+- **Security**: Removed exposed Postgres and Redis ports from docker-compose; locked down `/metrics` with token auth.
+- **Operations**: Added robust daemon-level orphan reaper and disk workspace garbage collection for idle sandboxes.
+- **Cleanup**: Fixed file watcher CWD path bugs; removed redundant `/sync` git endpoints; eliminated stale `install.sh` install scripts.
+- **Testing**: Added end-to-end testing script via session cookie (`e2e_session.sh`).
+
 ### v1.3.2 — 2026-08-16 (Unified Deployment & Build Fixes)
 
 - **fix**: Next.js frontend now correctly injects `BACKEND_URL` at build time to prevent `localhost:8080` proxy loops inside Docker.

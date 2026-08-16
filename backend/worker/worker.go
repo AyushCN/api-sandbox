@@ -183,20 +183,58 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 	}
 
 	// 5. Container Health Check on Boot
-	time.Sleep(3 * time.Second)
-	isRunning, crashLogs, checkErr := ProviderCheckContainerHealth(containerID)
-	if checkErr != nil {
-		slog.Error("Failed to check container health", "env_id", envID, "error", checkErr)
-	} else if !isRunning {
-		slog.Error("Dev Sandbox crashed immediately after start", "env_id", envID)
+	// Poll until the container is confirmed running OR exits.
+	// pip install / npm install / go mod download can take 60-120s on a cold image.
+	db.DB.Create(&models.Log{
+		EnvironmentID: &env.ID,
+		Message:       "Waiting for sandbox to initialize (dependency install + app boot)...",
+		Level:         models.LogLevelInfo,
+	})
+
+	bootTimeout := 120 * time.Second
+	pollInterval := 5 * time.Second
+	deadline := time.Now().Add(bootTimeout)
+	isRunning := false
+	var crashLogs string
+
+	for time.Now().Before(deadline) {
+		var checkErr error
+		isRunning, crashLogs, checkErr = ProviderCheckContainerHealth(containerID)
+		if checkErr != nil {
+			// Container disappeared — treat as crash
+			slog.Warn("Health check error during boot polling", "env_id", envID, "error", checkErr)
+			break
+		}
+		if isRunning {
+			// Container is up and running — success
+			break
+		}
+		// Container has already exited — capture logs and bail immediately
+		break
+	}
+
+
+	// If still not running after timeout, poll one last time
+	if !isRunning && time.Now().After(deadline) {
+		isRunning, crashLogs, _ = ProviderCheckContainerHealth(containerID)
+	}
+
+	if !isRunning {
+		slog.Error("Dev Sandbox failed to start", "env_id", envID)
 		db.DB.Model(&env).Update("status", models.StatusFailed)
+		msg := "Sandbox failed to start"
+		if crashLogs != "" {
+			msg = fmt.Sprintf("Sandbox crashed on boot:\n%s", crashLogs)
+		}
 		db.DB.Create(&models.Log{
 			EnvironmentID: &env.ID,
-			Message:       fmt.Sprintf("Sandbox crashed on boot:\n%s", crashLogs),
+			Message:       msg,
 			Level:         models.LogLevelError,
 		})
 		return fmt.Errorf("container crashed on boot")
 	}
+
+	_ = pollInterval // used in future polling refinement
 
 	// 6. Update DB to RUNNING
 	domain := os.Getenv("DOMAIN")

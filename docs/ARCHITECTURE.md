@@ -76,14 +76,15 @@ The system enforces isolation at multiple layers to safely run untrusted code. H
 ### ⚠️ Critical Limitation: The Docker Socket
 The `Backend` and `Worker` containers mount `/var/run/docker.sock` to orchestrate sandboxes. This is equivalent to host-level `root` access. If the Go backend is compromised, the host is compromised. Therefore, this platform is strictly limited to a single dedicated host.
 
-## Editor Strategy: GitHub-First (Non-Live)
+## Editor Strategy: Live Bind-Mount
 
-**Decision**: The web editor acts as a view/preparation environment. To run new code, users must commit and sync (push) to GitHub, which triggers a rebuild and restart of the sandbox.
+**Decision**: The web editor provides true live hot-reloading by writing directly to the host filesystem, which is bind-mounted into the ephemeral development sandbox container.
 
 ### Context
-Since the API Sandbox leverages Nixpacks to build immutable OCI Docker images, all dependencies and build steps are baked into the image. Implementing real-time "live" edits via bind-mounting host directories into these containers contradicts the immutable buildpack architecture and introduces significant fragility. 
+Unlike traditional immutable PaaS deployments (e.g., using Nixpacks or Heroku Buildpacks), this platform is optimized strictly for **development**. Code is not baked into OCI images. Instead, raw source code is mapped into language-specific alpine runtimes.
 
 ### Implementation
-- **Non-Live Editor**: Edits are local until committed.
-- **Workflow**: Edits -> Commit/Push -> Rebuild -> Restart.
-- If true live-reloading is required in the future, it should be built as a separate "Dev Mode" rather than compromising the current robust Nixpacks workflow.
+- **Live Editor**: When a user hits Save in the browser, the Go backend writes the file to the host's `/var/lib/api-sandbox/workspaces/<env-id>` directory.
+- **Bind Mounts**: The sandbox container mounts this host directory as its working directory.
+- **Process Watchers**: The container's entrypoint script runs a native process watcher (`node --watch`, `air`, `nodemon`, etc.) which detects the file change over the bind mount and restarts the application instantly.
+- **Traefik Retries**: Traefik intercepts traffic during the brief 1-2 second restart window, masking `502 Bad Gateway` errors with a loading state until the container starts accepting connections again.

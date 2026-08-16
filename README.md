@@ -6,9 +6,9 @@ Instead of deploying static images, this platform mounts your code into language
 
 ## ✨ Core Features
 
-1. **Ephemeral Dev Runtimes**: Instant orchestration of hot-reloading containers via host-level bind mounts. Natively supports **Node.js, Python, Go, Ruby, PHP, Rust, .NET (C#), Java, C, and C++** with sub-2-second edit-to-impact latency.
+1. **Ephemeral Dev Runtimes**: Orchestration of hot-reloading containers via host-level bind mounts. Designed for backend testing.
 2. **GitHub-First Source of Truth**: End-to-end GitHub OAuth integration. The sandbox acts as a temporary mirror. You can commit and push directly to GitHub from the browser.
-3. **Zero-Config Databases**: Automatic provisioning of isolated sidecar databases (PostgreSQL, MySQL, Redis) strictly tied to the lifecycle of the ephemeral sandbox. Fine-grained connection variables (e.g., `DB_HOST`, `DB_PORT`, `DB_USER`) are automatically injected into the sandbox container.
+3. **Zero-Config Databases**: Automatic provisioning of isolated sidecar databases (PostgreSQL, MySQL, Redis) strictly tied to the lifecycle of the ephemeral sandbox.
 4. **Browser IDE & Terminal**: Integrated file editing and terminal access to instantly test backend APIs before pushing.
 5. **Team Collaboration & RBAC**: Real-time user search for inviting teammates. Strict Role-Based Access Control ensures `VIEWER` roles have true read-only access (enforced at both UI and API levels), while `OWNER` and `COLLABORATOR` roles can edit, commit, and push changes.
 6. **Isolated Workspaces**: Sandboxes can be launched in isolated, shared workspaces. A private "Default Workspace" is automatically created for all new users.
@@ -56,13 +56,29 @@ Instead of deploying static images, this platform mounts your code into language
 - **fix**: Replaced the 3-second single health check with a 120-second polling loop so slow dependency installs (`pip`, `npm`, `go mod`) no longer cause false crash detection
 - **fix**: Boot log message "Waiting for sandbox to initialize…" is now written to the DB so the App Output stays informative during the install phase
 
-## ⚠️ Known Limitations & Security Caveats
+## ⚠️ Capability & Security Matrix
 
-**This system is an experimental prototype and is NOT a security boundary for hostile multi-tenant public internet traffic without further hardening.**
+**This system is an experimental prototype / lab tool. It is NOT a security boundary for hostile multi-tenant public internet traffic.**
+
+### Runtime Support
+| Runtime | Status |
+|---------|--------|
+| Node.js | Supported |
+| Python | Supported |
+| Go | Supported |
+| Others (Java, C++, Rust, .NET) | Experimental / best-effort |
+
+### Security & Isolation
+| Capability | Reality |
+|------------|---------|
+| Container cgroups / caps / networks | Best-effort isolation |
+| Multi-tenant hostile workloads | **Not supported** |
+| Control plane architecture | **Host Docker socket (root-equivalent)** |
 
 1. **Single host** — The platform relies on one Docker daemon and has no multi-node scheduler or federation capabilities.
-2. **Best-Effort Container Isolation** — Environments run with dropped capabilities and no `docker.sock` access, but do not use hypervisor-level isolation (e.g., Firecracker).
+2. **Best-Effort Container Isolation** — Environments run with dropped capabilities, but do not use hypervisor-level isolation (e.g., Firecracker/gVisor).
 3. **GitHub OAuth Requirement** — You must set up a GitHub OAuth App to use the platform as pushing and pulling depend entirely on GitHub as the source of truth.
+4. **Docker Socket Risk** — The Go API directly mounts `docker.sock`. If the orchestrator API is compromised, the attacker has host-level root access. Do not expose this platform to untrusted users.
 
 ## 🏃 Quick Start
 

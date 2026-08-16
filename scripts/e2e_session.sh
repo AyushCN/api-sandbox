@@ -69,6 +69,10 @@ else
     echo "Skipping git push due to SKIP_PUSH."
 fi
 
+echo "--- DOCKER STATS SNAPSHOT (Control Plane + Running Env) ---"
+docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}" api-sandbox-backend api-sandbox-frontend api-sandbox-postgres-1 api-sandbox-redis-1 api-sandbox-traefik api-sandbox-env-$ENV_ID
+echo "-----------------------------------------------------------"
+
 echo "Deleting Environment..."
 DELETE_RES=$(curl -s -X DELETE "$APP_URL/api/environments/$ENV_ID" -H "Cookie: token=$SESSION_COOKIE")
 if echo "$DELETE_RES" | grep -q "error"; then

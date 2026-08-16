@@ -351,8 +351,8 @@ export default function LandingPage() {
                     </div>
                     <div className="flex flex-col gap-2">
                         <h5 className="text-xs font-bold text-white mb-2 uppercase tracking-widest">Company</h5>
-                        <a className="text-sm text-on-surface-variant hover:text-primary transition-colors" href="#">Privacy</a>
-                        <a className="text-sm text-on-surface-variant hover:text-primary transition-colors" href="#">Terms</a>
+                        <Link className="text-sm text-on-surface-variant hover:text-primary transition-colors" href="/privacy">Privacy</Link>
+                        <Link className="text-sm text-on-surface-variant hover:text-primary transition-colors" href="/terms">Terms</Link>
                     </div>
                     <div className="flex flex-col gap-2">
                         <h5 className="text-xs font-bold text-white mb-2 uppercase tracking-widest">Connect</h5>

@@ -316,7 +316,7 @@ export default function SignupPage() {
                         {/* Bottom Links */}
                         <div className="text-center space-y-3">
                             <p className="text-xs text-on-surface-variant max-w-[320px] mx-auto leading-relaxed">
-                                By signing up, you agree to our Terms of Service and Privacy Policy.
+                                By signing up, you agree to our <Link href="/terms" className="text-primary hover:underline">Terms of Service</Link> and <Link href="/privacy" className="text-primary hover:underline">Privacy Policy</Link>.
                             </p>
                             <p className="text-sm text-on-surface">
                                 Already have an account? <Link className="text-primary-fixed-dim font-bold hover:underline transition-all" href="/login">Sign in</Link>

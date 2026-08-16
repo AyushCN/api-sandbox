@@ -36,6 +36,16 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 
 	slog.Info("Processing build job", "environment_id", envID)
 
+	retryCount, _ := asynq.GetRetryCount(ctx)
+	maxRetry, _ := asynq.GetMaxRetry(ctx)
+	if retryCount > 0 {
+		db.DB.Create(&models.Log{
+			EnvironmentID: &envID,
+			Message:       fmt.Sprintf("⚠️ Attempt %d of %d: Retrying failed build job...", retryCount+1, maxRetry+1),
+			Level:         models.LogLevelInfo,
+		})
+	}
+
 	var env models.Environment
 	if err := db.DB.First(&env, "id = ?", envID).Error; err != nil {
 		return fmt.Errorf("environment not found: %w", err)
@@ -72,7 +82,7 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 	// 1. Clone Repo directly
 	db.DB.Create(&models.Log{
 		EnvironmentID: &env.ID,
-		Message:       fmt.Sprintf("Cloning repository %s (branch: %s)...", env.GitURL, env.GithubBranch),
+		Message:       fmt.Sprintf("Synchronizing repository %s (branch: %s)...", env.GitURL, env.GithubBranch),
 		Level:         models.LogLevelInfo,
 	})
 

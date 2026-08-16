@@ -668,18 +668,40 @@ func GetDockerLogs(c *gin.Context) {
 		return
 	}
 
-	containerName := fmt.Sprintf("api-sandbox-env-%s", env.ID)
+	// Try by canonical name first, then fall back to stored ContainerID.
+	containerRef := fmt.Sprintf("api-sandbox-env-%s", env.ID)
+	if env.ContainerID != nil && *env.ContainerID != "" {
+		containerRef = *env.ContainerID
+	}
 
-	// Fetch last 500 lines of logs from Docker
-	cmd := exec.CommandContext(c.Request.Context(), "docker", "logs", "--tail", "500", containerName)
+	cmd := exec.CommandContext(c.Request.Context(), "docker", "logs", "--tail", "500", containerRef)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		outStr := string(output)
-		if strings.Contains(outStr, "No such container") {
+
+		// Container doesn't exist — the env is still building or crashed between retries.
+		// Surface the crash/error logs from the DB so the dev can see what went wrong.
+		if strings.Contains(outStr, "No such container") || len(output) == 0 {
+			var dbLogs []models.Log
+			db.DB.Where("environment_id = ?", id).
+				Order("created_at desc").
+				Limit(50).
+				Find(&dbLogs)
+
+			if len(dbLogs) > 0 {
+				var lines []string
+				// Return in chronological order
+				for i := len(dbLogs) - 1; i >= 0; i-- {
+					lines = append(lines, dbLogs[i].Message)
+				}
+				c.String(http.StatusOK, strings.Join(lines, "\n"))
+				return
+			}
+
 			c.String(http.StatusOK, "Container is provisioning. Waiting for initialization...")
 			return
 		}
-		// Log the error but return whatever output we got (or a friendly message if empty)
+
 		if len(output) == 0 {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch container logs or container is not running."})
 			return
@@ -688,6 +710,7 @@ func GetDockerLogs(c *gin.Context) {
 
 	c.String(http.StatusOK, string(output))
 }
+
 
 type MeResponse struct {
 	ID               string `json:"id"`

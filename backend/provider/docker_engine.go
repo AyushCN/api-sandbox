@@ -487,7 +487,7 @@ func EnsureOrgNetwork(ctx context.Context, orgID string) (string, string, error)
 // inside the container namespace. This triggers native file watchers (like inotify)
 // instantly, which host-side bind-mount writes sometimes fail to do reliably.
 func TouchFileInContainer(ctx context.Context, envID string, filePath string) error {
-	containerName := "env-" + envID
+	containerName := "api-sandbox-env-" + envID
 	
 	exec, err := dockerClient.CreateExec(docker.CreateExecOptions{
 		Container:    containerName,

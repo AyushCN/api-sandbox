@@ -16,7 +16,10 @@ COPY . .
 # Next.js telemetry is disabled
 ENV NEXT_TELEMETRY_DISABLED 1
 
-# During build, we don't have access to the real BACKEND_URL, but it's evaluated at runtime in rewrite rules.
+# Next.js bakes rewrites at build time, so we must provide BACKEND_URL during build.
+ARG BACKEND_URL=http://backend:8080
+ENV BACKEND_URL=$BACKEND_URL
+
 RUN npm run build
 
 # Production image, copy all the files and run next

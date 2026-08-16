@@ -41,7 +41,7 @@ services:
       - "--entrypoints.websecure.address=:443"
       # Enable dashboard ONLY if explicitly requested
       - "--api.insecure=${TRAEFIK_DASHBOARD:-false}"
-      # Enable ACME (Let's Encrypt) ONLY if ENABLE_TLS is true
+      # Enable ACME (Let's Encrypt)
       - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
       - "--certificatesresolvers.myresolver.acme.email=${ACME_EMAIL:-admin@example.com}"
       - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
@@ -55,6 +55,55 @@ services:
       - "traefik_certs:/letsencrypt"
     networks:
       - traefik-net
+
+  backend:
+    build: ./backend
+    container_name: api-sandbox-backend
+    environment:
+      - DOMAIN=${DOMAIN:-localhost}
+      - APP_URL=${APP_URL:-http://localhost:3000}
+      - JWT_SECRET=${JWT_SECRET}
+      - TOKEN_ENCRYPTION_KEY=${TOKEN_ENCRYPTION_KEY}
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
+      - DATABASE_URL=${DATABASE_URL:-postgres://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@postgres:5432/${DB_NAME:-api_sandbox}?sslmode=disable}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - HOST_WORKSPACES_DIR=${HOST_WORKSPACES_DIR}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${HOST_WORKSPACES_DIR}:/app/workspaces
+    networks:
+      - traefik-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.backend.rule=Host(`${DOMAIN:-localhost}`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.backend.entrypoints=${TRAEFIK_ENTRYPOINT:-web}"
+      - "traefik.http.routers.backend.tls=${ENABLE_TLS:-false}"
+      - "traefik.http.routers.backend.tls.certresolver=myresolver"
+      - "traefik.http.services.backend.loadbalancer.server.port=8080"
+      
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        BACKEND_URL: http://backend:8080
+    container_name: api-sandbox-frontend
+    environment:
+      - BACKEND_URL=http://backend:8080
+    networks:
+      - traefik-net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=Host(`${DOMAIN:-localhost}`)"
+      - "traefik.http.routers.frontend.entrypoints=${TRAEFIK_ENTRYPOINT:-web}"
+      - "traefik.http.routers.frontend.tls=${ENABLE_TLS:-false}"
+      - "traefik.http.routers.frontend.tls.certresolver=myresolver"
+      - "traefik.http.services.frontend.loadbalancer.server.port=3000"
 
 networks:
   traefik-net:

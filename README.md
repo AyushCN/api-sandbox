@@ -19,6 +19,13 @@ Instead of deploying static images, this platform mounts your code into language
 
 ## 📦 Changelog
 
+### v1.3.2 — 2026-08-16 (Unified Deployment & Build Fixes)
+
+- **fix**: Next.js frontend now correctly injects `BACKEND_URL` at build time to prevent `localhost:8080` proxy loops inside Docker.
+- **fix**: WebSocket upgrader strictly binds origins to `APP_URL` instead of the undocumented `FRONTEND_URL`.
+- **fix**: Unified `docker-compose.yml` to automatically orchestrate Traefik, Postgres, Redis, Frontend, and Backend as a single cohesive stack.
+- **docs**: Corrected encryption key documentation; `TOKEN_ENCRYPTION_KEY` strictly requires `openssl rand -hex 16` to fulfill the 32-byte exact length constraint.
+
 ### v1.3.1 — 2026-08-16 (Sandbox Lifecycle Stability)
 
 - **fix**: `GetDockerLogs` now falls back to the DB crash log when the container is absent (fixes silent "provisioning" spinner)
@@ -39,31 +46,31 @@ Instead of deploying static images, this platform mounts your code into language
 
 ### 1. Set up GitHub OAuth
 1. Go to your GitHub Developer Settings -> OAuth Apps.
-2. Create a new app with the callback URL: `http://localhost:8080/api/auth/github/callback`
-3. Add the Client ID and Secret to your `backend/.env` file.
+2. Create a new app with the callback URL: `http://localhost/api/auth/github/callback` (or your domain).
+3. Generate a Client ID and Secret.
 
-### 2. Start Infrastructure Services
-The project uses Docker Compose to run PostgreSQL, Redis, and the Traefik proxy.
+### 2. Configure Environment Variables
 ```bash
-docker compose up -d
+cp .env.example .env
+```
+Open `.env` and fill in the required variables:
+- `GITHUB_CLIENT_ID`
+- `GITHUB_CLIENT_SECRET`
+- `TOKEN_ENCRYPTION_KEY` (use `openssl rand -hex 16`)
+- `JWT_SECRET` (use `openssl rand -hex 32`)
+
+### 3. Start the Unified Stack
+The project uses Docker Compose to automatically orchestrate PostgreSQL, Redis, the Traefik reverse proxy, the Next.js Frontend, and the Go Backend.
+```bash
+# Create the workspaces directory (required for bind mounts)
+sudo mkdir -p /var/lib/api-sandbox/workspaces
+sudo chown -R $USER:$USER /var/lib/api-sandbox/workspaces
+
+# Build and start all services
+docker compose up -d --build
 ```
 
-### 3. Run the Next.js Frontend
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-### 4. Run the Go Backend & Worker
-Ensure you have the required environment variables (`GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `TOKEN_ENCRYPTION_KEY`, `DOMAIN`, etc.) set in `backend/.env`.
-```bash
-cd backend
-go build -o server .
-sudo ./server # Sudo may be required to configure bind-mount directories properly
-```
-
-Open `http://localhost:3000` in your browser.
+Open `http://localhost` in your browser. You're ready to go!
 
 ## 📚 Documentation Index
 - [Architecture & Trust Boundaries](docs/ARCHITECTURE.md)

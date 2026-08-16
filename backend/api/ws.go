@@ -18,13 +18,13 @@ var upgrader = websocket.Upgrader{
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
 		origin := r.Header.Get("Origin")
-		frontendUrl := os.Getenv("FRONTEND_URL")
-		if frontendUrl == "" {
-			frontendUrl = "http://localhost:3000"
+		appUrl := os.Getenv("APP_URL")
+		if appUrl == "" {
+			appUrl = "http://localhost:3000"
 		}
 
 		// Ensure origin matches exactly, avoiding substring matches like 'http://localhost:3000.malicious.com'
-		return origin == frontendUrl
+		return origin == appUrl
 	},
 }
 
@@ -177,6 +177,7 @@ func (c *WsClient) readPump() {
 		if err != nil {
 			break
 		}
+		TouchEnvironmentActivity(c.EnvID)
 	}
 }
 

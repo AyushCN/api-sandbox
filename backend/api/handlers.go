@@ -81,6 +81,7 @@ func SetupRoutes(router *gin.Engine) {
 			protected.GET("", GetEnvironments)
 			protected.POST("", CreateEnvironment)
 			protected.GET("/:id", GetEnvironment)
+			protected.PUT("/:id/settings", UpdateEnvironmentSettings)
 			protected.POST("/:id/restart", RestartEnvironment)
 			protected.POST("/:id/transfer", TransferEnvironment)
 			protected.POST("/:id/fork", ForkEnvironment)
@@ -135,7 +136,7 @@ func PrometheusMetrics(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Metrics token not configured"})
 		return
 	}
-	
+
 	token := c.GetHeader("X-Metrics-Token")
 	if token != expectedToken {
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Unauthorized metrics access"})
@@ -500,6 +501,57 @@ type TransferEnvironmentRequest struct {
 	ProjectID string `json:"projectId" binding:"required"`
 }
 
+func UpdateEnvironmentSettings(c *gin.Context) {
+	id := c.Param("id")
+	env, err := checkWorkspaceWriteAccess(c, id)
+	if err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		return
+	}
+
+	var req struct {
+		StartCommand    *string `json:"startCommand"`
+		Port            *int    `json:"port"`
+		HealthCheckType *string `json:"healthCheckType"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+
+	updates := map[string]interface{}{}
+
+	if req.StartCommand != nil {
+		updates["start_command"] = req.StartCommand
+	}
+
+	if req.Port != nil {
+		if *req.Port < 1 || *req.Port > 65535 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Port must be between 1 and 65535"})
+			return
+		}
+		updates["port"] = req.Port
+	}
+
+	if req.HealthCheckType != nil {
+		if *req.HealthCheckType != "tcp" && *req.HealthCheckType != "none" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "HealthCheckType must be 'tcp' or 'none'"})
+			return
+		}
+		updates["health_check_type"] = req.HealthCheckType
+	}
+
+	if len(updates) > 0 {
+		if err := db.DB.Model(&env).Updates(updates).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update settings"})
+			return
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Settings updated successfully. Changes will apply on next restart."})
+}
+
 func TransferEnvironment(c *gin.Context) {
 	envID := c.Param("id")
 	userIDVal, _ := c.Get("userId")
@@ -565,21 +617,23 @@ func DeleteEnvironment(c *gin.Context) {
 	// Cleanup database sidecar if it exists
 	_ = provider.CleanupContainer(c.Request.Context(), fmt.Sprintf("api-sandbox-db-%s", env.ID))
 
-	// Cleanup workspace folder on host
-	_ = provider.CleanupWorkspace(env.ID)
-
 	// Delete associated data first to satisfy foreign key constraints
 	db.DB.Where("environment_id = ?", env.ID).Delete(&models.Log{})
 	db.DB.Where("environment_id = ?", env.ID).Delete(&models.Metric{})
 	db.DB.Where("environment_id = ?", env.ID).Delete(&models.EnvironmentMember{})
+	
+	// Flush any pending watcher events before deleting activities
+	time.Sleep(500 * time.Millisecond)
 	db.DB.Where("environment_id = ?", env.ID).Delete(&models.Activity{})
-	db.DB.Where("environment_id = ?", env.ID).Delete(&models.EnvironmentChange{})
 
 	// Delete from database
 	if err := db.DB.Delete(&env).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete environment"})
 		return
 	}
+
+	// Cleanup workspace folder on host AFTER deleting DB record to prevent watcher race condition
+	_ = provider.CleanupWorkspace(env.ID)
 
 	db.DB.Create(&models.AuditLog{
 		UserID:    fmt.Sprintf("%v", userID),

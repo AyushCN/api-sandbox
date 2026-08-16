@@ -44,7 +44,8 @@ func setupEnvironmentTestRouter() *gin.Engine {
 	r.POST("/api/environments/:id/files/create", CreateWorkspaceFileOrFolder)
 	r.POST("/api/environments/:id/files/delete", DeleteWorkspaceFileOrFolder)
 	r.POST("/api/environments/:id/commit", CommitChanges)
-	r.POST("/api/environments/:id/sync", SyncEnvironmentWithGitHub)
+	// Endpoint removed
+	// r.POST("/api/environments/:id/sync", SyncEnvironmentWithGitHub)
 	r.GET("/api/environments/:id/docker-logs", GetDockerLogs)
 	r.GET("/api/ws/environments/:id", ServeWS)
 

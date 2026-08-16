@@ -226,7 +226,7 @@ func UpdateWorkspaceFileContent(c *gin.Context) {
 	}
 	fullPath := filepath.Join(wd, "workspaces", id, cleanPath)
 
-	// Save code to host workspace
+	// Save code to host workspace synchronously so it is available immediately
 	err = os.WriteFile(fullPath, []byte(req.Content), 0644)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to write file: %v", err)})
@@ -234,91 +234,92 @@ func UpdateWorkspaceFileContent(c *gin.Context) {
 	}
 
 	workspaceDir := filepath.Join(wd, "workspaces", id)
-
-	// Get git diff
-	cmdDiff := exec.Command("git", "diff", "HEAD", req.Path)
-	cmdDiff.Dir = workspaceDir
-	diffOut, _ := cmdDiff.Output()
-
-	// Stage file in git
-	cmdAdd := exec.Command("git", "add", req.Path)
-	cmdAdd.Dir = workspaceDir
-	cmdAdd.Run()
-
 	userID, _ := c.Get("userId")
 	userIDStr := userID.(string)
+	
+	// Perform heavy git, DB, broadcast, and touch operations asynchronously
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("Panic in async workspace save", "envID", id, "error", r)
+			}
+		}()
 
-	now := time.Now()
+		// Get git diff
+		cmdDiff := exec.Command("git", "diff", "HEAD", req.Path)
+		cmdDiff.Dir = workspaceDir
+		diffOut, _ := cmdDiff.Output()
 
-	// Update environment uncommitted changes
-	db.DB.Model(&env).Updates(map[string]interface{}{
-		"has_uncommitted_changes": true,
-		"last_modified_at":        now,
-		"modified_by_user_id":     userIDStr,
-	})
-
-	// Store environment change record
-	db.DB.Create(&models.EnvironmentChange{
-		EnvironmentID: &env.ID,
-		FilePath:      cleanPath,
-		ChangeType:    "modified",
-		UserID:        userIDStr,
-		Diff:          string(diffOut),
-	})
-
-	data := map[string]interface{}{
-		"type":      "file_changed",
-		"file_path": cleanPath,
-		"user_id":   userIDStr,
-		"user_name": GetCurrentUserName(userIDStr),
-		"action":    "save",
-		"timestamp": now,
-		"diff":      string(diffOut),
-	}
-	dataBytes, _ := json.Marshal(data)
-
-	db.DB.Create(&models.Activity{
-		EnvironmentID: &env.ID,
-		Type:          "file_edit",
-		Data:          string(dataBytes),
-		UserID:        &userIDStr,
-	})
-
-	// Broadcast to team via WebSocket
-	BroadcastToProjectMembers(env.ID, data)
-
-	// --- Reload Signaling (Option A) ---
-	// After writing to the host, touch the file inside the container's own
-	// namespace so inotify-based watchers (nodemon, air, uvicorn) fire
-	// instantly without needing 2-second polling loops.
-	reloadSignaled := false
-	reloadMsg := "Saved — runtime not running (no reload signal)"
-
-	if env.Status == "running" && env.ContainerID != nil && *env.ContainerID != "" {
-		// Build the in-container path: WorkDir (e.g. /app) + relative cleanPath.
-		// cleanPath has already been validated to be within the workspace root.
-		inContainerPath := "/app/" + strings.TrimPrefix(cleanPath, "/")
-
-		touchCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-
-		if touchErr := provider.TouchFileInContainer(touchCtx, id, inContainerPath); touchErr != nil {
-			slog.Warn("touch-on-save failed; save still succeeded",
-				"envID", id,
-				"path", inContainerPath,
-				"err", touchErr,
-			)
-			reloadMsg = "Saved — reload signal failed (runtime may be starting)"
-		} else {
-			reloadSignaled = true
-			reloadMsg = "Saved — reload signaled ⚡"
+		// Stage file in git
+		cmdAdd := exec.Command("git", "add", req.Path)
+		cmdAdd.Dir = workspaceDir
+		if err := cmdAdd.Run(); err != nil {
+			slog.Warn("Failed to git add in async save", "envID", id, "path", req.Path, "err", err)
 		}
-	}
 
+		now := time.Now()
+
+		// Update environment uncommitted changes
+		if err := db.DB.Model(&env).Updates(map[string]interface{}{
+			"has_uncommitted_changes": true,
+			"last_modified_at":        now,
+			"modified_by_user_id":     userIDStr,
+		}).Error; err != nil {
+			slog.Error("Failed to update env uncommitted status", "envID", id, "err", err)
+		}
+
+		// Store environment change record
+		db.DB.Create(&models.EnvironmentChange{
+			EnvironmentID: &env.ID,
+			FilePath:      cleanPath,
+			ChangeType:    "modified",
+			UserID:        userIDStr,
+			Diff:          string(diffOut),
+		})
+
+		data := map[string]interface{}{
+			"type":      "file_changed",
+			"file_path": cleanPath,
+			"user_id":   userIDStr,
+			"user_name": GetCurrentUserName(userIDStr),
+			"action":    "save",
+			"timestamp": now,
+			"diff":      string(diffOut),
+		}
+		dataBytes, _ := json.Marshal(data)
+
+		db.DB.Create(&models.Activity{
+			EnvironmentID: &env.ID,
+			Type:          "file_edit",
+			Data:          string(dataBytes),
+			UserID:        &userIDStr,
+		})
+
+		// Broadcast to team via WebSocket
+		BroadcastToProjectMembers(env.ID, data)
+
+		// --- Reload Signaling ---
+		if env.Status == "running" && env.ContainerID != nil && *env.ContainerID != "" {
+			inContainerPath := "/app/" + strings.TrimPrefix(cleanPath, "/")
+
+			touchCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+
+			if touchErr := provider.TouchFileInContainer(touchCtx, id, inContainerPath); touchErr != nil {
+				slog.Warn("touch-on-save failed",
+					"envID", id,
+					"path", inContainerPath,
+					"err", touchErr,
+				)
+			}
+		}
+	}()
+
+	// Return 200 immediately to UI to unblock user
 	c.JSON(http.StatusOK, gin.H{
-		"message":        reloadMsg,
-		"diff":           string(diffOut),
-		"reloadSignaled": reloadSignaled,
+		"message":        "Saved",
+		"diff":           "",     // Async, so diff is not instantly returned
+		"reloadSignaled": false,  // Async, so signaling state isn't instantly known
 	})
 }
 

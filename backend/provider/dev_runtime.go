@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/api-sandbox/backend/models"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -17,6 +18,21 @@ type DevRuntimeConfig struct {
 	WatchHint   string
 	WorkDir     string
 	ExposedPort string
+}
+
+func ResolveRuntime(env *models.Environment, repoPath string, subDir string) (DevRuntimeConfig, error) {
+	config, err := DetectDevRuntime(repoPath, subDir)
+
+	// Apply DB overrides
+	if env.StartCommand != nil && *env.StartCommand != "" {
+		config.StartCmd = *env.StartCommand
+		err = nil // Clear heuristic errors if explicit command given
+	}
+	if env.Port != nil && *env.Port > 0 {
+		config.ExposedPort = fmt.Sprintf("%d", *env.Port)
+	}
+
+	return config, err
 }
 
 func DetectDevRuntime(repoPath string, subDir string) (DevRuntimeConfig, error) {
@@ -94,7 +110,7 @@ func detectNodeRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
 	content, err := os.ReadFile(packageJsonPath)
 
 	installCmd := "npm install"
-	startCmd := "npx nodemon index.js" // fallback
+	startCmd := "node --watch index.js" // fallback (native fast watch)
 
 	// Detect package manager
 	if _, err := os.Stat(filepath.Join(appDir, "yarn.lock")); err == nil {
@@ -140,36 +156,29 @@ func detectNodeRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
 						startCmd = "bun run dev"
 					}
 				} else if start, ok := scripts["start"].(string); ok && start != "" {
-					startCmd = "npx nodemon --exec \"npm start\""
-					if strings.HasPrefix(installCmd, "yarn") {
-						startCmd = "npx nodemon --exec \"yarn start\""
-					}
-					if strings.HasPrefix(installCmd, "pnpm") {
-						startCmd = "npx nodemon --exec \"pnpm start\""
-					}
-					if strings.HasPrefix(installCmd, "bun") {
-						startCmd = "npx nodemon --exec \"bun start\""
-					}
+					startCmd = "node --watch --env-file=.env $(node -e \"console.log(require('./package.json').main || 'index.js')\") 2>/dev/null || node --watch index.js"
+					// If the user specified a custom start script, we try to watch the main file.
+					// node --watch index.js is much faster than npx nodemon
 				}
 			}
 		}
 	}
 
-	// Check if typescript and not nextjs, maybe we need ts-node
+	// Check if typescript and not nextjs, maybe we need ts-node or tsx
 	if !isNextJs {
 		if _, err := os.Stat(filepath.Join(appDir, "tsconfig.json")); err == nil {
-			if startCmd == "npx nodemon index.js" {
+			if startCmd == "node --watch index.js" {
 				// Try to find index.ts or src/index.ts
 				if _, err := os.Stat(filepath.Join(appDir, "src", "index.ts")); err == nil {
-					startCmd = "npx nodemon src/index.ts"
+					startCmd = "npx tsx --watch src/index.ts"
 				} else if _, err := os.Stat(filepath.Join(appDir, "index.ts")); err == nil {
-					startCmd = "npx nodemon index.ts"
+					startCmd = "npx tsx --watch index.ts"
 				}
 			}
 		} else {
-			if startCmd == "npx nodemon index.js" {
+			if startCmd == "node --watch index.js" {
 				if _, err := os.Stat(filepath.Join(appDir, "src", "index.js")); err == nil {
-					startCmd = "npx nodemon src/index.js"
+					startCmd = "node --watch src/index.js"
 				}
 			}
 		}

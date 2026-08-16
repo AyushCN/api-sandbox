@@ -29,7 +29,7 @@ func TestDetectDevRuntime(t *testing.T) {
 			},
 			expectedBase: "node:20-alpine",
 			expectedInst: "npm install",
-			expectedStrt: "npx nodemon --exec \"npm start\"",
+			expectedStrt: "node --watch --env-file=.env $(node -e \"console.log(require('./package.json').main || 'index.js')\") 2>/dev/null || node --watch index.js",
 		},
 		{
 			name: "Node.js Next.js with yarn",

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -138,8 +139,8 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 		}
 	}
 
-	// 3. Detect Dev Runtime & Write Script
-	devConfig, err := provider.DetectDevRuntime(workspaceDir, "")
+	// 3. Detect Runtime or Use Overrides
+	devConfig, err := provider.ResolveRuntime(&env, workspaceDir, "")
 	if err != nil {
 		slog.Error("Failed to detect Dev Runtime", "env_id", envID, "error", err)
 		db.DB.Model(&env).Update("status", models.StatusFailed)
@@ -198,20 +199,56 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 	isRunning := false
 	var crashLogs string
 
+	healthType := "tcp"
+	if env.HealthCheckType != nil {
+		healthType = *env.HealthCheckType
+	}
+
+	// StartCommand port=0 heuristic
+	if env.StartCommand != nil && *env.StartCommand != "" && (env.Port == nil || *env.Port == 0) {
+		healthType = "none"
+	}
+
+	domain := os.Getenv("DOMAIN")
+	if domain == "" {
+		domain = "localhost"
+	}
+
 	for time.Now().Before(deadline) {
 		var checkErr error
 		isRunning, crashLogs, checkErr = ProviderCheckContainerHealth(containerID)
 		if checkErr != nil {
-			// Container disappeared — treat as crash
 			slog.Warn("Health check error during boot polling", "env_id", envID, "error", checkErr)
 			break
 		}
-		if isRunning {
-			// Container is up and running — success
+
+		if !isRunning {
+			// Container has already exited
 			break
 		}
-		// Container has already exited — capture logs and bail immediately
-		break
+
+		if healthType == "none" {
+			// Skip HTTP/TCP port check
+			break
+		}
+
+		// Traefik HTTP Check (Ensures port is bound and accepting traffic)
+		req, _ := http.NewRequest("GET", "http://api-sandbox-traefik", nil)
+		req.Host = fmt.Sprintf("%s.%s", envID, domain)
+
+		client := &http.Client{Timeout: 2 * time.Second}
+		resp, err := client.Do(req)
+
+		if err == nil {
+			// 502 Bad Gateway means Traefik can't reach the container port yet
+			if resp.StatusCode != http.StatusBadGateway {
+				resp.Body.Close()
+				break // Application is responding!
+			}
+			resp.Body.Close()
+		}
+
+		time.Sleep(pollInterval)
 	}
 
 	// If still not running after timeout, poll one last time
@@ -225,22 +262,20 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 		msg := "Sandbox failed to start"
 		if crashLogs != "" {
 			msg = fmt.Sprintf("Sandbox crashed on boot:\n%s", crashLogs)
+		} else if healthType == "tcp" {
+			msg = "Sandbox failed to start: No process listening on configured port before timeout. Check your port settings or disable the health check."
 		}
 		db.DB.Create(&models.Log{
 			EnvironmentID: &env.ID,
 			Message:       msg,
 			Level:         models.LogLevelError,
 		})
-		return fmt.Errorf("container crashed on boot")
+		return fmt.Errorf("container crashed or failed healthcheck on boot")
 	}
 
 	_ = pollInterval // used in future polling refinement
 
 	// 6. Update DB to RUNNING
-	domain := os.Getenv("DOMAIN")
-	if domain == "" {
-		domain = "localhost"
-	}
 	protocol := "https"
 	if domain == "localhost" {
 		protocol = "http"

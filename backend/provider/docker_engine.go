@@ -90,7 +90,15 @@ func CloneOrFetch(ctx context.Context, dir, gitURL, branch, githubToken string) 
 
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
 		configToken()
-		exec.CommandContext(ctx, "git", "-C", dir, "fetch", "--depth", "1", "origin", branch).Run()
+		fetchCmd := exec.CommandContext(ctx, "git", "-C", dir, "fetch", "--depth", "1", "origin", branch)
+		if out, err := fetchCmd.CombinedOutput(); err != nil {
+			// Fallback: fetch default branch if specific branch fetch fails
+			fallbackFetch := exec.CommandContext(ctx, "git", "-C", dir, "fetch", "--depth", "1", "origin")
+			if out2, err2 := fallbackFetch.CombinedOutput(); err2 != nil {
+				return fmt.Errorf("git fetch failed: %s - %v (fallback: %s - %v)", string(out), err, string(out2), err2)
+			}
+			return exec.CommandContext(ctx, "git", "-C", dir, "reset", "--hard", "FETCH_HEAD").Run()
+		}
 		return exec.CommandContext(ctx, "git", "-C", dir, "reset", "--hard", "origin/"+branch).Run()
 	}
 
@@ -153,8 +161,21 @@ func ProvisionDevSandbox(ctx context.Context, envID string, config DevRuntimeCon
 	if domain != "localhost" {
 		labels[fmt.Sprintf("traefik.http.routers.env-%s.entrypoints", envID)] = "websecure"
 		labels[fmt.Sprintf("traefik.http.routers.env-%s.tls.certresolver", envID)] = "myresolver"
+
+		// Security headers
+		labels[fmt.Sprintf("traefik.http.middlewares.security-%s.headers.customresponseheaders.X-Sandbox-Environment", envID)] = envID
+
+		// Retry middleware to prevent 502 Bad Gateway during fast dev reloads (e.g. nodemon restart)
+		labels[fmt.Sprintf("traefik.http.middlewares.retry-%s.retry.attempts", envID)] = "10"
+		labels[fmt.Sprintf("traefik.http.middlewares.retry-%s.retry.initialinterval", envID)] = "100ms"
+
+		// Apply middlewares
+		labels[fmt.Sprintf("traefik.http.routers.env-%s.middlewares", envID)] = fmt.Sprintf("security-%s,retry-%s", envID, envID)
 	} else {
 		labels[fmt.Sprintf("traefik.http.routers.env-%s.entrypoints", envID)] = "web"
+		labels[fmt.Sprintf("traefik.http.middlewares.retry-%s.retry.attempts", envID)] = "10"
+		labels[fmt.Sprintf("traefik.http.middlewares.retry-%s.retry.initialinterval", envID)] = "100ms"
+		labels[fmt.Sprintf("traefik.http.routers.env-%s.middlewares", envID)] = fmt.Sprintf("retry-%s", envID)
 	}
 
 	networkName, networkID, err := EnsureOrgNetwork(ctx, orgID)

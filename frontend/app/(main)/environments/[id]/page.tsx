@@ -9,11 +9,12 @@ import {
   Activity, Box, Clock, ExternalLink, GitBranch, 
   Terminal as TerminalIcon, Loader2, Trash2, RefreshCw,
   Folder, FolderOpen, File, ChevronRight, ChevronDown, 
-  Save, Code, Check, AlertCircle, FilePlus, FolderPlus, ScrollText, X, Users, DownloadCloud, Search, Plus
+  Save, Code, Check, AlertCircle, FilePlus, FolderPlus, ScrollText, X, Users, DownloadCloud, Search, Plus, Settings as SettingsIcon
 } from "lucide-react";
 
 import { fetchWithAuth } from "@/lib/auth";
 import TeamCollaborationDashboard from "@/components/TeamCollaborationDashboard";
+import EnvironmentSettings from "@/components/EnvironmentSettings";
 import { useEnvironmentChanges } from "@/hooks/useEnvironmentChanges";
 import ActiveEditors from "@/components/ActiveEditors";
 import { CommitModal, BranchPicker } from "@/components/GitUI";
@@ -735,7 +736,7 @@ export default function EnvironmentDetail() {
               className={`px-4 py-1.5 rounded-lg border bg-primary-fixed/5 flex items-center gap-1.5 transition-colors text-xs font-semibold ${isViewerRole ? 'border-outline-variant/30 text-on-surface-variant/30 cursor-not-allowed' : 'border-primary-fixed/30 text-primary-fixed hover:bg-primary-fixed/15 disabled:opacity-50'}`}
             >
               {isRestarting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-              Restart
+              {env.status === 'STOPPED' ? 'Re-clone & Restart' : 'Restart'}
             </button>
             {!isViewerRole && (
               <button
@@ -833,6 +834,19 @@ export default function EnvironmentDetail() {
           <span className="flex items-center gap-2">
             <Activity className="w-4 h-4" />
             Team Activity
+          </span>
+        </button>
+        <button
+          onClick={() => setActiveTab("settings")}
+          className={`pb-3 text-sm font-medium transition-all relative ${
+            activeTab === "settings" 
+              ? "text-primary-fixed border-b-2 border-primary-fixed" 
+              : "text-on-surface-variant hover:text-on-surface"
+          }`}
+        >
+          <span className="flex items-center gap-2">
+            <SettingsIcon className="w-4 h-4" />
+            Settings
           </span>
         </button>
       </div>
@@ -1064,6 +1078,13 @@ export default function EnvironmentDetail() {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* Settings View */}
+      {activeTab === "settings" && (
+        <div className="pt-4">
+          <EnvironmentSettings env={env} mutate={() => mutate(`/api/environments/${id}`)} isViewerRole={isViewerRole} />
         </div>
       )}
     </div>

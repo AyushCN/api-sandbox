@@ -14,7 +14,7 @@ echo "Creating Environment..."
 ENV_JSON=$(curl -s -X POST "$APP_URL/api/environments" \
   -H "Cookie: token=$SESSION_COOKIE" \
   -H "Content-Type: application/json" \
-  -d '{"name": "Session E2E Test", "gitUrl": "https://github.com/AyushCN/api-sandbox-links-example"}')
+  -d '{"name": "Session E2E Test", "gitUrl": "https://github.com/expressjs/express", "projectId": "96aa4613-6f23-4914-afb3-2a7baedd8e01"}')
   
 ENV_ID=$(echo "$ENV_JSON" | jq -r '.id')
 echo "Environment ID: $ENV_ID"
@@ -23,6 +23,12 @@ if [ "$ENV_ID" == "null" ] || [ -z "$ENV_ID" ]; then
     echo "Failed to create environment: $ENV_JSON"
     exit 1
 fi
+
+echo "Disabling TCP Health Check via Settings API..."
+curl -s -X PUT "$APP_URL/api/environments/$ENV_ID/settings" \
+  -H "Cookie: token=$SESSION_COOKIE" \
+  -H "Content-Type: application/json" \
+  -d '{"healthCheckType": "none"}'
 
 echo "Waiting for build to finish..."
 STATUS="BUILDING"

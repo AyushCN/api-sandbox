@@ -157,6 +157,8 @@ type Environment struct {
 	UserProvidedDBURL *string           `gorm:"type:text" json:"userProvidedDbUrl"`
 	ContainerID       *string           `gorm:"type:text" json:"containerId"`
 	Port              *int              `gorm:"type:integer" json:"port"`
+	StartCommand      *string           `gorm:"type:text" json:"startCommand"`
+	HealthCheckType   *string           `gorm:"type:text;default:'tcp'" json:"healthCheckType"` // 'tcp' or 'none'
 	CreatedAt         time.Time         `gorm:"default:current_timestamp" json:"createdAt"`
 	UpdatedAt         time.Time         `gorm:"default:current_timestamp" json:"updatedAt"`
 	ExpiresAt         *time.Time        `gorm:"type:timestamp" json:"expiresAt"`

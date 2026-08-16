@@ -360,7 +360,7 @@ export default function ProfilePage() {
       
       {/* Clean Tab Navigation */}
       <div className="border-b border-outline-variant mb-8 mt-4 sticky top-0 bg-surface-container-lowest/80 backdrop-blur-md z-10">
-        <nav className="flex gap-6 lg:ml-[280px]">
+        <nav className="flex gap-6">
           {[
             { id: 'overview', label: 'Overview', icon: Activity },
             { id: 'environments', label: 'Environments', icon: BookOpen, count: user.envCount },
@@ -390,13 +390,10 @@ export default function ProfilePage() {
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
         
         {/* ───── Left Sidebar ───── */}
-        <div className="lg:col-span-1 -mt-24 relative z-20">
+        <div className="lg:col-span-1 relative z-20">
           <div className="relative mb-6">
             <div className="w-[280px] h-[280px] rounded-full bg-gradient-to-br from-primary-fixed/30 to-primary-container/20 border-8 border-surface-container-lowest flex items-center justify-center shadow-lg">
               <span className="text-7xl font-black text-primary-fixed tracking-tight">{initials}</span>
-            </div>
-            <div className="absolute bottom-12 right-6 w-12 h-12 bg-surface-container-lowest rounded-full border border-outline-variant shadow-sm flex items-center justify-center hover:scale-110 transition-transform cursor-pointer" title="Pro Badge">
-              <span className="text-xs font-black bg-gradient-to-br from-indigo-400 to-purple-500 text-transparent bg-clip-text">PRO</span>
             </div>
           </div>
 

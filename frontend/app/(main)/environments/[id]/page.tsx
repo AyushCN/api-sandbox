@@ -617,6 +617,7 @@ export default function EnvironmentDetail() {
       });
       if (!res.ok) throw new Error("Failed to restart sandbox");
       toast.success("Sandbox restart initiated");
+      mutate(`/api/environments/${id}`);
       if (xtermRef.current) {
         xtermRef.current.clear();
         xtermRef.current._logCount = 0;

@@ -19,6 +19,13 @@ Instead of deploying static images, this platform mounts your code into language
 
 ## 📦 Changelog
 
+### v1.3.5 — 2026-08-16 (Profile & Account Overhaul)
+
+- **Feature**: Completely rewrote the user profile page for a cleaner, modern layout.
+- **Feature**: Automatically fetch and display the user's GitHub profile picture upon login.
+- **Security**: Implemented a secure "Delete Account" flow that completely drops all user data and cascading sandbox environments.
+- **Cleanup**: Stripped out non-functional tabs (Packages, Stars) and removed irrelevant edit fields (Twitter, GitHub manual inputs).
+
 ### v1.3.4 — 2026-08-16 (Extended Language Support & Dev Loop Optimization)
 
 - **Languages**: Added native hot-reloading heuristics for `.NET (C#)`, `Java`, `C`, and `C++` using minimal Alpine base images (`dotnet/sdk:8.0-alpine`, `eclipse-temurin:21-jdk-alpine`, and `alpine:3.19` with injected `build-base`/`cmake`).

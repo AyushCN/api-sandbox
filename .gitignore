@@ -87,7 +87,3 @@ frontend/.env.*
 # Backend Sandbox Workspaces
 backend/workspaces/
 backend/sandbox-start.sh
-
-# Backups
-backups/
-

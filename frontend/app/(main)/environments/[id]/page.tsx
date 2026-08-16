@@ -241,6 +241,7 @@ export default function EnvironmentDetail() {
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
   const [transferProjectId, setTransferProjectId] = useState("");
   const [isTransferring, setIsTransferring] = useState(false);
+  const [isForking, setIsForking] = useState(false);
   const { data: projects, isLoading: isProjectsLoading } = useSWR("/api/projects", fetcher);
 
   const [userSearchResults, setUserSearchResults] = useState<any[]>([]);
@@ -329,6 +330,22 @@ export default function EnvironmentDetail() {
       toast.error(e.message);
     } finally {
       setIsTransferring(false);
+    }
+  };
+
+  const handleFork = async () => {
+    if (!confirm("Are you sure you want to fork this sandbox? This will create a duplicate sandbox in this project.")) return;
+    setIsForking(true);
+    try {
+      const res = await fetchWithAuth(`/api/environments/${id}/fork`, {
+        method: "POST",
+      });
+      toast.success("Sandbox forked successfully!");
+      // The response contains the new environment
+      router.push(`/environments/${res.id}`);
+    } catch (e: any) {
+      toast.error(e.message || "Failed to fork sandbox");
+      setIsForking(false);
     }
   };
 
@@ -760,6 +777,14 @@ export default function EnvironmentDetail() {
                 {hasUncommittedChanges ? "Review & Commit" : "Git Actions"}
               </button>
             )}
+            <button
+              onClick={handleFork}
+              disabled={isForking}
+              className="px-4 py-1.5 rounded-lg border border-purple-500/30 bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 flex items-center gap-1.5 transition-colors disabled:opacity-50 text-xs font-semibold"
+            >
+              {isForking ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <GitBranch className="w-3.5 h-3.5" />}
+              Fork
+            </button>
             {isEnvOwner && (
               <>
                 <button

@@ -201,6 +201,20 @@ func GithubCallback(c *gin.Context) {
 				UserID:         user.ID,
 				Role:           models.RoleAdmin,
 			})
+			
+			// Create Default Workspace Project
+			defaultProject := models.Project{
+				Name:                "Default Workspace",
+				OwnerOrganizationID: org.ID,
+				CreatedByUserID:     user.ID,
+			}
+			if err := db.DB.Create(&defaultProject).Error; err == nil {
+				db.DB.Create(&models.ProjectCollaborator{
+					ProjectID: defaultProject.ID,
+					UserID:    user.ID,
+					Role:      models.ProjectRoleOwner,
+				})
+			}
 		}
 	} else {
 		// Update existing user with latest GitHub info

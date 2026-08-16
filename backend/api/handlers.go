@@ -84,6 +84,7 @@ func SetupRoutes(router *gin.Engine) {
 			protected.GET("/:id", GetEnvironment)
 			protected.POST("/:id/restart", RestartEnvironment)
 			protected.POST("/:id/transfer", TransferEnvironment)
+			protected.POST("/:id/fork", ForkEnvironment)
 			protected.DELETE("/:id", DeleteEnvironment)
 			protected.GET("/:id/logs/stream", StreamLogs)
 			protected.GET("/:id/files", GetWorkspaceFiles)
@@ -856,4 +857,90 @@ func GetUserActivity(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, activities)
+}
+
+func ForkEnvironment(c *gin.Context) {
+	id := c.Param("id")
+	userID, _ := c.Get("userId")
+	uid := userID.(string)
+
+	var originalEnv models.Environment
+	query := applyEnvironmentScope(db.DB, userID)
+	if err := query.First(&originalEnv, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Environment not found or access denied"})
+		return
+	}
+
+	var user models.User
+	if err := db.DB.First(&user, "id = ?", uid).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch user"})
+		return
+	}
+
+	// 1. Check concurrent running/building environments
+	var currentActive int64
+	db.DB.Model(&models.Environment{}).
+		Where("user_id = ? AND status IN ?", uid, []models.EnvironmentStatus{models.StatusBuilding, models.StatusRunning}).
+		Count(&currentActive)
+
+	if currentActive >= int64(user.MaxEnvironments) {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": fmt.Sprintf("You have reached the limit of %d concurrent environments. Stop or delete an existing environment first.", user.MaxEnvironments),
+		})
+		return
+	}
+
+	forkedName := fmt.Sprintf("%s (Fork)", originalEnv.Name)
+
+	newEnv := models.Environment{
+		UserID:            uid,
+		ProjectID:         originalEnv.ProjectID,
+		OrganizationID:    originalEnv.OrganizationID,
+		Name:              forkedName,
+		GitURL:            originalEnv.GitURL,
+		GithubBranch:      originalEnv.GithubBranch,
+		Status:            models.StatusBuilding,
+		UserProvidedDBURL: originalEnv.UserProvidedDBURL,
+	}
+
+	if err := db.DB.Create(&newEnv).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fork environment"})
+		return
+	}
+
+	// Add creator as ADMIN
+	db.DB.Create(&models.EnvironmentMember{
+		EnvironmentID: newEnv.ID,
+		UserID:        uid,
+		Role:          models.EnvRoleAdmin,
+	})
+
+	db.DB.Create(&models.AuditLog{
+		UserID:    uid,
+		Action:    "FORK_ENVIRONMENT",
+		Resource:  newEnv.ID,
+		IPAddress: c.ClientIP(),
+	})
+
+	// Enqueue the build task
+	payload, err := json.Marshal(map[string]string{"environmentId": newEnv.ID})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to serialize task payload"})
+		return
+	}
+
+	task := asynq.NewTask(queue.TaskBuildEnvironment, payload)
+	_, err = queue.Client.Enqueue(task, asynq.MaxRetry(3))
+	if err != nil {
+		db.DB.Model(&newEnv).Update("status", models.StatusFailed)
+		db.DB.Create(&models.Log{
+			EnvironmentID: &newEnv.ID,
+			Message:       fmt.Sprintf("Failed to enqueue build: %v", err),
+			Level:         models.LogLevelError,
+		})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to enqueue build task"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, newEnv)
 }

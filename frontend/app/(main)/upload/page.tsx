@@ -10,10 +10,22 @@ import toast from "react-hot-toast";
 import { Code, Loader2 } from "lucide-react";
 import { fetchWithAuth } from "@/lib/auth";
 
+import useSWR from "swr";
+
 const schema = z.object({
   name: z.string().min(3, "Name must be at least 3 characters").max(50),
   gitUrl: z.string().url("Must be a valid URL").regex(/^https:\/\/github\.com/, "Must be a GitHub repository"),
   githubBranch: z.string().min(1, "Branch is required").default("main"),
+  projectId: z.string().optional(),
+  newProjectName: z.string().optional(),
+}).refine((data) => {
+  if (data.projectId === "new") {
+    return data.newProjectName && data.newProjectName.length >= 3;
+  }
+  return true;
+}, {
+  message: "New project name must be at least 3 characters",
+  path: ["newProjectName"],
 });
 
 type FormData = z.infer<typeof schema>;
@@ -35,7 +47,10 @@ export default function UploadPage() {
     defaultValues: { githubBranch: "main" },
   });
 
+  const { data: projects, isLoading: isProjectsLoading } = useSWR("/api/projects", (url) => fetchWithAuth(url));
+
   const gitUrl = watch("gitUrl");
+  const projectId = watch("projectId");
 
   useEffect(() => {
     const fetchBranches = async () => {
@@ -77,10 +92,27 @@ export default function UploadPage() {
   const onSubmit = async (data: FormData) => {
     setIsSubmitting(true);
     try {
+      let targetProjectId = data.projectId;
+      
+      if (targetProjectId === "new") {
+        // Create new project first
+        const projRes = await fetchWithAuth("/api/projects", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: data.newProjectName, description: "Auto-created workspace" }),
+        });
+        targetProjectId = projRes.id;
+      }
+
       const response = await fetchWithAuth("/api/environments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
+        body: JSON.stringify({
+          name: data.name,
+          gitUrl: data.gitUrl,
+          githubBranch: data.githubBranch,
+          projectId: targetProjectId && targetProjectId !== "" ? targetProjectId : undefined,
+        }),
       });
 
       const env = response;
@@ -109,6 +141,37 @@ export default function UploadPage() {
         </div>
 
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-6 relative z-10">
+          <div className="space-y-2">
+            <label className="text-sm font-bold tracking-wide text-on-surface-variant uppercase">Project Destination</label>
+            {isProjectsLoading ? (
+              <div className="w-full bg-surface-container px-4 py-3 rounded-lg border border-outline-variant text-on-surface opacity-50 flex items-center">
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Loading projects...
+              </div>
+            ) : (
+              <select
+                {...register("projectId")}
+                className="w-full bg-surface-container px-4 py-3 rounded-lg border border-outline-variant text-on-surface focus:border-primary-fixed focus:ring-1 focus:ring-primary-fixed transition-all appearance-none"
+              >
+                <option value="">-- Personal Sandbox (Not Shared) --</option>
+                {projects?.map((p: any) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+                <option value="new">+ Create New Workspace Project</option>
+              </select>
+            )}
+            
+            {projectId === "new" && (
+              <div className="pt-3">
+                <input
+                  {...register("newProjectName")}
+                  placeholder="New Project Name (e.g. My Secret App)"
+                  className="w-full bg-surface-container px-4 py-3 rounded-lg border border-outline-variant text-on-surface focus:border-primary-fixed focus:ring-1 focus:ring-primary-fixed transition-all"
+                />
+                {errors.newProjectName && <p className="text-sm text-error font-medium mt-1">{errors.newProjectName.message}</p>}
+              </div>
+            )}
+          </div>
+
           <div className="space-y-2">
             <label className="text-sm font-bold tracking-wide text-on-surface-variant uppercase">Project Name</label>
             <input

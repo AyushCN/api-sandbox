@@ -44,11 +44,13 @@ func CreateProject(c *gin.Context) {
 		return
 	}
 
+	now := time.Now()
 	db.DB.Create(&models.ProjectCollaborator{
 		ProjectID:       project.ID,
 		UserID:          uid,
 		Role:            models.ProjectRoleOwner,
 		InvitedByUserID: uid,
+		AcceptedAt:      &now,
 	})
 
 	c.JSON(http.StatusCreated, gin.H{"project": project})
@@ -99,6 +101,18 @@ func InviteToProject(c *gin.Context) {
 	// Make sure role is valid
 	if req.Role != models.ProjectRoleAdmin && req.Role != models.ProjectRoleCollaborator && req.Role != models.ProjectRoleViewer {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid role specified"})
+		return
+	}
+
+	// Fetch the project to ensure we don't invite to Default Workspace
+	var project models.Project
+	if err := db.DB.First(&project, "id = ?", projectID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+		return
+	}
+
+	if project.Name == "Default Workspace" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "You cannot invite collaborators to your Default Workspace. Please create a new project to share with others."})
 		return
 	}
 

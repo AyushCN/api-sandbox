@@ -411,7 +411,7 @@ func GetEnvironment(c *gin.Context) {
 
 func getUserProjectIDs(userID interface{}) []string {
 	var collabs []models.ProjectCollaborator
-	db.DB.Where("user_id = ?", userID).Find(&collabs)
+	db.DB.Where("user_id = ? AND accepted_at IS NOT NULL", userID).Find(&collabs)
 	var projectIDs []string
 	for _, c := range collabs {
 		projectIDs = append(projectIDs, c.ProjectID)

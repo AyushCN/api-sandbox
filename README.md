@@ -14,6 +14,18 @@ Instead of deploying static images, this platform mounts your code into language
 6. **Isolated Workspaces**: Sandboxes can be launched in isolated, shared workspaces. A private "Default Workspace" is automatically created for all new users.
 7. **Fork Sandbox**: Seamlessly clone any environment you have access to. Forking duplicates the entire container and sidecar context into your own isolated sandbox to avoid team conflict.
 8. **Strict Invitation Security**: Pending invitations grant zero access to sandboxes or code until the user explicitly accepts the invitation.
+9. **Crash Visibility**: When a sandbox container fails to start, the exact application traceback is surfaced directly in the App Output panel, replacing the silent "Container is provisioning" message.
+10. **Smart Boot Polling**: The health checker waits up to 120 seconds for slow runtimes (e.g., Python `pip install`, Node.js `npm install`) before declaring a container failed, eliminating false crash-loop cycles on cold images.
+
+## 📦 Changelog
+
+### v1.3.1 — 2026-08-16 (Sandbox Lifecycle Stability)
+
+- **fix**: `GetDockerLogs` now falls back to the DB crash log when the container is absent (fixes silent "provisioning" spinner)
+- **fix**: Corrected `ORDER BY timestamp` column name in the DB-fallback log query (was incorrectly `created_at`, causing a 42703 SQL error)
+- **fix**: `TouchFileInContainer` now uses the correct `api-sandbox-env-` name prefix, matching the provisioning subsystem
+- **fix**: Replaced the 3-second single health check with a 120-second polling loop so slow dependency installs (`pip`, `npm`, `go mod`) no longer cause false crash detection
+- **fix**: Boot log message "Waiting for sandbox to initialize…" is now written to the DB so the App Output stays informative during the install phase
 
 ## ⚠️ Known Limitations & Security Caveats
 

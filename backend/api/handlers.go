@@ -684,7 +684,7 @@ func GetDockerLogs(c *gin.Context) {
 		if strings.Contains(outStr, "No such container") || len(output) == 0 {
 			var dbLogs []models.Log
 			db.DB.Where("environment_id = ?", id).
-				Order("created_at desc").
+				Order("timestamp desc").
 				Limit(50).
 				Find(&dbLogs)
 

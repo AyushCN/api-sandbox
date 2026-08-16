@@ -182,6 +182,7 @@ func GithubCallback(c *gin.Context) {
 			GithubUsername:  ghUser.Login,
 			GithubToken:     encryptedToken,
 			Github:          ghUser.HtmlUrl,
+			AvatarURL:       ghUser.Avatar,
 		}
 
 		if err := db.DB.Create(&user).Error; err != nil {
@@ -223,6 +224,7 @@ func GithubCallback(c *gin.Context) {
 			"github_username": ghUser.Login,
 			"github_token":    encryptedToken,
 			"github":          ghUser.HtmlUrl,
+			"avatar_url":      ghUser.Avatar,
 		})
 	}
 

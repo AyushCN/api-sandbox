@@ -33,6 +33,7 @@ interface UserProfile {
   twitter: string;
   github: string;
   githubUsername?: string;
+  avatarUrl?: string;
 }
 
 interface Environment {
@@ -392,8 +393,13 @@ export default function ProfilePage() {
         {/* ───── Left Sidebar ───── */}
         <div className="lg:col-span-1 relative z-20">
           <div className="relative mb-6">
-            <div className="w-[280px] h-[280px] rounded-full bg-gradient-to-br from-primary-fixed/30 to-primary-container/20 border-8 border-surface-container-lowest flex items-center justify-center shadow-lg">
-              <span className="text-7xl font-black text-primary-fixed tracking-tight">{initials}</span>
+            <div className="w-[280px] h-[280px] rounded-full bg-gradient-to-br from-primary-fixed/30 to-primary-container/20 border-8 border-surface-container-lowest flex items-center justify-center shadow-lg overflow-hidden">
+              {user.avatarUrl ? (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img src={user.avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-7xl font-black text-primary-fixed tracking-tight">{initials}</span>
+              )}
             </div>
           </div>
 

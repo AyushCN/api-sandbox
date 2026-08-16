@@ -782,6 +782,7 @@ type MeResponse struct {
 	Email            string `json:"email"`
 	Username         string `json:"username"`
 	GithubUsername   string `json:"githubUsername"`
+	AvatarURL        string `json:"avatarUrl"`
 	IsEmailVerified  bool   `json:"isEmailVerified"`
 	MaxEnvironments  int    `json:"maxEnvironments"`
 	MaxBuildsPerHour int    `json:"maxBuildsPerHour"`
@@ -824,6 +825,7 @@ func GetMe(c *gin.Context) {
 		Email:            user.Email,
 		Username:         user.Username,
 		GithubUsername:   user.GithubUsername,
+		AvatarURL:        user.AvatarURL,
 		IsEmailVerified:  user.IsEmailVerified,
 		MaxEnvironments:  user.MaxEnvironments,
 		MaxBuildsPerHour: user.MaxBuildsPerHour,

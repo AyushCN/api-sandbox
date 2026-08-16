@@ -38,6 +38,7 @@ type User struct {
 	GithubID          string     `gorm:"type:text;index" json:"githubId,omitempty"`
 	GithubUsername    string     `gorm:"type:text" json:"githubUsername,omitempty"`
 	GithubToken       string     `gorm:"type:text" json:"-"`
+	AvatarURL         string     `gorm:"type:text" json:"avatarUrl"`
 	CreatedAt         time.Time  `gorm:"default:current_timestamp" json:"createdAt"`
 	UpdatedAt         time.Time  `gorm:"default:current_timestamp" json:"updatedAt"`
 }

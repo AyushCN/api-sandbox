@@ -11,6 +11,8 @@ Instead of deploying static images, this platform mounts your code into language
 3. **Zero-Config Databases**: Automatic provisioning of isolated sidecar databases (PostgreSQL, MySQL, Redis) strictly tied to the lifecycle of the ephemeral sandbox. Fine-grained connection variables (e.g., `DB_HOST`, `DB_PORT`, `DB_USER`) are automatically injected into the sandbox container.
 4. **Browser IDE & Terminal**: Integrated file editing and terminal access to instantly test backend APIs before pushing.
 5. **Team Collaboration & RBAC**: Real-time user search for inviting teammates. Strict Role-Based Access Control ensures `VIEWER` roles have true read-only access (enforced at both UI and API levels), while `OWNER` and `COLLABORATOR` roles can edit, commit, and push changes.
+6. **Isolated Workspaces**: Sandboxes can be launched in isolated, shared workspaces. Your "Default Workspace" is fully private and cannot be shared to ensure code isolation.
+7. **Strict Invitation Security**: Pending invitations grant zero access to sandboxes or code until the user explicitly accepts the invitation.
 
 ## ⚠️ Known Limitations & Security Caveats
 

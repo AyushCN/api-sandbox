@@ -16,8 +16,8 @@ export default function MainLayout({
             <span className="font-bold tracking-tight text-xl text-primary">API Sandbox</span>
           </Link>
           <div className="flex items-center gap-6">
-            <Link href="/dashboard" className="text-sm font-bold tracking-wide text-on-surface-variant hover:text-primary transition-colors">
-              Dashboard
+            <Link href="/projects" className="text-sm font-bold tracking-wide text-on-surface-variant hover:text-primary transition-colors">
+              Projects
             </Link>
             <UserAvatar />
             <LogoutButton />

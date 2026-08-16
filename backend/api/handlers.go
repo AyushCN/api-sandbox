@@ -546,6 +546,11 @@ func RestartEnvironment(c *gin.Context) {
 
 	TouchEnvironmentActivity(env.ID)
 
+	if env.Status == models.StatusBuilding {
+		c.JSON(http.StatusConflict, gin.H{"error": "Environment is already building"})
+		return
+	}
+
 	// Try to stop and remove old docker container if it exists
 	if env.ContainerID != nil && *env.ContainerID != "" {
 		_ = provider.CleanupContainer(c.Request.Context(), *env.ContainerID)

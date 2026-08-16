@@ -355,8 +355,8 @@ func StartSidecarDatabase(ctx context.Context, envID string, orgID string, dbTyp
 			Env:   env,
 		},
 		HostConfig: &docker.HostConfig{
-			Memory:      256 * 1024 * 1024, // 256MB for DB
-			MemorySwap:  256 * 1024 * 1024,
+			Memory:      512 * 1024 * 1024, // 512MB for DB
+			MemorySwap:  1024 * 1024 * 1024, // 1GB Swap
 			CPUQuota:    100000,
 			CPUPeriod:   100000,
 			CPUShares:   512,

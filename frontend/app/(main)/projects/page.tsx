@@ -43,8 +43,8 @@ export default function ProjectsPage() {
     <div className="space-y-8 pb-12">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center">
-            <Folder className="w-5 h-5 text-indigo-400" />
+          <div className="w-10 h-10 rounded-xl bg-primary-fixed/10 border-primary-fixed/20 flex items-center justify-center">
+            <Folder className="w-5 h-5 text-primary-fixed" />
           </div>
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-on-surface">Workspace Projects</h1>
@@ -74,14 +74,14 @@ export default function ProjectsPage() {
           </div>
         ) : projects?.length === 0 ? (
           <div className="bg-surface-container-lowest border border-outline-variant border-dashed rounded-xl py-24 text-center flex flex-col items-center">
-            <div className="w-16 h-16 rounded-2xl bg-indigo-500/5 border border-indigo-500/10 flex items-center justify-center mb-5">
+            <div className="w-16 h-16 rounded-2xl bg-primary-fixed/5 border border-primary-fixed/10 flex items-center justify-center mb-5">
               <Folder className="w-8 h-8 text-on-surface-variant/30" />
             </div>
             <h3 className="text-xl font-bold text-on-surface mb-2">No projects yet</h3>
             <p className="text-on-surface-variant mb-8 max-w-xs">Create your first collaborative workspace project.</p>
             <button 
               onClick={() => setIsCreateModalOpen(true)}
-              className="bg-indigo-500 text-white px-8 py-3 rounded-xl font-bold hover:shadow-[0_0_20px_rgba(99,102,241,0.3)] active:scale-95 transition-all"
+              className="bg-primary-container text-on-primary-fixed-variant hover:shadow-[0_0_20px_rgba(0,240,255,0.2)]"
             >
               New Workspace
             </button>
@@ -91,10 +91,10 @@ export default function ProjectsPage() {
             {projects?.map((project: any, idx: number) => (
               <motion.div key={project.id} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.04, duration: 0.35 }}>
                 <Link href={`/projects/${project.id}`} className="block group h-full">
-                  <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-5 h-full flex flex-col gap-4 transition-all duration-300 hover:border-indigo-500/40 hover:shadow-[0_0_24px_rgba(99,102,241,0.08)] relative overflow-hidden">
-                    <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+                  <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-5 h-full flex flex-col gap-4 transition-all duration-300 hover:border-primary-fixed/40 hover:shadow-[0_0_24px_rgba(0,240,255,0.08)] relative overflow-hidden">
+                    <div className="absolute inset-0 bg-gradient-to-br from-primary-fixed/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
                     <div className="relative z-10 flex-1 min-w-0">
-                      <h3 className="font-bold text-lg text-on-surface group-hover:text-indigo-400 transition-colors truncate mb-1.5">{project.name}</h3>
+                      <h3 className="font-bold text-lg text-on-surface group-hover:text-primary-fixed transition-colors truncate mb-1.5">{project.name}</h3>
                       <p className="text-sm text-on-surface-variant line-clamp-2 mb-4">
                         {project.description || "No description provided."}
                       </p>
@@ -104,7 +104,7 @@ export default function ProjectsPage() {
                         <Users className="w-3 h-3" />
                         {project.name === "Default Workspace" ? "Private" : "Team Workspace"}
                       </div>
-                      <ArrowRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 text-indigo-400 transition-all group-hover:translate-x-0.5 duration-200" />
+                      <ArrowRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 text-primary-fixed transition-all group-hover:translate-x-0.5 duration-200" />
                     </div>
                   </div>
                 </Link>
@@ -133,7 +133,7 @@ export default function ProjectsPage() {
                   value={newProjectName}
                   onChange={(e) => setNewProjectName(e.target.value)}
                   placeholder="e.g. Backend Services API"
-                  className="w-full bg-surface-container px-4 py-3 rounded-lg border border-outline-variant text-on-surface focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all outline-none"
+                  className="w-full bg-surface-container px-4 py-3 rounded-lg border border-outline-variant text-on-surface focus:border-primary-fixed focus:ring-primary-fixed transition-all outline-none"
                 />
               </div>
               <div>
@@ -142,7 +142,7 @@ export default function ProjectsPage() {
                   value={newProjectDesc}
                   onChange={(e) => setNewProjectDesc(e.target.value)}
                   placeholder="Briefly describe this workspace..."
-                  className="w-full bg-surface-container px-4 py-3 rounded-lg border border-outline-variant text-on-surface focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all h-24 resize-none outline-none"
+                  className="w-full bg-surface-container px-4 py-3 rounded-lg border border-outline-variant text-on-surface focus:border-primary-fixed focus:ring-primary-fixed transition-all h-24 resize-none outline-none"
                 />
               </div>
               <div className="pt-2 flex justify-end gap-3">
@@ -156,7 +156,7 @@ export default function ProjectsPage() {
                 <button
                   type="submit"
                   disabled={isCreating || !newProjectName.trim()}
-                  className="px-5 py-2 bg-indigo-500 text-white rounded-lg font-bold hover:shadow-[0_0_15px_rgba(99,102,241,0.3)] hover:bg-indigo-600 disabled:opacity-50 disabled:pointer-events-none flex items-center gap-2 transition-all"
+                  className="px-5 py-2 bg-primary-container text-on-primary-fixed-variant hover:shadow-[0_0_20px_rgba(0,240,255,0.2)] hover:brightness-110 disabled:opacity-50 disabled:pointer-events-none flex items-center gap-2 transition-all"
                 >
                   {isCreating && <Loader2 className="w-4 h-4 animate-spin" />}
                   Create Workspace

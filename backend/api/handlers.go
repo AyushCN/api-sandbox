@@ -163,8 +163,9 @@ func PrometheusMetrics(c *gin.Context) {
 }
 
 type PaginationParams struct {
-	Page  int `form:"page"`
-	Limit int `form:"limit"`
+	Page      int    `form:"page"`
+	Limit     int    `form:"limit"`
+	ProjectID string `form:"projectId"`
 }
 
 func applyEnvironmentScope(query *gorm.DB, userID interface{}) *gorm.DB {
@@ -207,6 +208,9 @@ func GetEnvironments(c *gin.Context) {
 
 	err = executeWithRetry(3, 100*time.Millisecond, func() error {
 		query := applyEnvironmentScope(db.DB.WithContext(context.Background()), userID)
+		if params.ProjectID != "" {
+			query = query.Where("project_id = ?", params.ProjectID)
+		}
 		return query.Order("created_at desc").
 			Offset(offset).
 			Limit(params.Limit).

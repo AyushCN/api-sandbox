@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -13,6 +15,7 @@ import (
 
 	"github.com/api-sandbox/backend/db"
 	"github.com/api-sandbox/backend/models"
+	"github.com/api-sandbox/backend/provider"
 	"github.com/gin-gonic/gin"
 )
 
@@ -284,9 +287,38 @@ func UpdateWorkspaceFileContent(c *gin.Context) {
 	// Broadcast to team via WebSocket
 	BroadcastToProjectMembers(env.ID, data)
 
+	// --- Reload Signaling (Option A) ---
+	// After writing to the host, touch the file inside the container's own
+	// namespace so inotify-based watchers (nodemon, air, uvicorn) fire
+	// instantly without needing 2-second polling loops.
+	reloadSignaled := false
+	reloadMsg := "Saved — runtime not running (no reload signal)"
+
+	if env.Status == "running" && env.ContainerID != nil && *env.ContainerID != "" {
+		// Build the in-container path: WorkDir (e.g. /app) + relative cleanPath.
+		// cleanPath has already been validated to be within the workspace root.
+		inContainerPath := "/app/" + strings.TrimPrefix(cleanPath, "/")
+
+		touchCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		if touchErr := provider.TouchFileInContainer(touchCtx, id, inContainerPath); touchErr != nil {
+			slog.Warn("touch-on-save failed; save still succeeded",
+				"envID", id,
+				"path", inContainerPath,
+				"err", touchErr,
+			)
+			reloadMsg = "Saved — reload signal failed (runtime may be starting)"
+		} else {
+			reloadSignaled = true
+			reloadMsg = "Saved — reload signaled ⚡"
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"message": "Changes saved locally. Commit and sync to deploy.",
-		"diff":    string(diffOut),
+		"message":       reloadMsg,
+		"diff":          string(diffOut),
+		"reloadSignaled": reloadSignaled,
 	})
 }
 

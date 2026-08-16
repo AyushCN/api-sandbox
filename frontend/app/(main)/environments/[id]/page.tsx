@@ -463,7 +463,6 @@ export default function EnvironmentDetail() {
     if (!selectedFilePath) return;
     setIsSavingFile(true);
     try {
-      const token = localStorage.getItem("token");
       const res = await fetch(`/api/environments/${id}/files/content`, {
         method: "POST",
         credentials: "include",
@@ -476,7 +475,12 @@ export default function EnvironmentDetail() {
         })
       });
       if (!res.ok) throw new Error("Failed to save changes");
-      toast.success("File saved locally. Commit and sync to deploy changes.");
+      const data = await res.json();
+      if (data.reloadSignaled) {
+        toast.success("Saved — reload signaled ⚡");
+      } else {
+        toast.success(data.message ?? "Saved — runtime not running (no reload signal)");
+      }
       setOriginalFileContent(fileContent);
       setIsEditingFile(false);
       
@@ -488,6 +492,7 @@ export default function EnvironmentDetail() {
       setIsSavingFile(false);
     }
   };
+
 
   const handleCreateFileOrFolder = async (isDir: boolean) => {
     const typeStr = isDir ? "Folder" : "File";

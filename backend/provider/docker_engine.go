@@ -482,3 +482,27 @@ func EnsureOrgNetwork(ctx context.Context, orgID string) (string, string, error)
 
 	return networkName, networkID, nil
 }
+
+// TouchFileInContainer creates an empty file or updates the timestamp of a file
+// inside the container namespace. This triggers native file watchers (like inotify)
+// instantly, which host-side bind-mount writes sometimes fail to do reliably.
+func TouchFileInContainer(ctx context.Context, envID string, filePath string) error {
+	containerName := "env-" + envID
+	
+	exec, err := dockerClient.CreateExec(docker.CreateExecOptions{
+		Container:    containerName,
+		Cmd:          []string{"touch", filePath},
+		AttachStdout: false,
+		AttachStderr: false,
+		Context:      ctx,
+	})
+	if err != nil {
+		return err
+	}
+	
+	err = dockerClient.StartExec(exec.ID, docker.StartExecOptions{
+		Detach:  true,
+		Context: ctx,
+	})
+	return err
+}

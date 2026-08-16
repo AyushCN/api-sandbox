@@ -94,7 +94,7 @@ func detectNodeRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
 	content, err := os.ReadFile(packageJsonPath)
 	
 	installCmd := "npm install"
-	startCmd := "npx nodemon -L index.js" // fallback
+	startCmd := "npx nodemon index.js" // fallback
 	
 	// Detect package manager
 	if _, err := os.Stat(filepath.Join(appDir, "yarn.lock")); err == nil {
@@ -128,10 +128,10 @@ func detectNodeRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
 					if strings.HasPrefix(installCmd, "pnpm") { startCmd = "pnpm dev" }
 					if strings.HasPrefix(installCmd, "bun") { startCmd = "bun run dev" }
 				} else if start, ok := scripts["start"].(string); ok && start != "" {
-					startCmd = "npx nodemon -L --exec \"npm start\""
-					if strings.HasPrefix(installCmd, "yarn") { startCmd = "npx nodemon -L --exec \"yarn start\"" }
-					if strings.HasPrefix(installCmd, "pnpm") { startCmd = "npx nodemon -L --exec \"pnpm start\"" }
-					if strings.HasPrefix(installCmd, "bun") { startCmd = "npx nodemon -L --exec \"bun start\"" }
+					startCmd = "npx nodemon --exec \"npm start\""
+					if strings.HasPrefix(installCmd, "yarn") { startCmd = "npx nodemon --exec \"yarn start\"" }
+					if strings.HasPrefix(installCmd, "pnpm") { startCmd = "npx nodemon --exec \"pnpm start\"" }
+					if strings.HasPrefix(installCmd, "bun") { startCmd = "npx nodemon --exec \"bun start\"" }
 				}
 			}
 		}
@@ -140,18 +140,18 @@ func detectNodeRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
 	// Check if typescript and not nextjs, maybe we need ts-node
 	if !isNextJs {
 		if _, err := os.Stat(filepath.Join(appDir, "tsconfig.json")); err == nil {
-			if startCmd == "npx nodemon -L index.js" {
-				// Try to find index.ts or src/index.ts
-				if _, err := os.Stat(filepath.Join(appDir, "src", "index.ts")); err == nil {
-					startCmd = "npx nodemon -L src/index.ts"
-				} else if _, err := os.Stat(filepath.Join(appDir, "index.ts")); err == nil {
-					startCmd = "npx nodemon -L index.ts"
+			if startCmd == "npx nodemon index.js" {
+					// Try to find index.ts or src/index.ts
+					if _, err := os.Stat(filepath.Join(appDir, "src", "index.ts")); err == nil {
+						startCmd = "npx nodemon src/index.ts"
+					} else if _, err := os.Stat(filepath.Join(appDir, "index.ts")); err == nil {
+						startCmd = "npx nodemon index.ts"
+					}
 				}
-			}
 		} else {
-			if startCmd == "npx nodemon -L index.js" {
+			if startCmd == "npx nodemon index.js" {
 				if _, err := os.Stat(filepath.Join(appDir, "src", "index.js")); err == nil {
-					startCmd = "npx nodemon -L src/index.js"
+					startCmd = "npx nodemon src/index.js"
 				}
 			}
 		}
@@ -166,7 +166,7 @@ func detectNodeRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
 		BaseImage:   baseImage,
 		InstallCmd:  installCmd,
 		StartCmd:    startCmd,
-		WatchHint:   "Node.js detected. Polling enforced via nodemon -L where applicable.",
+		WatchHint:   "Node.js detected. Native file events via touch-on-save.",
 		WorkDir:     getWorkDir(subDir),
 		ExposedPort: "3000", // Default to 3000 for Node.js (Next.js, Express, etc)
 	}, nil
@@ -182,7 +182,7 @@ func detectPythonRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
 		}
 	}
 
-	installCmd += " watchdog" // Ensure polling works
+	installCmd += " && pip install uvicorn[standard]" // Ensure uvicorn available
 
 	startCmd := "python main.py"
 	
@@ -221,7 +221,7 @@ func detectPythonRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
 		BaseImage:   "python:3.11-slim",
 		InstallCmd:  installCmd,
 		StartCmd:    startCmd,
-		WatchHint:   "Python detected. Watchdog installed for polling.",
+		WatchHint:   "Python detected. Native file events via touch-on-save.",
 		WorkDir:     getWorkDir(subDir),
 		ExposedPort: "8000",
 	}, nil
@@ -231,8 +231,8 @@ func detectGoRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
 	return DevRuntimeConfig{
 		BaseImage:   "golang:1.22-alpine",
 		InstallCmd:  "go mod download && go install github.com/air-verse/air@latest",
-		StartCmd:    "if [ ! -f .air.toml ]; then air init && sed -i 's/poll = false/poll = true/' .air.toml; fi && air || go run .",
-		WatchHint:   "Go detected. Air configured with polling enabled.",
+		StartCmd:    "if [ ! -f .air.toml ]; then air init; fi && air || go run .",
+		WatchHint:   "Go detected. Air uses native file events via touch-on-save.",
 		WorkDir:     getWorkDir(subDir),
 		ExposedPort: "8080",
 	}, nil

@@ -6,17 +6,19 @@ import toast from "react-hot-toast";
 import { formatDistanceToNow, format, subDays, eachDayOfInterval } from "date-fns";
 import {
   User, Mail, MapPin, Link as LinkIcon, MessageSquare, Code,
-  BookOpen, Star, Package, Activity, Loader2, AlertCircle,
-  Clock, CheckCircle2, X, Save, ArrowRight,
+  BookOpen, Activity, Loader2, AlertCircle,
+  Clock, CheckCircle2, X, Save, ArrowRight, Settings, AlertTriangle
 } from "lucide-react";
 import { fetchWithAuth } from "@/lib/auth";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 const fetcher = (url: string) => fetchWithAuth(url);
 
 interface UserProfile {
   id: string;
   email: string;
+  username: string;
   isEmailVerified: boolean;
   maxEnvironments: number;
   maxBuildsPerHour: number;
@@ -30,6 +32,7 @@ interface UserProfile {
   website: string;
   twitter: string;
   github: string;
+  githubUsername?: string;
 }
 
 interface Environment {
@@ -137,31 +140,27 @@ function ContributionGraph({ activities = [] }: { activities: AuditLog[] }) {
 
 /* ─── Edit Profile Modal ─── */
 function EditProfileModal({ user, onClose, onSaved }: { user: UserProfile; onClose: () => void; onSaved: () => void }) {
+  const [username, setUsername] = useState(user.username || "");
   const [bio, setBio] = useState(user.bio || "");
   const [pronouns, setPronouns] = useState(user.pronouns || "");
   const [location, setLocation] = useState(user.location || "");
   const [website, setWebsite] = useState(user.website || "");
-  const [twitter, setTwitter] = useState(user.twitter || "");
-  const [github, setGithub] = useState(user.github || "");
   const [saving, setSaving] = useState(false);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     try {
-      const token = localStorage.getItem("token");
-      const res = await fetch("/api/user/me", {
+      const res = await fetchWithAuth("/api/user/me", {
         method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ bio, pronouns, location, website, twitter, github }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, bio, pronouns, location, website }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to update profile");
       toast.success("Profile updated!");
       onSaved();
       onClose();
     } catch (err: any) {
-      toast.error(err.message);
+      toast.error(err.message || "Failed to update profile");
     } finally {
       setSaving(false);
     }
@@ -182,6 +181,10 @@ function EditProfileModal({ user, onClose, onSaved }: { user: UserProfile; onClo
 
         <form onSubmit={handleSave} className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
           <div>
+            <label className="block text-xs font-bold text-on-surface-variant mb-1.5 tracking-wide uppercase">Username</label>
+            <input value={username} onChange={e => setUsername(e.target.value)} placeholder="username" className={inputCls} />
+          </div>
+          <div>
             <label className="block text-xs font-bold text-on-surface-variant mb-1.5 tracking-wide uppercase">Bio</label>
             <textarea value={bio} onChange={e => setBio(e.target.value)} rows={3} placeholder="Tell the world about yourself" className={inputCls + " resize-none"} />
           </div>
@@ -199,16 +202,6 @@ function EditProfileModal({ user, onClose, onSaved }: { user: UserProfile; onClo
             <label className="block text-xs font-bold text-on-surface-variant mb-1.5 tracking-wide uppercase">Website</label>
             <input value={website} onChange={e => setWebsite(e.target.value)} placeholder="https://yoursite.dev" className={inputCls} />
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-bold text-on-surface-variant mb-1.5 tracking-wide uppercase">Twitter / X</label>
-              <input value={twitter} onChange={e => setTwitter(e.target.value)} placeholder="handle" className={inputCls} />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-on-surface-variant mb-1.5 tracking-wide uppercase">GitHub</label>
-              <input value={github} onChange={e => setGithub(e.target.value)} placeholder="username" className={inputCls} />
-            </div>
-          </div>
 
           <div className="flex justify-end gap-3 pt-4 border-t border-outline-variant">
             <button type="button" onClick={onClose} className="px-5 py-2 rounded-xl text-sm font-semibold text-on-surface-variant hover:bg-surface-container-high transition-colors border border-outline-variant">
@@ -217,6 +210,78 @@ function EditProfileModal({ user, onClose, onSaved }: { user: UserProfile; onClo
             <button type="submit" disabled={saving} className="flex items-center gap-2 bg-primary-container text-on-primary-fixed-variant px-6 py-2 rounded-xl font-bold text-sm hover:shadow-[0_0_20px_rgba(0,240,255,0.2)] active:scale-95 transition-all disabled:opacity-50">
               {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
               Save
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Delete Account Modal ─── */
+function DeleteAccountModal({ user, onClose }: { user: UserProfile; onClose: () => void }) {
+  const router = useRouter();
+  const [confirmText, setConfirmText] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const expectedText = `delete account ${user.username}`;
+
+  const handleDelete = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (confirmText !== expectedText) return;
+    setDeleting(true);
+    try {
+      await fetchWithAuth("/api/user/me", { method: "DELETE" });
+      toast.success("Account deleted successfully.");
+      localStorage.removeItem("token");
+      window.location.href = "/login";
+    } catch (err: any) {
+      toast.error(err.message || "Failed to delete account");
+      setDeleting(false);
+    }
+  };
+
+  const inputCls = "w-full bg-surface-container border border-outline-variant rounded-lg px-4 py-2.5 text-sm text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-error/60 transition-colors";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-surface-container-lowest border border-error/30 rounded-2xl shadow-2xl w-full max-w-md mx-4" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-outline-variant">
+          <h2 className="text-lg font-bold text-error flex items-center gap-2">
+            <AlertTriangle className="w-5 h-5" />
+            Delete Account
+          </h2>
+          <button onClick={onClose} className="text-on-surface-variant hover:text-on-surface transition-colors">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <form onSubmit={handleDelete} className="p-6 space-y-4">
+          <p className="text-sm text-on-surface-variant leading-relaxed">
+            This action is <span className="font-bold text-on-surface">permanent</span> and cannot be undone. All your environments, projects, and data will be permanently wiped.
+          </p>
+          <div className="bg-error/10 border border-error/20 p-3 rounded-lg text-xs text-error font-mono">
+            Please type <span className="font-bold select-all bg-error/20 px-1 py-0.5 rounded">{expectedText}</span> to confirm.
+          </div>
+          <div>
+            <input 
+              value={confirmText} 
+              onChange={e => setConfirmText(e.target.value)} 
+              placeholder={expectedText} 
+              className={inputCls} 
+            />
+          </div>
+
+          <div className="flex justify-end gap-3 pt-4 border-t border-outline-variant">
+            <button type="button" onClick={onClose} className="px-5 py-2 rounded-xl text-sm font-semibold text-on-surface-variant hover:bg-surface-container-high transition-colors border border-outline-variant">
+              Cancel
+            </button>
+            <button 
+              type="submit" 
+              disabled={deleting || confirmText !== expectedText} 
+              className="flex items-center gap-2 bg-error text-white px-6 py-2 rounded-xl font-bold text-sm hover:bg-error/90 active:scale-95 transition-all disabled:opacity-50"
+            >
+              {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+              Delete Account
             </button>
           </div>
         </form>
@@ -251,6 +316,7 @@ export default function ProfilePage() {
   
   const [activeTab, setActiveTab] = useState('overview');
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
 
   if (isLoading) {
     return (
@@ -269,7 +335,7 @@ export default function ProfilePage() {
     );
   }
 
-  const initials = user.email.slice(0, 2).toUpperCase();
+  const initials = (user.username || user.email).slice(0, 2).toUpperCase();
   const pinnedEnvs = environments ? environments.slice(0, 4) : [];
   const allEnvs = environments || [];
   const recentActivities = activities ? activities.slice(0, 5) : [];
@@ -277,7 +343,7 @@ export default function ProfilePage() {
   return (
     <div className="max-w-7xl mx-auto py-8">
 
-      {/* Edit Profile Modal */}
+      {/* Modals */}
       {showEditModal && (
         <EditProfileModal
           user={user}
@@ -285,15 +351,20 @@ export default function ProfilePage() {
           onSaved={() => mutateUser()}
         />
       )}
+      {showDeleteModal && (
+        <DeleteAccountModal
+          user={user}
+          onClose={() => setShowDeleteModal(false)}
+        />
+      )}
       
-      {/* GitHub-style Tab Navigation */}
+      {/* Clean Tab Navigation */}
       <div className="border-b border-outline-variant mb-8 mt-4 sticky top-0 bg-surface-container-lowest/80 backdrop-blur-md z-10">
         <nav className="flex gap-6 lg:ml-[280px]">
           {[
             { id: 'overview', label: 'Overview', icon: Activity },
             { id: 'environments', label: 'Environments', icon: BookOpen, count: user.envCount },
-            { id: 'packages', label: 'Packages', icon: Package },
-            { id: 'stars', label: 'Stars', icon: Star, count: 0 },
+            { id: 'settings', label: 'Settings', icon: Settings },
           ].map(tab => (
             <button
               key={tab.id}
@@ -331,7 +402,7 @@ export default function ProfilePage() {
 
           <div className="space-y-4 px-2">
             <div>
-              <h1 className="text-2xl font-bold text-on-surface leading-tight">{user.email.split('@')[0]}</h1>
+              <h1 className="text-2xl font-bold text-on-surface leading-tight">{user.username || user.email.split('@')[0]}</h1>
               <h2 className="text-xl text-on-surface-variant font-light">{user.email}</h2>
             </div>
             
@@ -346,13 +417,6 @@ export default function ProfilePage() {
               <p className="text-on-surface text-sm">{user.bio || "No bio yet — click Edit profile to add one."}</p>
             </div>
 
-            <div className="flex items-center gap-1.5 text-sm text-on-surface-variant pt-2">
-              <User className="w-4 h-4" />
-              <span className="font-semibold text-on-surface">0</span> followers
-              <span className="mx-1">·</span>
-              <span className="font-semibold text-on-surface">0</span> following
-            </div>
-
             <ul className="space-y-2 pt-4 text-sm text-on-surface">
               {user.pronouns && (
                 <li className="flex items-center gap-2">
@@ -360,14 +424,12 @@ export default function ProfilePage() {
                   {user.pronouns}
                 </li>
               )}
-              <li className="flex items-center gap-2">
-                <MapPin className="w-4 h-4 text-on-surface-variant" />
-                {user.location || "Earth"}
-              </li>
-              <li className="flex items-center gap-2">
-                <Clock className="w-4 h-4 text-on-surface-variant" />
-                {format(new Date(), "HH:mm")} (Local time)
-              </li>
+              {user.location && (
+                <li className="flex items-center gap-2">
+                  <MapPin className="w-4 h-4 text-on-surface-variant" />
+                  {user.location}
+                </li>
+              )}
               <li className="flex items-center gap-2">
                 <Mail className="w-4 h-4 text-on-surface-variant" />
                 <a href={`mailto:${user.email}`} className="hover:text-primary-fixed">{user.email}</a>
@@ -378,44 +440,13 @@ export default function ProfilePage() {
                   <a href={user.website} target="_blank" className="hover:text-primary-fixed hover:underline">{user.website.replace(/^https?:\/\//, '')}</a>
                 </li>
               )}
-              {user.twitter && (
-                <li className="flex items-center gap-2">
-                  <MessageSquare className="w-4 h-4 text-on-surface-variant" />
-                  <a href={`https://twitter.com/${user.twitter}`} target="_blank" className="hover:text-primary-fixed">@{user.twitter}</a>
-                </li>
-              )}
-              {user.github && (
+              {(user.githubUsername || user.github) && (
                 <li className="flex items-center gap-2">
                   <Code className="w-4 h-4 text-on-surface-variant" />
-                  <a href={`https://github.com/${user.github}`} target="_blank" className="hover:text-primary-fixed">{user.github}</a>
+                  <a href={`https://github.com/${user.githubUsername || user.github}`} target="_blank" className="hover:text-primary-fixed hover:underline">{user.githubUsername || user.github}</a>
                 </li>
               )}
             </ul>
-
-            <div className="pt-6 border-t border-outline-variant">
-              <h3 className="text-sm font-semibold text-on-surface mb-3">Achievements</h3>
-              <div className="flex gap-2">
-                <div className="w-10 h-10 rounded-full bg-purple-500/20 border border-purple-500/40 flex items-center justify-center cursor-pointer hover:bg-purple-500/30 transition-colors" title="Achievement: YOLO">
-                  🚀
-                </div>
-                <div className="w-10 h-10 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center cursor-pointer hover:bg-emerald-500/30 transition-colors" title={user.isEmailVerified ? "Verified Email" : "Unverified"}>
-                  {user.isEmailVerified ? <CheckCircle2 className="w-5 h-5 text-emerald-400" /> : '🤔'}
-                </div>
-              </div>
-            </div>
-
-            <div className="pt-6 border-t border-outline-variant">
-              <h3 className="text-sm font-semibold text-on-surface mb-3">Organizations</h3>
-              <div className="flex gap-2">
-                {user.orgName ? (
-                  <div className="w-8 h-8 rounded bg-surface-container-high border border-outline-variant flex items-center justify-center font-bold text-xs" title={user.orgName}>
-                    {user.orgName.charAt(0).toUpperCase()}
-                  </div>
-                ) : (
-                  <span className="text-xs text-on-surface-variant">No organizations</span>
-                )}
-              </div>
-            </div>
 
             <div className="pt-6 border-t border-outline-variant">
               <h3 className="text-sm font-semibold text-on-surface mb-3 flex items-center justify-between">
@@ -431,7 +462,6 @@ export default function ProfilePage() {
                   {invites.map((invite) => (
                     <div key={invite.projectId} className="bg-surface-container border border-outline-variant rounded-lg p-3 hover:border-primary-fixed/30 transition-colors">
                       <div className="flex items-center gap-2 min-w-0 mb-3">
-                        <Package className="w-4 h-4 text-primary-fixed shrink-0" />
                         <span className="text-sm font-bold text-on-surface truncate">{invite.project?.name || "Unknown Project"}</span>
                       </div>
                       <div className="flex items-center justify-between">
@@ -487,7 +517,7 @@ export default function ProfilePage() {
               {/* Pinned Environments */}
               <div>
                 <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-sm font-semibold text-on-surface">Pinned Environments</h2>
+                  <h2 className="text-sm font-semibold text-on-surface">Recent Environments</h2>
                 </div>
                 
                 {pinnedEnvs.length === 0 ? (
@@ -611,26 +641,31 @@ export default function ProfilePage() {
               )}
             </div>
           )}
-          
-          {/* ── Packages Tab ── */}
-          {activeTab === 'packages' && (
-            <div className="py-12 text-center text-on-surface-variant">
-              <Package className="w-12 h-12 mx-auto mb-4 opacity-50" />
-              <h3 className="text-lg font-semibold text-on-surface mb-2">Packages</h3>
-              <p>No packages published yet.</p>
+
+          {/* ── Settings Tab ── */}
+          {activeTab === 'settings' && (
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-lg font-bold text-on-surface mb-1">Account Settings</h3>
+                <p className="text-sm text-on-surface-variant mb-6">Manage your account preferences and danger zone settings.</p>
+              </div>
+
+              <div className="border border-error/30 rounded-xl p-6 bg-error/5">
+                <h4 className="text-base font-bold text-error mb-2">Danger Zone</h4>
+                <p className="text-sm text-on-surface-variant mb-4">
+                  Permanently delete your account and all associated data. This action is irreversible.
+                </p>
+                <button 
+                  onClick={() => setShowDeleteModal(true)}
+                  className="bg-error text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-error/90 transition-colors"
+                >
+                  Delete Account
+                </button>
+              </div>
             </div>
           )}
 
-          {/* ── Stars Tab ── */}
-          {activeTab === 'stars' && (
-            <div className="py-12 text-center text-on-surface-variant">
-              <Star className="w-12 h-12 mx-auto mb-4 opacity-50" />
-              <h3 className="text-lg font-semibold text-on-surface mb-2">Stars</h3>
-              <p>You haven&apos;t starred anything yet.</p>
-            </div>
-          )}
         </div>
-        
       </div>
     </div>
   );

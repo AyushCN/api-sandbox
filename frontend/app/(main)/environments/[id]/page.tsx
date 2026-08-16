@@ -190,7 +190,7 @@ export default function EnvironmentDetail() {
   };
   
   // Tab control
-  const [activeTab, setActiveTab] = useState<"logs" | "workspace" | "collaborators" | "team-activity">("logs");
+  const [activeTab, setActiveTab] = useState<"logs" | "workspace" | "collaborators" | "team-activity" | "settings">("logs");
   
   // File explorer states
   const [selectedFilePath, setSelectedFilePath] = useState<string>("");

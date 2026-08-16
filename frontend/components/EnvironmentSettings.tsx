@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { toast } from "sonner"
+import toast from "react-hot-toast"
 import { Loader2, Settings, Save } from "lucide-react"
 
 export default function EnvironmentSettings({ env, mutate, isViewerRole }: { env: Record<string, any>, mutate: () => void, isViewerRole: boolean }) {

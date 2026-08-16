@@ -115,6 +115,7 @@ func SetupRoutes(router *gin.Engine) {
 		{
 			userGroup.GET("/me", GetMe)
 			userGroup.PUT("/me", UpdateMe)
+			userGroup.DELETE("/me", DeleteAccount)
 			userGroup.GET("/activity", GetUserActivity)
 			userGroup.PUT("/me/password", ChangePassword)
 			userGroup.GET("/invites", GetUserInvites)
@@ -779,6 +780,8 @@ func GetDockerLogs(c *gin.Context) {
 type MeResponse struct {
 	ID               string `json:"id"`
 	Email            string `json:"email"`
+	Username         string `json:"username"`
+	GithubUsername   string `json:"githubUsername"`
 	IsEmailVerified  bool   `json:"isEmailVerified"`
 	MaxEnvironments  int    `json:"maxEnvironments"`
 	MaxBuildsPerHour int    `json:"maxBuildsPerHour"`
@@ -819,6 +822,8 @@ func GetMe(c *gin.Context) {
 	c.JSON(http.StatusOK, MeResponse{
 		ID:               user.ID,
 		Email:            user.Email,
+		Username:         user.Username,
+		GithubUsername:   user.GithubUsername,
 		IsEmailVerified:  user.IsEmailVerified,
 		MaxEnvironments:  user.MaxEnvironments,
 		MaxBuildsPerHour: user.MaxBuildsPerHour,
@@ -836,6 +841,7 @@ func GetMe(c *gin.Context) {
 }
 
 type UpdateMeRequest struct {
+	Username string `json:"username"`
 	Bio      string `json:"bio"`
 	Pronouns string `json:"pronouns"`
 	Location string `json:"location"`
@@ -859,6 +865,9 @@ func UpdateMe(c *gin.Context) {
 		return
 	}
 
+	if req.Username != "" {
+		user.Username = req.Username
+	}
 	user.Bio = req.Bio
 	user.Pronouns = req.Pronouns
 	user.Location = req.Location
@@ -867,6 +876,10 @@ func UpdateMe(c *gin.Context) {
 	user.Github = req.Github
 
 	if err := db.DB.Save(&user).Error; err != nil {
+		if strings.Contains(err.Error(), "unique") {
+			c.JSON(http.StatusConflict, gin.H{"error": "Username already taken"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update profile"})
 		return
 	}
@@ -926,6 +939,29 @@ func ChangePassword(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Password changed successfully"})
+}
+
+func DeleteAccount(c *gin.Context) {
+	userID, _ := c.Get("userId")
+
+	var user models.User
+	if err := db.DB.First(&user, "id = ?", userID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	// Soft delete all user's environments first (cascade cleanup handled by background worker)
+	db.DB.Where("user_id = ?", userID).Delete(&models.Environment{})
+
+	// Delete user record
+	if err := db.DB.Unscoped().Delete(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete account"})
+		return
+	}
+
+	// Clear auth cookie
+	c.SetCookie("token", "", -1, "/", "", false, true)
+	c.JSON(http.StatusOK, gin.H{"message": "Account deleted successfully"})
 }
 
 func GetUserActivity(c *gin.Context) {

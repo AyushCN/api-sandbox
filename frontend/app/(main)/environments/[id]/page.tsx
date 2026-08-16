@@ -905,7 +905,7 @@ export default function EnvironmentDetail() {
       {activeTab === "workspace" && (
         <div className="bg-surface-container-lowest border border-outline-variant rounded-xl overflow-hidden grid grid-cols-12" style={{ height: 'calc(100vh - 260px)', minHeight: '500px' }}>
           {/* File Explorer Sidebar */}
-          <div className="col-span-3 border-r border-outline-variant bg-surface-container/40 flex flex-col h-full">
+          <div className="col-span-3 border-r border-outline-variant bg-surface-container/40 flex flex-col h-full min-h-0">
             <div className="px-4 py-2.5 border-b border-outline-variant flex items-center justify-between font-medium text-on-surface-variant text-xs tracking-wider uppercase">
               <span>Files</span>
               <div className="flex items-center gap-1.5 normal-case">
@@ -945,7 +945,7 @@ export default function EnvironmentDetail() {
           </div>
 
           {/* Editor Workspace */}
-          <div className="col-span-9 flex flex-col bg-slate-950/20 h-full">
+          <div className="col-span-9 flex flex-col bg-slate-950/20 h-full min-h-0">
             {selectedFilePath ? (
               <>
                 {/* Editor Header Toolbar */}
@@ -996,7 +996,7 @@ export default function EnvironmentDetail() {
                   {/* Line Numbers */}
                   <div 
                     ref={lineNumbersRef}
-                    className="w-12 text-right pr-3 select-none text-white/20 border-r border-white/5 py-4 overflow-hidden text-sm leading-6"
+                    className="w-12 text-right pr-3 select-none text-white/20 border-r border-white/5 py-4 overflow-hidden text-sm leading-6 shrink-0"
                   >
                     {Array.from({ length: lineCount }).map((_, i) => (
                       <div key={i}>{i + 1}</div>
@@ -1011,7 +1011,7 @@ export default function EnvironmentDetail() {
                     onChange={(e) => setFileContent(e.target.value)}
                     spellCheck="false"
                     readOnly={!isEditingFile || isViewerRole}
-                    className={`flex-1 resize-none py-4 px-3 text-white/90 outline-none overflow-y-auto text-sm leading-6 select-text selection:bg-primary/30 selection:text-white ${!isEditingFile || isViewerRole ? 'bg-transparent cursor-text' : 'bg-slate-900/50'}`}
+                    className={`flex-1 w-full h-full resize-none py-4 px-3 text-white/90 outline-none overflow-y-auto text-sm leading-6 select-text selection:bg-primary/30 selection:text-white ${!isEditingFile || isViewerRole ? 'bg-transparent cursor-text' : 'bg-slate-900/50'}`}
                   />
                 </div>
               </>

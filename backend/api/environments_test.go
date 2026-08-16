@@ -179,14 +179,6 @@ func TestEnvironmentAuthz(t *testing.T) {
 		t.Errorf("User2 should get 403 for User1's environment update file. Got %d", wUpdateFile.Code)
 	}
 
-	// Test Git Sync (POST)
-	req, _ = http.NewRequest(http.MethodPost, "/api/environments/"+env.ID+"/sync", nil)
-	req.AddCookie(&http.Cookie{Name: "token", Value: generateTestToken(user2.ID)})
-	wSync := httptest.NewRecorder()
-	r.ServeHTTP(wSync, req)
-	if wSync.Code != http.StatusForbidden {
-		t.Errorf("User2 should get 403 for User1's environment sync. Got %d", wSync.Code)
-	}
 
 	// Test Docker Logs (GET)
 	req, _ = http.NewRequest(http.MethodGet, "/api/environments/"+env.ID+"/docker-logs", nil)

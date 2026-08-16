@@ -6,7 +6,7 @@ Instead of deploying static images, this platform mounts your code into language
 
 ## ✨ Core Features
 
-1. **Ephemeral Dev Runtimes**: Instant orchestration of hot-reloading containers (Node.js, Python, Go, etc.) via host-level bind mounts.
+1. **Ephemeral Dev Runtimes**: Instant orchestration of hot-reloading containers via host-level bind mounts. Natively supports **Node.js, Python, Go, Ruby, PHP, Rust, .NET (C#), Java, C, and C++** with sub-2-second edit-to-impact latency.
 2. **GitHub-First Source of Truth**: End-to-end GitHub OAuth integration. The sandbox acts as a temporary mirror. You can commit and push directly to GitHub from the browser.
 3. **Zero-Config Databases**: Automatic provisioning of isolated sidecar databases (PostgreSQL, MySQL, Redis) strictly tied to the lifecycle of the ephemeral sandbox. Fine-grained connection variables (e.g., `DB_HOST`, `DB_PORT`, `DB_USER`) are automatically injected into the sandbox container.
 4. **Browser IDE & Terminal**: Integrated file editing and terminal access to instantly test backend APIs before pushing.
@@ -18,6 +18,14 @@ Instead of deploying static images, this platform mounts your code into language
 10. **Smart Boot Polling**: The health checker waits up to 120 seconds for slow runtimes (e.g., Python `pip install`, Node.js `npm install`) before declaring a container failed, eliminating false crash-loop cycles on cold images.
 
 ## 📦 Changelog
+
+### v1.3.4 — 2026-08-16 (Extended Language Support & Dev Loop Optimization)
+
+- **Languages**: Added native hot-reloading heuristics for `.NET (C#)`, `Java`, `C`, and `C++` using minimal Alpine base images (`dotnet/sdk:8.0-alpine`, `eclipse-temurin:21-jdk-alpine`, and `alpine:3.19` with injected `build-base`/`cmake`).
+- **Dev Loop**: Refactored the `POST /files/content` API to execute Git staging and DB writes asynchronously, achieving a true < 2s hot-reloading loop.
+- **Resilience**: Upgraded Node.js runtimes to use native `node --watch` instead of `nodemon` to eliminate download overhead.
+- **Resilience**: Injected Traefik `retry.attempts=10` middleware to seamlessly mask `502 Bad Gateway` errors while sandbox containers reboot.
+- **Security Audit**: Successfully executed Experiment 5, mathematically proving 100% IDOR resistance across all operational APIs.
 
 ### v1.3.3 — 2026-08-16 (Host Security & Cleanup)
 

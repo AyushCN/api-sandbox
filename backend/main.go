@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/api-sandbox/backend/api"
+	"github.com/api-sandbox/backend/cron"
 	"github.com/api-sandbox/backend/db"
 	"github.com/api-sandbox/backend/models"
-	"github.com/api-sandbox/backend/cron"
 	"github.com/api-sandbox/backend/provider"
 	"github.com/api-sandbox/backend/queue"
 	"github.com/api-sandbox/backend/worker"
@@ -60,6 +60,14 @@ func main() {
 	encryptionKey := os.Getenv("TOKEN_ENCRYPTION_KEY")
 	if encryptionKey == "" {
 		slog.Error("CRITICAL: TOKEN_ENCRYPTION_KEY is missing. Refusing to boot.")
+		os.Exit(1)
+	}
+	if os.Getenv("JWT_SECRET") == "" {
+		slog.Error("CRITICAL: JWT_SECRET is missing. Refusing to boot.")
+		os.Exit(1)
+	}
+	if os.Getenv("GITHUB_CLIENT_ID") == "" || os.Getenv("GITHUB_CLIENT_SECRET") == "" {
+		slog.Error("CRITICAL: GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET are required for OAuth.")
 		os.Exit(1)
 	}
 	if len(encryptionKey) != 16 && len(encryptionKey) != 24 && len(encryptionKey) != 32 {
@@ -135,6 +143,10 @@ func startScheduler() *asynq.Scheduler {
 		slog.Error("Failed to register cleanup cron", "error", err)
 		os.Exit(1)
 	}
+	if _, err := scheduler.Register("@every 1h", asynq.NewTask(queue.TaskReapOrphans, nil)); err != nil {
+		slog.Error("Failed to register orphan reaper cron", "error", err)
+		os.Exit(1)
+	}
 
 	slog.Info("Starting Asynq scheduler...")
 	go func() {
@@ -190,6 +202,7 @@ func startWorker() *asynq.Server {
 	mux.HandleFunc(queue.TaskBuildEnvironment, worker.HandleBuildEnvironmentTask)
 	mux.HandleFunc(queue.TaskCollectMetrics, worker.HandleCollectMetricsTask)
 	mux.HandleFunc(queue.TaskCleanupContainers, worker.HandleCleanupContainersTask)
+	mux.HandleFunc(queue.TaskReapOrphans, worker.HandleReapOrphansTask)
 
 	slog.Info("Starting Asynq worker...")
 	go func() {

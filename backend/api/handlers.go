@@ -9,6 +9,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -41,7 +42,7 @@ func SetupRoutes(router *gin.Engine) {
 	api := router.Group("/api")
 	{
 		api.GET("/health", HealthCheck)
-		
+
 		api.POST("/auth/register", RateLimitRegister(), Register)
 		api.POST("/auth/login", RateLimitLogin(), Login)
 		api.POST("/auth/logout", Logout)
@@ -74,8 +75,6 @@ func SetupRoutes(router *gin.Engine) {
 			}
 		}
 
-
-
 		protected := api.Group("/environments")
 		protected.Use(AuthMiddleware(), RateLimitAPI())
 		{
@@ -95,7 +94,7 @@ func SetupRoutes(router *gin.Engine) {
 			protected.GET("/:id/docker-logs", GetDockerLogs)
 			protected.GET("/:id/git-tree", GetGitTree)
 			protected.POST("/:id/commit", CommitChanges)
-			protected.POST("/:id/sync", SyncEnvironmentWithGitHub)
+
 			protected.POST("/:id/push", PushChanges)
 			protected.GET("/:id/git/status", GitStatus)
 			protected.GET("/:id/git/branches", GitListBranches)
@@ -131,6 +130,18 @@ func SetupRoutes(router *gin.Engine) {
 }
 
 func PrometheusMetrics(c *gin.Context) {
+	expectedToken := os.Getenv("METRICS_TOKEN")
+	if expectedToken == "" {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Metrics token not configured"})
+		return
+	}
+	
+	token := c.GetHeader("X-Metrics-Token")
+	if token != expectedToken {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Unauthorized metrics access"})
+		return
+	}
+
 	clientIP := c.ClientIP()
 	ip := net.ParseIP(clientIP)
 	if ip == nil || (!ip.IsLoopback() && !ip.IsPrivate()) {
@@ -710,7 +721,6 @@ func GetDockerLogs(c *gin.Context) {
 
 	c.String(http.StatusOK, string(output))
 }
-
 
 type MeResponse struct {
 	ID               string `json:"id"`

@@ -2,7 +2,6 @@ package api
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
@@ -13,9 +12,7 @@ import (
 
 	"github.com/api-sandbox/backend/db"
 	"github.com/api-sandbox/backend/models"
-	"github.com/api-sandbox/backend/queue"
 	"github.com/gin-gonic/gin"
-	"github.com/hibiken/asynq"
 )
 
 type GitActivity struct {
@@ -367,109 +364,13 @@ func CommitChanges(c *gin.Context) {
 		"user":        name,
 	})
 
+	TouchEnvironmentActivity(envID)
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"commit":  hashStr,
 		"message": req.Message,
 	})
-}
-
-func SyncEnvironmentWithGitHub(c *gin.Context) {
-	id := c.Param("id")
-	env, err := checkWorkspaceWriteAccess(c, id)
-	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
-		return
-	}
-
-	wd, err := os.Getwd()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get working directory"})
-		return
-	}
-	workspaceDir := filepath.Join(wd, "workspaces", env.ID)
-
-	// Fetch latest from origin
-	cmdFetch := exec.Command("git", "fetch", "origin")
-	cmdFetch.Dir = workspaceDir
-	if err := cmdFetch.Run(); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch from GitHub"})
-		return
-	}
-
-	// Pull from origin
-	cmdPull := exec.Command("git", "pull", "origin", env.GithubBranch)
-	cmdPull.Dir = workspaceDir
-	pullOut, err := cmdPull.CombinedOutput()
-	if err != nil {
-		c.JSON(http.StatusConflict, gin.H{
-			"error":   "Merge conflict or pull failed",
-			"details": string(pullOut),
-		})
-		return
-	}
-
-	// Record activity
-	userID, _ := c.Get("userId")
-	userIDStr := userID.(string)
-
-	data := map[string]interface{}{
-		"type":      "file_changed", // triggers frontend to reload files
-		"action":    "sync",
-		"user_name": GetCurrentUserName(userIDStr),
-		"user_id":   userIDStr,
-	}
-	dataBytes, _ := json.Marshal(data)
-
-	db.DB.Create(&models.Activity{
-		EnvironmentID: &env.ID,
-		Type:          "build", // visual type
-		Data:          string(dataBytes),
-		UserID:        &userIDStr,
-	})
-
-	db.DB.Create(&models.AuditLog{
-		UserID:    fmt.Sprintf("%v", userID),
-		Action:    "SYNC_AND_REBUILD",
-		Resource:  env.ID,
-		IPAddress: c.ClientIP(),
-	})
-
-	// Set status to BUILDING before enqueueing
-	db.DB.Model(&env).Updates(map[string]interface{}{
-		"status":       models.StatusBuilding,
-		"container_id": nil,
-	})
-
-	// Enqueue build task
-	payload, err := json.Marshal(map[string]string{"environmentId": env.ID})
-	if err == nil {
-		task := asynq.NewTask(queue.TaskBuildEnvironment, payload)
-		_, err = queue.Client.Enqueue(task, asynq.MaxRetry(3))
-		if err != nil {
-			db.DB.Model(&env).Update("status", models.StatusFailed)
-			db.DB.Create(&models.Log{
-				EnvironmentID: &env.ID,
-				Message:       fmt.Sprintf("Failed to enqueue sync build task: %v", err),
-				Level:         models.LogLevelError,
-			})
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to enqueue sync build task"})
-			return
-		}
-	} else {
-		db.DB.Model(&env).Update("status", models.StatusFailed)
-		db.DB.Create(&models.Log{
-			EnvironmentID: &env.ID,
-			Message:       fmt.Sprintf("Failed to serialize task payload: %v", err),
-			Level:         models.LogLevelError,
-		})
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to serialize task payload"})
-		return
-	}
-
-	BroadcastToProjectMembers(env.ID, data)
-
-	c.JSON(http.StatusOK, gin.H{"message": "Successfully synced with GitHub", "details": string(pullOut)})
 }
 
 func getEnvId(p *string) string {
@@ -531,6 +432,8 @@ func PushChanges(c *gin.Context) {
 		})
 		return
 	}
+
+	TouchEnvironmentActivity(env.ID)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Successfully pushed to GitHub"})
 }

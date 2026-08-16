@@ -316,8 +316,8 @@ func UpdateWorkspaceFileContent(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message":       reloadMsg,
-		"diff":          string(diffOut),
+		"message":        reloadMsg,
+		"diff":           string(diffOut),
 		"reloadSignaled": reloadSignaled,
 	})
 }

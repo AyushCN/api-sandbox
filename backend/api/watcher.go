@@ -20,13 +20,15 @@ func WatchAllEnvironments() {
 	}
 	defer watcher.Close()
 
-	wd, err := os.Getwd()
-	if err != nil {
-		slog.Error("Failed to get working directory for watcher", "error", err)
-		return
+	workspacesDir := os.Getenv("WORKSPACES_PATH")
+	if workspacesDir == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			slog.Error("Failed to get working directory for watcher", "error", err)
+			return
+		}
+		workspacesDir = filepath.Join(wd, "workspaces")
 	}
-
-	workspacesDir := filepath.Join(wd, "workspaces")
 
 	// Create workspaces dir if it doesn't exist
 	if _, err := os.Stat(workspacesDir); os.IsNotExist(err) {

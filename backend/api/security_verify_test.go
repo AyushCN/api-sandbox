@@ -21,7 +21,7 @@ func TestMetricsProtection(t *testing.T) {
 	req.RemoteAddr = "203.0.113.1:1234"
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
-	
+
 	if w.Code != http.StatusForbidden {
 		t.Errorf("Expected 403 Forbidden for public IP, got %d", w.Code)
 	}
@@ -31,7 +31,7 @@ func TestMetricsProtection(t *testing.T) {
 	req2.RemoteAddr = "10.0.0.5:1234"
 	w2 := httptest.NewRecorder()
 	r.ServeHTTP(w2, req2)
-	
+
 	if w2.Code == http.StatusForbidden {
 		t.Errorf("Expected allowed for private IP, got 403")
 	}
@@ -41,7 +41,7 @@ func TestMetricsProtection(t *testing.T) {
 	req3.RemoteAddr = "127.0.0.1:1234"
 	w3 := httptest.NewRecorder()
 	r.ServeHTTP(w3, req3)
-	
+
 	if w3.Code == http.StatusForbidden {
 		t.Errorf("Expected allowed for localhost IP, got 403")
 	}

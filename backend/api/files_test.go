@@ -2,15 +2,15 @@ package api
 
 import (
 	"bytes"
-	"net/http"
-	"net/http/httptest"
-	"testing"
 	"github.com/api-sandbox/backend/db"
 	"github.com/api-sandbox/backend/models"
 	"github.com/gin-gonic/gin"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+	"net/http"
+	"net/http/httptest"
+	"testing"
 )
 
 func setupTestDBForFiles(t *testing.T) {
@@ -61,14 +61,14 @@ func createTestEnvironmentForFiles(t *testing.T) (*models.Environment, *models.U
 func setupTestRouterForFiles() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.Default()
-	
+
 	r.Use(AuthMiddleware())
 	r.GET("/api/environments/:id/files", GetWorkspaceFiles)
 	r.GET("/api/environments/:id/files/content", GetWorkspaceFileContent)
 	r.POST("/api/environments/:id/files/content", UpdateWorkspaceFileContent)
 	r.POST("/api/environments/:id/files/create", CreateWorkspaceFileOrFolder)
 	r.POST("/api/environments/:id/files/delete", DeleteWorkspaceFileOrFolder)
-	
+
 	return r
 }
 

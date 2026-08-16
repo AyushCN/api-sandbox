@@ -30,7 +30,14 @@ func StartIdleCleanup(db *gorm.DB) {
 
 	go func() {
 		for range ticker.C {
+			ctx := context.Background()
 			cleanupIdleEnvironments(db, idleDuration)
+
+			// Daemon-level orphan reaper
+			slog.Info("Cron: Running daemon orphan reaper to clean up stale containers and workspaces.")
+			if err := provider.ReapOrphanContainers(ctx); err != nil {
+				slog.Error("Daemon ReapOrphanContainers failed", "error", err)
+			}
 		}
 	}()
 }
@@ -65,7 +72,10 @@ func cleanupIdleEnvironments(db *gorm.DB, idleDuration time.Duration) {
 		// 2. Cleanup Database Sidecar Container
 		_ = provider.CleanupContainer(ctx, fmt.Sprintf("api-sandbox-db-%s", env.ID))
 
-		// 3. Mark as STOPPED
+		// 3. Cleanup Workspace on disk
+		_ = provider.CleanupWorkspace(env.ID)
+
+		// 4. Mark as STOPPED
 		if err := db.Model(&env).Update("status", models.StatusStopped).Error; err != nil {
 			slog.Error("Failed to update status to STOPPED for idle environment", "env_id", env.ID, "error", err)
 		}

@@ -33,7 +33,7 @@ func GithubLogin(c *gin.Context) {
 	}
 
 	state := generateStateString()
-	
+
 	// Store state in a secure http-only cookie for CSRF protection
 	isProd := os.Getenv("GIN_MODE") == "release"
 	c.SetSameSite(http.SameSiteLaxMode) // Lax is usually better for OAuth redirects
@@ -112,12 +112,12 @@ func GithubCallback(c *gin.Context) {
 	defer userResp.Body.Close()
 
 	var ghUser struct {
-		ID       int    `json:"id"`
-		Login    string `json:"login"`
-		Name     string `json:"name"`
-		Email    string `json:"email"`
-		Avatar   string `json:"avatar_url"`
-		HtmlUrl  string `json:"html_url"`
+		ID      int    `json:"id"`
+		Login   string `json:"login"`
+		Name    string `json:"name"`
+		Email   string `json:"email"`
+		Avatar  string `json:"avatar_url"`
+		HtmlUrl string `json:"html_url"`
 	}
 	if err := json.NewDecoder(userResp.Body).Decode(&ghUser); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode GitHub user"})
@@ -167,7 +167,7 @@ func GithubCallback(c *gin.Context) {
 		// Create new user
 		randomPassword := generateStateString() + generateStateString()
 		hashedPassword, _ := bcrypt.GenerateFromPassword([]byte(randomPassword), bcrypt.DefaultCost)
-		
+
 		username := ghUser.Login
 		if username == "" {
 			username = strings.Split(ghUser.Email, "@")[0]
@@ -201,7 +201,7 @@ func GithubCallback(c *gin.Context) {
 				UserID:         user.ID,
 				Role:           models.RoleAdmin,
 			})
-			
+
 			// Create Default Workspace Project
 			defaultProject := models.Project{
 				Name:                "Default Workspace",

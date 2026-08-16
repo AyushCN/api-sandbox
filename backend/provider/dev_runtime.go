@@ -11,9 +11,9 @@ import (
 )
 
 type DevRuntimeConfig struct {
-	BaseImage  string
-	InstallCmd string
-	StartCmd   string
+	BaseImage   string
+	InstallCmd  string
+	StartCmd    string
 	WatchHint   string
 	WorkDir     string
 	ExposedPort string
@@ -23,7 +23,7 @@ func DetectDevRuntime(repoPath string, subDir string) (DevRuntimeConfig, error) 
 	appDir := filepath.Join(repoPath, subDir)
 	var config DevRuntimeConfig
 	var err error
-	
+
 	// Node.js detection
 	packageJsonPath := filepath.Join(appDir, "package.json")
 	if _, errStat := os.Stat(packageJsonPath); errStat == nil {
@@ -50,11 +50,11 @@ func DetectDevRuntime(repoPath string, subDir string) (DevRuntimeConfig, error) 
 	sandboxTomlPath := filepath.Join(appDir, "sandbox.toml")
 	if b, readErr := os.ReadFile(sandboxTomlPath); readErr == nil {
 		var override struct {
-		BaseImage   string `toml:"base_image"`
-		InstallCmd  string `toml:"install_cmd"`
-		StartCmd    string `toml:"start_cmd"`
-		WorkDir     string `toml:"work_dir"`
-		ExposedPort string `toml:"exposed_port"`
+			BaseImage   string `toml:"base_image"`
+			InstallCmd  string `toml:"install_cmd"`
+			StartCmd    string `toml:"start_cmd"`
+			WorkDir     string `toml:"work_dir"`
+			ExposedPort string `toml:"exposed_port"`
 		}
 		if tomlErr := toml.Unmarshal(b, &override); tomlErr == nil {
 			if override.BaseImage != "" {
@@ -92,10 +92,10 @@ func getWorkDir(subDir string) string {
 func detectNodeRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
 	packageJsonPath := filepath.Join(appDir, "package.json")
 	content, err := os.ReadFile(packageJsonPath)
-	
+
 	installCmd := "npm install"
 	startCmd := "npx nodemon index.js" // fallback
-	
+
 	// Detect package manager
 	if _, err := os.Stat(filepath.Join(appDir, "yarn.lock")); err == nil {
 		installCmd = "yarn install"
@@ -115,23 +115,41 @@ func detectNodeRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
 					isNextJs = true
 				}
 			}
-			
+
 			if scripts, ok := pkg["scripts"].(map[string]interface{}); ok {
 				if isNextJs {
 					startCmd = "npm run dev"
-					if strings.HasPrefix(installCmd, "yarn") { startCmd = "yarn dev" }
-					if strings.HasPrefix(installCmd, "pnpm") { startCmd = "pnpm dev" }
-					if strings.HasPrefix(installCmd, "bun") { startCmd = "bun run dev" }
+					if strings.HasPrefix(installCmd, "yarn") {
+						startCmd = "yarn dev"
+					}
+					if strings.HasPrefix(installCmd, "pnpm") {
+						startCmd = "pnpm dev"
+					}
+					if strings.HasPrefix(installCmd, "bun") {
+						startCmd = "bun run dev"
+					}
 				} else if dev, ok := scripts["dev"].(string); ok && dev != "" {
 					startCmd = "npm run dev"
-					if strings.HasPrefix(installCmd, "yarn") { startCmd = "yarn dev" }
-					if strings.HasPrefix(installCmd, "pnpm") { startCmd = "pnpm dev" }
-					if strings.HasPrefix(installCmd, "bun") { startCmd = "bun run dev" }
+					if strings.HasPrefix(installCmd, "yarn") {
+						startCmd = "yarn dev"
+					}
+					if strings.HasPrefix(installCmd, "pnpm") {
+						startCmd = "pnpm dev"
+					}
+					if strings.HasPrefix(installCmd, "bun") {
+						startCmd = "bun run dev"
+					}
 				} else if start, ok := scripts["start"].(string); ok && start != "" {
 					startCmd = "npx nodemon --exec \"npm start\""
-					if strings.HasPrefix(installCmd, "yarn") { startCmd = "npx nodemon --exec \"yarn start\"" }
-					if strings.HasPrefix(installCmd, "pnpm") { startCmd = "npx nodemon --exec \"pnpm start\"" }
-					if strings.HasPrefix(installCmd, "bun") { startCmd = "npx nodemon --exec \"bun start\"" }
+					if strings.HasPrefix(installCmd, "yarn") {
+						startCmd = "npx nodemon --exec \"yarn start\""
+					}
+					if strings.HasPrefix(installCmd, "pnpm") {
+						startCmd = "npx nodemon --exec \"pnpm start\""
+					}
+					if strings.HasPrefix(installCmd, "bun") {
+						startCmd = "npx nodemon --exec \"bun start\""
+					}
 				}
 			}
 		}
@@ -141,13 +159,13 @@ func detectNodeRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
 	if !isNextJs {
 		if _, err := os.Stat(filepath.Join(appDir, "tsconfig.json")); err == nil {
 			if startCmd == "npx nodemon index.js" {
-					// Try to find index.ts or src/index.ts
-					if _, err := os.Stat(filepath.Join(appDir, "src", "index.ts")); err == nil {
-						startCmd = "npx nodemon src/index.ts"
-					} else if _, err := os.Stat(filepath.Join(appDir, "index.ts")); err == nil {
-						startCmd = "npx nodemon index.ts"
-					}
+				// Try to find index.ts or src/index.ts
+				if _, err := os.Stat(filepath.Join(appDir, "src", "index.ts")); err == nil {
+					startCmd = "npx nodemon src/index.ts"
+				} else if _, err := os.Stat(filepath.Join(appDir, "index.ts")); err == nil {
+					startCmd = "npx nodemon index.ts"
 				}
+			}
 		} else {
 			if startCmd == "npx nodemon index.js" {
 				if _, err := os.Stat(filepath.Join(appDir, "src", "index.js")); err == nil {
@@ -185,11 +203,11 @@ func detectPythonRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
 	installCmd += " && pip install uvicorn[standard]" // Ensure uvicorn available
 
 	startCmd := "python main.py"
-	
+
 	// Scan requirements for frameworks
 	reqs, _ := os.ReadFile(filepath.Join(appDir, "requirements.txt"))
 	reqStr := strings.ToLower(string(reqs))
-	
+
 	if strings.Contains(reqStr, "fastapi") {
 		startCmd = "uvicorn main:app --host 0.0.0.0 --reload --reload-dir ."
 		if _, err := os.Stat(filepath.Join(appDir, "app", "main.py")); err == nil {
@@ -242,7 +260,7 @@ func detectRubyRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
 	startCmd := "ruby main.rb"
 	gemfile, _ := os.ReadFile(filepath.Join(appDir, "Gemfile"))
 	gemStr := strings.ToLower(string(gemfile))
-	
+
 	if strings.Contains(gemStr, "rails") {
 		startCmd = "bin/rails server -b 0.0.0.0"
 	}
@@ -261,7 +279,7 @@ func detectPHPRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
 	startCmd := "php -S 0.0.0.0:8000"
 	composer, _ := os.ReadFile(filepath.Join(appDir, "composer.json"))
 	compStr := strings.ToLower(string(composer))
-	
+
 	if strings.Contains(compStr, "laravel/framework") {
 		startCmd = "php artisan serve --host=0.0.0.0 --port=8000"
 	}

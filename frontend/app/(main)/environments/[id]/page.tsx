@@ -123,30 +123,6 @@ export default function EnvironmentDetail() {
   
   const { hasUncommittedChanges, setHasUncommittedChanges, activeEditors } = useEnvironmentChanges(id);
   const [isCommitting, setIsCommitting] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
-
-  const handleSync = async () => {
-    setIsSyncing(true);
-    try {
-      const res = await fetch(`/api/environments/${id}/sync`, {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${localStorage.getItem("token")}`
-        }
-      });
-      const data = await res.json();
-      if (res.ok) {
-        toast.success("Successfully synced with GitHub!");
-        mutate(`/api/environments/${id}`);
-      } else {
-        throw new Error(data.error || "Sync failed");
-      }
-    } catch(err: any) {
-      toast.error(err.message);
-    } finally {
-      setIsSyncing(false);
-    }
-  };
 
   const [isCommitModalOpen, setIsCommitModalOpen] = useState(false);
 
@@ -753,14 +729,6 @@ export default function EnvironmentDetail() {
                 Ephemeral Preview URL <ExternalLink className="w-3.5 h-3.5" />
               </a>
             )}
-            <button
-              onClick={handleSync}
-              disabled={isSyncing || env.status === 'BUILDING' || isViewerRole}
-              className={`px-4 py-1.5 rounded-lg border bg-primary-fixed/5 flex items-center gap-1.5 transition-colors text-xs font-semibold ${isViewerRole ? 'border-outline-variant/30 text-on-surface-variant/30 cursor-not-allowed' : 'border-primary-fixed/30 text-primary-fixed hover:bg-primary-fixed/15 disabled:opacity-50'}`}
-            >
-              {isSyncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <DownloadCloud className="w-3.5 h-3.5" />}
-              Sync
-            </button>
             <button
               onClick={handleRestart}
               disabled={isRestarting || env.status === 'BUILDING' || isViewerRole}

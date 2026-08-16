@@ -7,13 +7,13 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
-	"net/url"
 
 	"github.com/api-sandbox/backend/db"
 	"github.com/api-sandbox/backend/models"
@@ -165,7 +165,7 @@ func ProvisionDevSandbox(ctx context.Context, envID string, config DevRuntimeCon
 
 	if networkID != "" {
 		_ = dockerClient.ConnectNetwork(networkID, docker.NetworkConnectionOptions{
-			Container: "traefik-proxy",
+			Container: "api-sandbox-traefik",
 		})
 	}
 
@@ -173,7 +173,15 @@ func ProvisionDevSandbox(ctx context.Context, envID string, config DevRuntimeCon
 	if err != nil {
 		return "", 0, fmt.Errorf("failed to get working directory: %v", err)
 	}
-	workspaceDir := filepath.Join(wd, "workspaces", envID)
+
+	// Determine the host path for the bind mount
+	hostWorkspacesDir := os.Getenv("HOST_WORKSPACES_DIR")
+	var hostWorkspaceDir string
+	if hostWorkspacesDir != "" {
+		hostWorkspaceDir = filepath.Join(hostWorkspacesDir, envID)
+	} else {
+		hostWorkspaceDir = filepath.Join(wd, "workspaces", envID)
+	}
 
 	pidsLimit := int64(256)
 	opts := docker.CreateContainerOptions{
@@ -201,17 +209,17 @@ func ProvisionDevSandbox(ctx context.Context, envID string, config DevRuntimeCon
 			Cmd:    []string{"/bin/sh", "sandbox-start.sh"},
 		},
 		HostConfig: &docker.HostConfig{
-			Memory:          512 * 1024 * 1024,
-			MemorySwap:      512 * 1024 * 1024,
-			CPUQuota:        100000,
-			CPUPeriod:       100000,
-			CPUShares:       1024,
-			PidsLimit:       &pidsLimit,
-			RestartPolicy:   docker.RestartOnFailure(3),
-			SecurityOpt:     []string{"no-new-privileges:true"},
-			CapDrop:         []string{"ALL"},
+			Memory:        512 * 1024 * 1024,
+			MemorySwap:    512 * 1024 * 1024,
+			CPUQuota:      100000,
+			CPUPeriod:     100000,
+			CPUShares:     1024,
+			PidsLimit:     &pidsLimit,
+			RestartPolicy: docker.RestartOnFailure(3),
+			SecurityOpt:   []string{"no-new-privileges:true"},
+			CapDrop:       []string{"ALL"},
 			Binds: []string{
-				fmt.Sprintf("%s:%s", workspaceDir, config.WorkDir),
+				fmt.Sprintf("%s:%s", hostWorkspaceDir, config.WorkDir),
 			},
 		},
 		NetworkingConfig: &docker.NetworkingConfig{
@@ -355,7 +363,7 @@ func StartSidecarDatabase(ctx context.Context, envID string, orgID string, dbTyp
 			Env:   env,
 		},
 		HostConfig: &docker.HostConfig{
-			Memory:      512 * 1024 * 1024, // 512MB for DB
+			Memory:      512 * 1024 * 1024,  // 512MB for DB
 			MemorySwap:  1024 * 1024 * 1024, // 1GB Swap
 			CPUQuota:    100000,
 			CPUPeriod:   100000,
@@ -488,7 +496,7 @@ func EnsureOrgNetwork(ctx context.Context, orgID string) (string, string, error)
 // instantly, which host-side bind-mount writes sometimes fail to do reliably.
 func TouchFileInContainer(ctx context.Context, envID string, filePath string) error {
 	containerName := "api-sandbox-env-" + envID
-	
+
 	exec, err := dockerClient.CreateExec(docker.CreateExecOptions{
 		Container:    containerName,
 		Cmd:          []string{"touch", filePath},
@@ -499,10 +507,56 @@ func TouchFileInContainer(ctx context.Context, envID string, filePath string) er
 	if err != nil {
 		return err
 	}
-	
+
 	err = dockerClient.StartExec(exec.ID, docker.StartExecOptions{
 		Detach:  true,
 		Context: ctx,
 	})
 	return err
+}
+
+func ReapOrphanContainers(ctx context.Context) error {
+	containers, err := dockerClient.ListContainers(docker.ListContainersOptions{All: true})
+	if err != nil {
+		return err
+	}
+
+	for _, c := range containers {
+		name := ""
+		if len(c.Names) > 0 {
+			name = strings.TrimPrefix(c.Names[0], "/")
+		}
+
+		var envID string
+		isEnv := strings.HasPrefix(name, "api-sandbox-env-")
+		isDB := strings.HasPrefix(name, "api-sandbox-db-")
+
+		if isEnv {
+			envID = strings.TrimPrefix(name, "api-sandbox-env-")
+		} else if isDB {
+			envID = strings.TrimPrefix(name, "api-sandbox-db-")
+		} else {
+			continue
+		}
+
+		var env models.Environment
+		err := db.DB.Where("id = ?", envID).First(&env).Error
+
+		// We reap if it's not in the DB, OR if the DB says it's STOPPED/FAILED
+		shouldReap := false
+		if err != nil {
+			shouldReap = true
+		} else if env.Status != models.StatusRunning && env.Status != models.StatusBuilding {
+			shouldReap = true
+		}
+
+		if shouldReap {
+			slog.Info("Reaper: Removing orphan container", "name", name, "env_id", envID)
+			_ = CleanupContainer(ctx, name)
+			if isEnv {
+				_ = CleanupWorkspace(envID)
+			}
+		}
+	}
+	return nil
 }

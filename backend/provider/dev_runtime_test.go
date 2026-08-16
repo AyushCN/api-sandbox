@@ -29,7 +29,7 @@ func TestDetectDevRuntime(t *testing.T) {
 			},
 			expectedBase: "node:20-alpine",
 			expectedInst: "npm install",
-			expectedStrt: "npx nodemon -L --exec \"npm start\"",
+			expectedStrt: "npx nodemon --exec \"npm start\"",
 		},
 		{
 			name: "Node.js Next.js with yarn",
@@ -58,7 +58,7 @@ func TestDetectDevRuntime(t *testing.T) {
 				"main.py":          "",
 			},
 			expectedBase: "python:3.11-slim",
-			expectedInst: "pip install -r requirements.txt watchdog",
+			expectedInst: "pip install -r requirements.txt && pip install uvicorn[standard]",
 			expectedStrt: "uvicorn main:app --host 0.0.0.0 --reload --reload-dir .",
 		},
 		{
@@ -68,7 +68,7 @@ func TestDetectDevRuntime(t *testing.T) {
 				"manage.py":        "",
 			},
 			expectedBase: "python:3.11-slim",
-			expectedInst: "pip install -r requirements.txt watchdog",
+			expectedInst: "pip install -r requirements.txt && pip install uvicorn[standard]",
 			expectedStrt: "python manage.py runserver 0.0.0.0:8000",
 		},
 		{
@@ -78,7 +78,7 @@ func TestDetectDevRuntime(t *testing.T) {
 			},
 			expectedBase: "golang:1.22-alpine",
 			expectedInst: "go mod download && go install github.com/air-verse/air@latest",
-			expectedStrt: "if [ ! -f .air.toml ]; then air init && sed -i 's/poll = false/poll = true/' .air.toml; fi && air || go run .",
+			expectedStrt: "if [ ! -f .air.toml ]; then air init; fi && air || go run .",
 		},
 		{
 			name: "Ruby on Rails",

@@ -13,6 +13,7 @@ const (
 	TaskBuildEnvironment  = "environment:build"
 	TaskCollectMetrics    = "system:metrics"
 	TaskCleanupContainers = "system:cleanup"
+	TaskReapOrphans       = "system:reap"
 )
 
 func InitQueue() {

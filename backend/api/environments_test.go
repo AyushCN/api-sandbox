@@ -28,8 +28,6 @@ func generateTestToken(userId string) string {
 	return tokenString
 }
 
-
-
 func setupEnvironmentTestRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.Default()
@@ -176,8 +174,8 @@ func TestEnvironmentAuthz(t *testing.T) {
 	req.AddCookie(&http.Cookie{Name: "token", Value: generateTestToken(user2.ID)})
 	wUpdateFile := httptest.NewRecorder()
 	r.ServeHTTP(wUpdateFile, req)
-	if wUpdateFile.Code != http.StatusNotFound {
-		t.Errorf("User2 should get 404 for User1's environment update file. Got %d", wUpdateFile.Code)
+	if wUpdateFile.Code != http.StatusForbidden {
+		t.Errorf("User2 should get 403 for User1's environment update file. Got %d", wUpdateFile.Code)
 	}
 
 	// Test Git Sync (POST)
@@ -185,8 +183,8 @@ func TestEnvironmentAuthz(t *testing.T) {
 	req.AddCookie(&http.Cookie{Name: "token", Value: generateTestToken(user2.ID)})
 	wSync := httptest.NewRecorder()
 	r.ServeHTTP(wSync, req)
-	if wSync.Code != http.StatusNotFound {
-		t.Errorf("User2 should get 404 for User1's environment sync. Got %d", wSync.Code)
+	if wSync.Code != http.StatusForbidden {
+		t.Errorf("User2 should get 403 for User1's environment sync. Got %d", wSync.Code)
 	}
 
 	// Test Docker Logs (GET)
@@ -204,8 +202,8 @@ func TestEnvironmentAuthz(t *testing.T) {
 	req.AddCookie(&http.Cookie{Name: "token", Value: generateTestToken(user2.ID)})
 	wCreateFile := httptest.NewRecorder()
 	r.ServeHTTP(wCreateFile, req)
-	if wCreateFile.Code != http.StatusNotFound {
-		t.Errorf("User2 should get 404 for User1's environment create file. Got %d", wCreateFile.Code)
+	if wCreateFile.Code != http.StatusForbidden {
+		t.Errorf("User2 should get 403 for User1's environment create file. Got %d", wCreateFile.Code)
 	}
 
 	// Test Workspace File Delete (POST)
@@ -214,8 +212,8 @@ func TestEnvironmentAuthz(t *testing.T) {
 	req.AddCookie(&http.Cookie{Name: "token", Value: generateTestToken(user2.ID)})
 	wDeleteFile := httptest.NewRecorder()
 	r.ServeHTTP(wDeleteFile, req)
-	if wDeleteFile.Code != http.StatusNotFound {
-		t.Errorf("User2 should get 404 for User1's environment delete file. Got %d", wDeleteFile.Code)
+	if wDeleteFile.Code != http.StatusForbidden {
+		t.Errorf("User2 should get 403 for User1's environment delete file. Got %d", wDeleteFile.Code)
 	}
 
 	// Test Git Commit (POST)
@@ -224,15 +222,15 @@ func TestEnvironmentAuthz(t *testing.T) {
 	req.AddCookie(&http.Cookie{Name: "token", Value: generateTestToken(user2.ID)})
 	wCommit := httptest.NewRecorder()
 	r.ServeHTTP(wCommit, req)
-	if wCommit.Code != http.StatusNotFound {
-		t.Errorf("User2 should get 404 for User1's environment commit. Got %d", wCommit.Code)
+	if wCommit.Code != http.StatusForbidden {
+		t.Errorf("User2 should get 403 for User1's environment commit. Got %d", wCommit.Code)
 	}
 
 	// Test CreateEnvironment authorization (User 2 trying to create in User 1's project)
 	createReq := CreateEnvironmentRequest{
-		Name:         "Hacked Env",
-		GitURL:       "https://github.com/test/repo",
-		ProjectID:    projectA.ID,
+		Name:      "Hacked Env",
+		GitURL:    "https://github.com/test/repo",
+		ProjectID: projectA.ID,
 	}
 	payload, _ := json.Marshal(createReq)
 	req, _ = http.NewRequest(http.MethodPost, "/api/environments", bytes.NewBuffer(payload))
@@ -248,7 +246,7 @@ func TestEnvironmentAuthz(t *testing.T) {
 	if wCreate.Code == http.StatusCreated {
 		t.Errorf("User2 should not be able to create environment in User1's project.")
 	}
-	
+
 	// Cleanup test DB
 	os.Remove("test.db")
 }

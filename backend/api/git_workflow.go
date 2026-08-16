@@ -143,6 +143,8 @@ func GitBranch(c *gin.Context) {
 	env.GithubBranch = req.Branch
 	db.DB.Save(env)
 
+	TouchEnvironmentActivity(id)
+
 	c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Created and checked out branch %s", req.Branch)})
 }
 
@@ -203,6 +205,8 @@ func GitCheckout(c *gin.Context) {
 	env.GithubBranch = actualBranch
 	db.DB.Save(env)
 
+	TouchEnvironmentActivity(id)
+
 	c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Checked out %s", req.Ref), "branch": actualBranch})
 }
 
@@ -224,6 +228,8 @@ func GitPull(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": string(out)})
 		return
 	}
+
+	TouchEnvironmentActivity(id)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Successfully pulled", "output": string(out)})
 }

@@ -23,6 +23,7 @@ var (
 	ProviderStartSidecarDatabase       = provider.StartSidecarDatabase
 	ProviderCheckContainerHealth       = provider.CheckContainerHealth
 )
+
 func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 	var payload map[string]string
 	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
@@ -212,7 +213,6 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 		// Container has already exited — capture logs and bail immediately
 		break
 	}
-
 
 	// If still not running after timeout, poll one last time
 	if !isRunning && time.Now().After(deadline) {

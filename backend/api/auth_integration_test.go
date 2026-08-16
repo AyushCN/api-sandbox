@@ -44,18 +44,17 @@ func setupIntegrationRouter() *gin.Engine {
 
 	// Use actual JWT middleware if testing protected routes
 	auth := r.Group("/api", AuthMiddleware())
-	
+
 	// Auth routes
 	r.POST("/api/auth/register", Register)
 	r.POST("/api/auth/login", Login)
 	r.POST("/api/auth/verify", VerifyEmail)
 	r.POST("/api/auth/reset-password", ForgotPassword)
-	
+
 	auth.POST("/environments", CreateEnvironment)
 
 	return r
 }
-
 
 func TestQuotas(t *testing.T) {
 	setupIntegrationDB(t)
@@ -68,7 +67,7 @@ func TestQuotas(t *testing.T) {
 
 	// Mock Enqueue for CreateEnvironment so it doesn't fail
 	// Wait, we don't need to mock Enqueue, it will just fail to enqueue (redis offline) and return 500, but quota check happens BEFORE enqueue.
-	
+
 	// Max environments is 5. Create 5 environments manually in DB.
 	for i := 0; i < 5; i++ {
 		db.DB.Create(&models.Environment{
@@ -90,7 +89,7 @@ func TestQuotas(t *testing.T) {
 
 	// Reset DB, test builds per hour
 	db.DB.Exec("DELETE FROM environments")
-	
+
 	// Max builds per hour is 10.
 	for i := 0; i < 10; i++ {
 		db.DB.Create(&models.Environment{

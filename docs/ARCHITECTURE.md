@@ -1,69 +1,98 @@
-# API Sandbox Architecture
+# Architecture
 
-This document outlines the high-level architecture of the API Sandbox platform, specifically focusing on the orchestrator, proxy routing, and the real-time development loop.
+This document describes the design, lifecycle, and trust boundaries of the API Sandbox.
 
-## System Topology
+## What It Is
 
-The platform operates on a single dedicated host machine utilizing Docker and Traefik to orchestrate, isolate, and route traffic to user sandboxes dynamically.
+A single-host orchestrator. One Linux machine runs Docker, Traefik, a Go backend, a Next.js frontend, PostgreSQL, and Redis. The backend uses the Docker socket to provision ephemeral user sandbox containers on that same host.
+
+## System Diagram
 
 ```mermaid
 graph TD
     Client[Web Client]
     subgraph Single Host
         Traefik[Traefik Proxy]
-        Backend[Go API Orchestrator]
+        Backend[Go API - mounts docker.sock]
         Worker[Asynq Worker]
-        PostgreSQL[(System PostgreSQL)]
-        Redis[(System Redis)]
+        PostgreSQL[(PostgreSQL)]
+        Redis[(Redis)]
 
         subgraph Org A Network
-            EnvA[Sandbox Env A]
-            DB_A[(Postgres Sidecar A)]
+            EnvA[Sandbox Container A]
+            DB_A[(Postgres Sidecar)]
             EnvA --- DB_A
         end
 
         subgraph Org B Network
-            EnvB[Sandbox Env B]
+            EnvB[Sandbox Container B]
         end
     end
 
-    Client -->|HTTPS / WSS| Traefik
+    Client -->|HTTP / WSS| Traefik
     Traefik -->|/api/*| Backend
-    Traefik -->|*.sandbox.com| EnvA
-    Traefik -->|*.sandbox.com| EnvB
+    Traefik -->|Host: envId.domain| EnvA
+    Traefik -->|Host: envId.domain| EnvB
 
     Backend --> PostgreSQL
     Backend --> Redis
-    Backend -->|Enqueues Build| Worker
-    Worker --> Redis
-    
-    Worker -->|docker build/run| EnvA
-    Worker -->|docker build/run| EnvB
+    Backend -->|Enqueues| Worker
+    Worker -->|docker run| EnvA
+    Worker -->|docker run| EnvB
 ```
 
-## The Real-Time Development Loop
+## Environment Lifecycle
 
-The absolute core technical requirement of this platform is the **Real-Time Dev Loop**—ensuring that a user saving a file in the browser experiences the result of that code change in under 2 seconds.
+The environment is the primary abstraction. Lifecycle state:
 
-### Bind-Mount Synchronization
-Unlike traditional CI/CD pipelines that rebuild immutable OCI images, this platform maps raw source code directly into language-specific Alpine runtimes via host-level bind mounts.
-1. The Go backend receives the edited file content via the `POST /api/environments/:id/files/content` endpoint.
-2. The file is written synchronously to the host path: `/var/lib/api-sandbox/workspaces/<env-id>`.
-3. The host path is bind-mounted directly to `/app` inside the ephemeral sandbox container.
+```mermaid
+stateDiagram-v2
+    [*] --> IDLE : Created
+    IDLE --> BUILDING : Start requested
+    BUILDING --> RUNNING : Base image pulled, volume mounted, health passes
+    BUILDING --> FAILED : Clone or health failed
+    RUNNING --> STOPPED : User stop
+    STOPPED --> BUILDING : Restart
+    FAILED --> BUILDING : Retry
+    RUNNING --> [*] : Deleted
+    STOPPED --> [*] : Deleted
+    FAILED --> [*] : Deleted
+    IDLE --> [*] : Deleted
+```
 
-### Fast Process Watchers
-We rely entirely on native process watchers to handle the reboot inside the container without terminating PID 1:
-- **Node.js**: Uses `npx nodemon` to survive rapid I/O spikes without crashing.
-- **Python**: Uses `uvicorn --reload --reload-dir .`.
-- **Go**: Uses `air` (specifically pinned to `v1.52.3` to ensure compatibility with `golang:alpine`).
+**"RUNNING" means:** base image is pulled, code directory is bind-mounted to `/app`, a process watcher is running inside the container, and the TCP/HTTP health check has returned success. It does not mean the application is fully built or ready — just that the container process started.
 
-### HTTP Proxy Readiness Polling
-Once the file is saved, the container begins its reboot. The Go backend must actively determine *exactly when* the application is ready to accept traffic again. 
+## How the Dev Loop Works
 
-Initially, we used raw TCP dials against the container's internal IP. This failed due to strict Docker network isolation (Organization networks vs. Backend network). We migrated to a robust **HTTP Proxy Routing** strategy:
-1. The Go backend polls the Traefik entrypoint using an HTTP GET request with a forged `Host` header (e.g., `Host: {env-id}.localhost`).
-2. Traefik routes the request into the isolated container network.
-3. If the container is still rebooting, Traefik immediately returns `502 Bad Gateway`. 
-4. The Go backend iteratively polls every few milliseconds until it receives a `200 OK` (or any non-502 status), definitively proving the application is ready.
+1. User saves a file in the browser IDE
+2. Go backend writes the file to the host path `/var/lib/api-sandbox/workspaces/<env-id>/`
+3. The sandbox container has this directory bind-mounted to `/app`
+4. The process watcher inside the container detects the change and restarts the application
+5. The backend polls Traefik with the environment's virtual host header until it receives a non-502 response
+6. A `reload_ready` WebSocket event is broadcast to all connected clients
 
-This proxy-first polling mechanism entirely eliminates network boundary issues and accurately simulates a user's browser, enabling us to achieve consistent `p95 < 1s` latency.
+Warm reload latency (Node.js): ~250ms. Cold starts are substantially longer.
+
+## Trust Boundaries
+
+| Boundary | Mechanism | What it does not protect |
+|----------|-----------|--------------------------|
+| API auth | JWT cookie | Compromised API process |
+| Tenant network | Bridge per org | Host if socket is abused |
+| Container | CapDrop, no-new-privs, mem/PID limits | Kernel exploits, socket mount |
+| Path validation | Workspace root checks | Host FS via RCE in Go backend |
+
+## Critical Limitation: Docker Socket
+
+The Backend container mounts `/var/run/docker.sock`. This is functionally equivalent to host root access. If the Go backend is exploited, the attacker controls the host.
+
+**This is a deliberate design tradeoff for a single-host, trusted-user tool.** Do not use this as a multi-tenant public platform.
+
+## Editor Strategy
+
+Code is **not** baked into images. Raw source is mapped from the host into Alpine-based language runtimes via bind mounts. This enables live editing but means the container and host share the same codebase at all times.
+
+Process watchers per runtime:
+- **Node.js**: `npx nodemon`
+- **Python**: `uvicorn --reload --reload-dir .`
+- **Go**: `air` (pinned to v1.52.3, compatible with `golang:alpine`)

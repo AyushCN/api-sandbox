@@ -233,6 +233,27 @@ func UpdateWorkspaceFileContent(c *gin.Context) {
 		return
 	}
 
+	saveTime := time.Now()
+	reloadSignaled := false
+
+	// Synchronous touch for reliable feedback (usually takes < 30ms)
+	if env.Status == "running" && env.ContainerID != nil && *env.ContainerID != "" {
+		inContainerPath := "/app/" + strings.TrimPrefix(cleanPath, "/")
+
+		touchCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		if touchErr := provider.TouchFileInContainer(touchCtx, id, inContainerPath); touchErr == nil {
+			reloadSignaled = true
+		} else {
+			slog.Warn("touch-on-save failed",
+				"envID", id,
+				"path", inContainerPath,
+				"err", touchErr,
+			)
+		}
+	}
+
 	workspaceDir := filepath.Join(wd, "workspaces", id)
 	userID, _ := c.Get("userId")
 	userIDStr := userID.(string)
@@ -298,19 +319,22 @@ func UpdateWorkspaceFileContent(c *gin.Context) {
 		// Broadcast to team via WebSocket
 		BroadcastToProjectMembers(env.ID, data)
 
-		// --- Reload Signaling ---
-		if env.Status == "running" && env.ContainerID != nil && *env.ContainerID != "" {
-			inContainerPath := "/app/" + strings.TrimPrefix(cleanPath, "/")
-
-			touchCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			defer cancel()
-
-			if touchErr := provider.TouchFileInContainer(touchCtx, id, inContainerPath); touchErr != nil {
-				slog.Warn("touch-on-save failed",
-					"envID", id,
-					"path", inContainerPath,
-					"err", touchErr,
-				)
+		// --- Readiness Polling ---
+		if reloadSignaled && env.Port != nil && *env.Port > 0 {
+			waitCtx, cancelWait := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancelWait()
+			
+			if waitErr := provider.WaitForContainerPort(waitCtx, *env.ContainerID, *env.Port); waitErr == nil {
+				latency := time.Since(saveTime)
+				slog.Info("DevLoop Latency", "envID", env.ID, "duration_ms", latency.Milliseconds())
+				
+				readyData := map[string]interface{}{
+					"type": "reload_ready",
+					"timestamp": time.Now(),
+				}
+				BroadcastToProjectMembers(env.ID, readyData)
+			} else {
+				slog.Warn("Container failed to become ready after touch", "envID", id, "err", waitErr)
 			}
 		}
 	}()
@@ -319,7 +343,7 @@ func UpdateWorkspaceFileContent(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"message":        "Saved",
 		"diff":           "",     // Async, so diff is not instantly returned
-		"reloadSignaled": false,  // Async, so signaling state isn't instantly known
+		"reloadSignaled": reloadSignaled,
 	})
 }
 

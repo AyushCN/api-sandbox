@@ -13,7 +13,11 @@ export interface EnvironmentChangeMessage {
   message?: string;
 }
 
-export function useEnvironmentChanges(envId: string | undefined) {
+interface UseEnvironmentChangesOptions {
+  onReloadReady?: () => void;
+}
+
+export function useEnvironmentChanges(envId: string | undefined, options?: UseEnvironmentChangesOptions) {
   const [activeEditors, setActiveEditors] = useState<string[]>([]);
   const [hasUncommittedChanges, setHasUncommittedChanges] = useState<boolean>(false);
   const [recentChanges, setRecentChanges] = useState<EnvironmentChangeMessage[]>([]);
@@ -58,6 +62,12 @@ export function useEnvironmentChanges(envId: string | undefined) {
             
           case 'rebuild_triggered':
             toast(`Environment rebuild triggered by ${msg.user_name}`, { icon: 'ℹ️' });
+            break;
+            
+          case 'reload_ready':
+            if (options?.onReloadReady) {
+              options.onReloadReady();
+            }
             break;
         }
       } catch (err) {

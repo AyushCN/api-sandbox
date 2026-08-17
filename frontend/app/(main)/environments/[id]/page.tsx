@@ -122,7 +122,15 @@ export default function EnvironmentDetail() {
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<unknown>(null);
   
-  const { hasUncommittedChanges, setHasUncommittedChanges, activeEditors } = useEnvironmentChanges(id);
+  const { hasUncommittedChanges, setHasUncommittedChanges, activeEditors } = useEnvironmentChanges(id, {
+    onReloadReady: () => {
+      setSaveState('live');
+      // After a short delay, return to idle so the 'Live' indicator fades gracefully
+      setTimeout(() => {
+        setSaveState(current => current === 'live' ? 'idle' : current);
+      }, 2500);
+    }
+  });
   const [isCommitting, setIsCommitting] = useState(false);
 
   const [isCommitModalOpen, setIsCommitModalOpen] = useState(false);
@@ -197,7 +205,7 @@ export default function EnvironmentDetail() {
   const [fileContent, setFileContent] = useState<string>("");
   const [originalFileContent, setOriginalFileContent] = useState<string>("");
   const [isLoadingFile, setIsLoadingFile] = useState<boolean>(false);
-  const [isSavingFile, setIsSavingFile] = useState<boolean>(false);
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'reloading' | 'live'>('idle');
   const [isEditingFile, setIsEditingFile] = useState<boolean>(false);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -442,7 +450,7 @@ export default function EnvironmentDetail() {
 
   const handleSaveFile = async () => {
     if (!selectedFilePath) return;
-    setIsSavingFile(true);
+    setSaveState('saving');
     try {
       const res = await fetch(`/api/environments/${id}/files/content`, {
         method: "POST",
@@ -458,9 +466,10 @@ export default function EnvironmentDetail() {
       if (!res.ok) throw new Error("Failed to save changes");
       const data = await res.json();
       if (data.reloadSignaled) {
-        toast.success("Saved — reload signaled ⚡");
+        setSaveState('reloading');
       } else {
         toast.success(data.message ?? "Saved — runtime not running (no reload signal)");
+        setSaveState('idle');
       }
       setOriginalFileContent(fileContent);
       setIsEditingFile(false);
@@ -469,8 +478,7 @@ export default function EnvironmentDetail() {
       mutate(`/api/environments/${id}`);
     } catch (e: unknown) {
       toast.error((e as Error).message);
-    } finally {
-      setIsSavingFile(false);
+      setSaveState('idle');
     }
   };
 
@@ -1028,16 +1036,29 @@ export default function EnvironmentDetail() {
                     ) : (
                       <button
                         onClick={handleSaveFile}
-                        disabled={isSavingFile || !hasUnsavedChanges}
+                        disabled={saveState !== 'idle' && saveState !== 'live' || !hasUnsavedChanges}
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-primary/10 border border-primary/30 text-primary hover:bg-primary/20 disabled:opacity-30 disabled:hover:bg-primary/10 transition-colors text-xs font-semibold"
                       >
-                        {isSavingFile ? (
+                        {saveState === 'saving' || saveState === 'reloading' ? (
                           <Loader2 className="w-3.5 h-3.5 animate-spin" />
                         ) : (
                           <Save className="w-3.5 h-3.5" />
                         )}
                         Save & Apply
                       </button>
+                    )}
+                    
+                    {/* Dev Loop Status Indicator */}
+                    {saveState !== 'idle' && (
+                      <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded border text-xs font-semibold transition-colors ${
+                        saveState === 'live' 
+                          ? 'bg-green-500/20 border-green-500/40 text-green-400 shadow-[0_0_10px_rgba(34,197,94,0.3)]' 
+                          : 'bg-amber-500/10 border-amber-500/20 text-amber-400'
+                      }`}>
+                        {saveState === 'saving' && <><span>Saving</span><Loader2 className="w-3.5 h-3.5 animate-spin ml-1" /></>}
+                        {saveState === 'reloading' && <><span>Reloading</span><Loader2 className="w-3.5 h-3.5 animate-spin ml-1" /></>}
+                        {saveState === 'live' && <span>Live ⚡</span>}
+                      </div>
                     )}
                   </div>
                 </div>

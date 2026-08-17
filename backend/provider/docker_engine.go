@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"net"
 
 	"github.com/api-sandbox/backend/db"
 	"github.com/api-sandbox/backend/models"
@@ -315,6 +316,49 @@ func GetContainerPort(containerID string) (int, error) {
 		}
 	}
 	return assignedPort, nil
+}
+
+func WaitForContainerPort(ctx context.Context, containerID string, port int) error {
+	inspect, err := dockerClient.InspectContainer(containerID)
+	if err != nil {
+		return err
+	}
+
+	ipAddress := inspect.NetworkSettings.IPAddress
+	if ipAddress == "" {
+		// Fallback to searching networks
+		for _, net := range inspect.NetworkSettings.Networks {
+			ipAddress = net.IPAddress
+			if ipAddress != "" {
+				break
+			}
+		}
+	}
+
+	if ipAddress == "" {
+		return fmt.Errorf("no IP address found for container %s", containerID)
+	}
+
+	target := fmt.Sprintf("%s:%d", ipAddress, port)
+	timeout := time.After(30 * time.Second)
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timeout:
+			return fmt.Errorf("timed out waiting for port %d to be reachable on %s", port, ipAddress)
+		case <-ticker.C:
+			// Dial the internal IP and Port of the container directly
+			conn, err := net.DialTimeout("tcp", target, 500*time.Millisecond)
+			if err == nil {
+				conn.Close()
+				return nil
+			}
+		}
+	}
 }
 
 func StartSidecarDatabase(ctx context.Context, envID string, orgID string, dbType DBType) (string, error) {

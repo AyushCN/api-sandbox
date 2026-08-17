@@ -19,6 +19,11 @@ Instead of deploying static images, this platform mounts your code into language
 
 ## 📦 Changelog
 
+### v1.3.6 — 2026-08-17 (Frontend Types & Pipeline Stability)
+
+- **fix**: Systematically resolved all Next.js TS strictness and linting regressions, enforcing proper data typing for `any` and `unknown` object structures across React components.
+- **Operations**: Restored a clean `0` exit code for the automated `npm run build` validation step in the CI pipeline.
+
 ### v1.3.5 — 2026-08-16 (Profile & Account Overhaul)
 
 - **Feature**: Completely rewrote the user profile page for a cleaner, modern layout.

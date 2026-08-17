@@ -170,13 +170,13 @@ func GithubCallback(c *gin.Context) {
 		}
 
 		user = models.User{
-			Email:           ghUser.Email,
-			Username:        username,
-			GithubID:        ghIDStr,
-			GithubUsername:  ghUser.Login,
-			GithubToken:     encryptedToken,
-			Github:          ghUser.HtmlUrl,
-			AvatarURL:       ghUser.Avatar,
+			Email:          ghUser.Email,
+			Username:       username,
+			GithubID:       ghIDStr,
+			GithubUsername: ghUser.Login,
+			GithubToken:    encryptedToken,
+			Github:         ghUser.HtmlUrl,
+			AvatarURL:      ghUser.Avatar,
 		}
 
 		if err := db.DB.Create(&user).Error; err != nil {

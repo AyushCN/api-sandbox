@@ -71,8 +71,8 @@ func main() {
 	}
 
 	if len(keyBytes) != 16 && len(keyBytes) != 24 && len(keyBytes) != 32 {
-		slog.Error("CRITICAL: TOKEN_ENCRYPTION_KEY must be 16, 24, or 32 bytes", 
-			"got_bytes", len(keyBytes), 
+		slog.Error("CRITICAL: TOKEN_ENCRYPTION_KEY must be 16, 24, or 32 bytes",
+			"got_bytes", len(keyBytes),
 			"got_hex_chars", len(encryptionKey))
 		os.Exit(1)
 	}

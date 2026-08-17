@@ -12,21 +12,29 @@ import { fetchWithAuth } from "@/lib/auth";
 
 import useSWR from "swr";
 
-const schema = z.object({
-  name: z.string().min(3, "Name must be at least 3 characters").max(50),
-  gitUrl: z.string().url("Must be a valid URL").regex(/^https:\/\/github\.com/, "Must be a GitHub repository"),
-  githubBranch: z.string().min(1, "Branch is required").default("main"),
-  projectId: z.string().min(1, "Project is required"),
-  newProjectName: z.string().optional(),
-}).refine((data) => {
-  if (data.projectId === "new") {
-    return data.newProjectName && data.newProjectName.length >= 3;
-  }
-  return true;
-}, {
-  message: "New project name must be at least 3 characters",
-  path: ["newProjectName"],
-});
+const schema = z
+  .object({
+    name: z.string().min(3, "Name must be at least 3 characters").max(50),
+    gitUrl: z
+      .string()
+      .url("Must be a valid URL")
+      .regex(/^https:\/\/github\.com/, "Must be a GitHub repository"),
+    githubBranch: z.string().min(1, "Branch is required").default("main"),
+    projectId: z.string().min(1, "Project is required"),
+    newProjectName: z.string().optional(),
+  })
+  .refine(
+    (data) => {
+      if (data.projectId === "new") {
+        return data.newProjectName && data.newProjectName.length >= 3;
+      }
+      return true;
+    },
+    {
+      message: "New project name must be at least 3 characters",
+      path: ["newProjectName"],
+    },
+  );
 
 type FormData = z.infer<typeof schema>;
 
@@ -47,7 +55,10 @@ export default function UploadPage() {
     defaultValues: { githubBranch: "main" },
   });
 
-  const { data: projects, isLoading: isProjectsLoading } = useSWR("/api/projects", (url) => fetchWithAuth(url));
+  const { data: projects, isLoading: isProjectsLoading } = useSWR(
+    "/api/projects",
+    (url) => fetchWithAuth(url),
+  );
 
   const gitUrl = watch("gitUrl");
   const projectId = watch("projectId");
@@ -62,7 +73,7 @@ export default function UploadPage() {
   useEffect(() => {
     const fetchBranches = async () => {
       if (!gitUrl || !gitUrl.startsWith("https://github.com/")) return;
-      
+
       const match = gitUrl.match(/https:\/\/github\.com\/([^/]+)\/([^/.]+)/);
       if (!match) return;
 
@@ -71,7 +82,9 @@ export default function UploadPage() {
 
       setIsFetchingBranches(true);
       try {
-        const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/branches`);
+        const res = await fetch(
+          `https://api.github.com/repos/${owner}/${repo}/branches`,
+        );
         if (!res.ok) {
           setBranches([]);
           return;
@@ -79,11 +92,13 @@ export default function UploadPage() {
         const data = await res.json();
         const branchNames = data.map((b: { name: string }) => b.name);
         setBranches(branchNames);
-        
+
         // Auto-select main or master if available
         if (branchNames.includes("main")) setValue("githubBranch", "main");
-        else if (branchNames.includes("master")) setValue("githubBranch", "master");
-        else if (branchNames.length > 0) setValue("githubBranch", branchNames[0]);
+        else if (branchNames.includes("master"))
+          setValue("githubBranch", "master");
+        else if (branchNames.length > 0)
+          setValue("githubBranch", branchNames[0]);
       } catch (err) {
         // Silently fail and fallback to manual input if network request fails entirely
         setBranches([]);
@@ -100,13 +115,16 @@ export default function UploadPage() {
     setIsSubmitting(true);
     try {
       let targetProjectId = data.projectId;
-      
+
       if (targetProjectId === "new") {
         // Create new project first
         const projRes = await fetchWithAuth("/api/projects", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: data.newProjectName, description: "Auto-created workspace" }),
+          body: JSON.stringify({
+            name: data.newProjectName,
+            description: "Auto-created workspace",
+          }),
         });
         targetProjectId = projRes.id;
       }
@@ -118,7 +136,10 @@ export default function UploadPage() {
           name: data.name,
           gitUrl: data.gitUrl,
           githubBranch: data.githubBranch,
-          projectId: targetProjectId && targetProjectId !== "" ? targetProjectId : undefined,
+          projectId:
+            targetProjectId && targetProjectId !== ""
+              ? targetProjectId
+              : undefined,
         }),
       });
 
@@ -136,23 +157,38 @@ export default function UploadPage() {
     <div className="max-w-2xl mx-auto mt-12 mb-24">
       <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-8 md:p-12 shadow-2xl relative overflow-hidden">
         <div className="absolute top-0 right-0 p-16 opacity-5 pointer-events-none">
-          <span className="material-symbols-outlined text-[200px] text-primary-fixed">cloud_upload</span>
-        </div>
-        
-        <div className="text-center mb-10 relative z-10">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary-container/20 text-primary-fixed mb-6 border border-primary-container/30 hover:scale-110 transition-transform">
-            <span className="material-symbols-outlined text-[32px]">deployed_code</span>
-          </div>
-          <h1 className="text-3xl font-bold text-on-surface mb-3">Deploy New Sandbox</h1>
-          <p className="text-on-surface-variant">Connect a public GitHub repository to instantly build and deploy an isolated container.</p>
+          <span className="material-symbols-outlined text-[200px] text-primary-fixed">
+            cloud_upload
+          </span>
         </div>
 
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-6 relative z-10">
+        <div className="text-center mb-10 relative z-10">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary-container/20 text-primary-fixed mb-6 border border-primary-container/30 hover:scale-110 transition-transform">
+            <span className="material-symbols-outlined text-[32px]">
+              deployed_code
+            </span>
+          </div>
+          <h1 className="text-3xl font-bold text-on-surface mb-3">
+            Deploy New Sandbox
+          </h1>
+          <p className="text-on-surface-variant">
+            Connect a public GitHub repository to instantly build and deploy an
+            isolated container.
+          </p>
+        </div>
+
+        <form
+          onSubmit={handleSubmit(onSubmit)}
+          className="space-y-6 relative z-10"
+        >
           <div className="space-y-2">
-            <label className="text-sm font-bold tracking-wide text-on-surface-variant uppercase">Project Destination</label>
+            <label className="text-sm font-bold tracking-wide text-on-surface-variant uppercase">
+              Project Destination
+            </label>
             {isProjectsLoading ? (
               <div className="w-full bg-surface-container px-4 py-3 rounded-lg border border-outline-variant text-on-surface opacity-50 flex items-center">
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Loading projects...
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Loading
+                projects...
               </div>
             ) : (
               <select
@@ -160,12 +196,14 @@ export default function UploadPage() {
                 className="w-full bg-surface-container px-4 py-3 rounded-lg border border-outline-variant text-on-surface focus:border-primary-fixed focus:ring-1 focus:ring-primary-fixed transition-all appearance-none"
               >
                 {projects?.map((p: { id: string; name: string }) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
                 ))}
                 <option value="new">+ Create New Workspace Project</option>
               </select>
             )}
-            
+
             {projectId === "new" && (
               <div className="pt-3">
                 <input
@@ -173,43 +211,67 @@ export default function UploadPage() {
                   placeholder="New Project Name (e.g. My Secret App)"
                   className="w-full bg-surface-container px-4 py-3 rounded-lg border border-outline-variant text-on-surface focus:border-primary-fixed focus:ring-1 focus:ring-primary-fixed transition-all"
                 />
-                {errors.newProjectName && <p className="text-sm text-error font-medium mt-1">{errors.newProjectName.message}</p>}
+                {errors.newProjectName && (
+                  <p className="text-sm text-error font-medium mt-1">
+                    {errors.newProjectName.message}
+                  </p>
+                )}
               </div>
             )}
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-bold tracking-wide text-on-surface-variant uppercase">Project Name</label>
+            <label className="text-sm font-bold tracking-wide text-on-surface-variant uppercase">
+              Project Name
+            </label>
             <input
               {...register("name")}
               placeholder="e.g. my-awesome-api"
               className="w-full bg-surface-container px-4 py-3 rounded-lg border border-outline-variant text-on-surface focus:border-primary-fixed focus:ring-1 focus:ring-primary-fixed transition-all"
             />
-            {errors.name && <p className="text-sm text-error font-medium">{errors.name.message}</p>}
+            {errors.name && (
+              <p className="text-sm text-error font-medium">
+                {errors.name.message}
+              </p>
+            )}
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-bold tracking-wide text-on-surface-variant uppercase">GitHub Repository URL</label>
+            <label className="text-sm font-bold tracking-wide text-on-surface-variant uppercase">
+              GitHub Repository URL
+            </label>
             <input
               {...register("gitUrl")}
               placeholder="https://github.com/username/repo"
               className="w-full bg-surface-container px-4 py-3 rounded-lg border border-outline-variant text-on-surface focus:border-primary-fixed focus:ring-1 focus:ring-primary-fixed transition-all"
             />
-            {errors.gitUrl && <p className="text-sm text-error font-medium">{errors.gitUrl.message}</p>}
+            {errors.gitUrl && (
+              <p className="text-sm text-error font-medium">
+                {errors.gitUrl.message}
+              </p>
+            )}
           </div>
 
           <div className="space-y-2">
             <label className="text-sm font-bold tracking-wide text-on-surface-variant uppercase flex items-center gap-2">
-              Branch 
-              {isFetchingBranches && <Loader2 className="w-3 h-3 animate-spin text-primary-fixed" />}
+              Branch
+              {isFetchingBranches && (
+                <Loader2 className="w-3 h-3 animate-spin text-primary-fixed" />
+              )}
             </label>
             {branches.length > 0 ? (
               <select
                 {...register("githubBranch")}
                 className="w-full bg-surface-container px-4 py-3 rounded-lg border border-outline-variant text-on-surface focus:border-primary-fixed focus:ring-1 focus:ring-primary-fixed transition-all appearance-none"
               >
-                {branches.map(b => (
-                  <option key={b} value={b} className="bg-surface-container text-on-surface">{b}</option>
+                {branches.map((b) => (
+                  <option
+                    key={b}
+                    value={b}
+                    className="bg-surface-container text-on-surface"
+                  >
+                    {b}
+                  </option>
                 ))}
               </select>
             ) : (
@@ -219,7 +281,11 @@ export default function UploadPage() {
                 className="w-full bg-surface-container px-4 py-3 rounded-lg border border-outline-variant text-on-surface focus:border-primary-fixed focus:ring-1 focus:ring-primary-fixed transition-all"
               />
             )}
-            {errors.githubBranch && <p className="text-sm text-error font-medium">{errors.githubBranch.message}</p>}
+            {errors.githubBranch && (
+              <p className="text-sm text-error font-medium">
+                {errors.githubBranch.message}
+              </p>
+            )}
           </div>
 
           <button

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/url"
 	"os"
 	"os/exec"
@@ -14,7 +15,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"net"
 
 	"github.com/api-sandbox/backend/db"
 	"github.com/api-sandbox/backend/models"

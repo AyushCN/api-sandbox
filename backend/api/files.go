@@ -257,7 +257,7 @@ func UpdateWorkspaceFileContent(c *gin.Context) {
 	workspaceDir := filepath.Join(wd, "workspaces", id)
 	userID, _ := c.Get("userId")
 	userIDStr := userID.(string)
-	
+
 	// Perform heavy git, DB, broadcast, and touch operations asynchronously
 	go func() {
 		defer func() {
@@ -321,20 +321,25 @@ func UpdateWorkspaceFileContent(c *gin.Context) {
 
 		// --- Readiness Polling ---
 		if reloadSignaled && env.Port != nil && *env.Port > 0 {
-			waitCtx, cancelWait := context.WithTimeout(context.Background(), 30*time.Second)
+			waitCtx, cancelWait := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancelWait()
-			
+
 			if waitErr := provider.WaitForContainerPort(waitCtx, *env.ContainerID, *env.Port); waitErr == nil {
 				latency := time.Since(saveTime)
 				slog.Info("DevLoop Latency", "envID", env.ID, "duration_ms", latency.Milliseconds())
-				
+
 				readyData := map[string]interface{}{
-					"type": "reload_ready",
+					"type":      "reload_ready",
 					"timestamp": time.Now(),
 				}
 				BroadcastToProjectMembers(env.ID, readyData)
 			} else {
 				slog.Warn("Container failed to become ready after touch", "envID", id, "err", waitErr)
+				failedData := map[string]interface{}{
+					"type":      "reload_failed",
+					"timestamp": time.Now(),
+				}
+				BroadcastToProjectMembers(env.ID, failedData)
 			}
 		}
 	}()
@@ -342,7 +347,7 @@ func UpdateWorkspaceFileContent(c *gin.Context) {
 	// Return 200 immediately to UI to unblock user
 	c.JSON(http.StatusOK, gin.H{
 		"message":        "Saved",
-		"diff":           "",     // Async, so diff is not instantly returned
+		"diff":           "", // Async, so diff is not instantly returned
 		"reloadSignaled": reloadSignaled,
 	})
 }

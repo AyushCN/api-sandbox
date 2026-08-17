@@ -179,7 +179,6 @@ func TestEnvironmentAuthz(t *testing.T) {
 		t.Errorf("User2 should get 403 for User1's environment update file. Got %d", wUpdateFile.Code)
 	}
 
-
 	// Test Docker Logs (GET)
 	req, _ = http.NewRequest(http.MethodGet, "/api/environments/"+env.ID+"/docker-logs", nil)
 	req.AddCookie(&http.Cookie{Name: "token", Value: generateTestToken(user2.ID)})

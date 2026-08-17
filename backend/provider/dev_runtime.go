@@ -231,7 +231,7 @@ func detectGoRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
 	return DevRuntimeConfig{
 		BaseImage:   "golang:1.22-alpine",
 		InstallCmd:  "go mod download && go install github.com/air-verse/air@latest",
-		StartCmd:    "if [ ! -f .air.toml ]; then air init; fi && air || go run .",
+		StartCmd:    "if [ ! -f .air.toml ]; then air init && sed -i 's/poll = false/poll = true/g' .air.toml; fi && air || go run .",
 		WatchHint:   "Go detected. Air uses native file events via touch-on-save.",
 		WorkDir:     getWorkDir(subDir),
 		ExposedPort: "8080",
@@ -262,6 +262,9 @@ echo "========================================="
 echo "🛠️  Setting up Dev Sandbox Runtime"
 echo "========================================="
 echo "Working Directory: ` + config.WorkDir + `"
+
+export HOST=0.0.0.0
+export PORT=` + config.ExposedPort + `
 
 echo "📦 Installing dependencies..."
 ` + config.InstallCmd + `

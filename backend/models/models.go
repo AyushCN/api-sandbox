@@ -18,23 +18,23 @@ const (
 )
 
 type User struct {
-	ID                string     `gorm:"type:text;primaryKey" json:"id"`
-	Email             string     `gorm:"type:text;unique;not null" json:"email"`
-	Username          string     `gorm:"type:text;uniqueIndex" json:"username"`
-	MaxEnvironments   int        `gorm:"default:5" json:"maxEnvironments"`
-	MaxBuildsPerHour  int        `gorm:"default:10" json:"maxBuildsPerHour"`
-	Bio               string     `gorm:"type:text" json:"bio"`
-	Pronouns          string     `gorm:"type:text" json:"pronouns"`
-	Location          string     `gorm:"type:text" json:"location"`
-	Website           string     `gorm:"type:text" json:"website"`
-	Twitter           string     `gorm:"type:text" json:"twitter"`
-	Github            string     `gorm:"type:text" json:"github"` // Public github profile link
-	GithubID          string     `gorm:"type:text;index" json:"githubId,omitempty"`
-	GithubUsername    string     `gorm:"type:text" json:"githubUsername,omitempty"`
-	GithubToken       string     `gorm:"type:text" json:"-"`
-	AvatarURL         string     `gorm:"type:text" json:"avatarUrl"`
-	CreatedAt         time.Time  `gorm:"default:current_timestamp" json:"createdAt"`
-	UpdatedAt         time.Time  `gorm:"default:current_timestamp" json:"updatedAt"`
+	ID               string    `gorm:"type:text;primaryKey" json:"id"`
+	Email            string    `gorm:"type:text;unique;not null" json:"email"`
+	Username         string    `gorm:"type:text;uniqueIndex" json:"username"`
+	MaxEnvironments  int       `gorm:"default:5" json:"maxEnvironments"`
+	MaxBuildsPerHour int       `gorm:"default:10" json:"maxBuildsPerHour"`
+	Bio              string    `gorm:"type:text" json:"bio"`
+	Pronouns         string    `gorm:"type:text" json:"pronouns"`
+	Location         string    `gorm:"type:text" json:"location"`
+	Website          string    `gorm:"type:text" json:"website"`
+	Twitter          string    `gorm:"type:text" json:"twitter"`
+	Github           string    `gorm:"type:text" json:"github"` // Public github profile link
+	GithubID         string    `gorm:"type:text;index" json:"githubId,omitempty"`
+	GithubUsername   string    `gorm:"type:text" json:"githubUsername,omitempty"`
+	GithubToken      string    `gorm:"type:text" json:"-"`
+	AvatarURL        string    `gorm:"type:text" json:"avatarUrl"`
+	CreatedAt        time.Time `gorm:"default:current_timestamp" json:"createdAt"`
+	UpdatedAt        time.Time `gorm:"default:current_timestamp" json:"updatedAt"`
 }
 
 func (u *User) BeforeCreate(tx *gorm.DB) (err error) {

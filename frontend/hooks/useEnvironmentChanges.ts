@@ -15,6 +15,7 @@ export interface EnvironmentChangeMessage {
 
 interface UseEnvironmentChangesOptions {
   onReloadReady?: () => void;
+  onReloadFailed?: () => void;
 }
 
 export function useEnvironmentChanges(envId: string | undefined, options?: UseEnvironmentChangesOptions) {
@@ -23,10 +24,12 @@ export function useEnvironmentChanges(envId: string | undefined, options?: UseEn
   const [recentChanges, setRecentChanges] = useState<EnvironmentChangeMessage[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
   const onReloadReadyRef = useRef(options?.onReloadReady);
+  const onReloadFailedRef = useRef(options?.onReloadFailed);
 
   useEffect(() => {
     onReloadReadyRef.current = options?.onReloadReady;
-  }, [options?.onReloadReady]);
+    onReloadFailedRef.current = options?.onReloadFailed;
+  }, [options?.onReloadReady, options?.onReloadFailed]);
 
   useEffect(() => {
     if (!envId) return;
@@ -72,6 +75,12 @@ export function useEnvironmentChanges(envId: string | undefined, options?: UseEn
           case 'reload_ready':
             if (onReloadReadyRef.current) {
               onReloadReadyRef.current();
+            }
+            break;
+            
+          case 'reload_failed':
+            if (onReloadFailedRef.current) {
+              onReloadFailedRef.current();
             }
             break;
         }

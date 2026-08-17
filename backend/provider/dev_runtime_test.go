@@ -29,7 +29,7 @@ func TestDetectDevRuntime(t *testing.T) {
 			},
 			expectedBase: "node:20-alpine",
 			expectedInst: "npm install",
-			expectedStrt: "node --watch index.js",
+			expectedStrt: "npx nodemon index.js",
 		},
 		{
 			name: "Node.js Next.js with yarn",
@@ -76,9 +76,9 @@ func TestDetectDevRuntime(t *testing.T) {
 			setupFiles: map[string]string{
 				"go.mod": "module example.com/m\n\ngo 1.22\n",
 			},
-			expectedBase: "golang:1.22-alpine",
-			expectedInst: "go mod download && go install github.com/air-verse/air@latest",
-			expectedStrt: "if [ ! -f .air.toml ]; then air init; fi && air || go run .",
+			expectedBase: "golang:alpine",
+			expectedInst: "go mod download && go install github.com/air-verse/air@v1.52.3",
+			expectedStrt: "if [ ! -f .air.toml ]; then air init && sed -i 's/poll = false/poll = true/g' .air.toml; fi && air || go run .",
 		},
 
 		{

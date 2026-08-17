@@ -17,6 +17,7 @@ const schema = z.object({
 });
 
 type FormData = z.infer<typeof schema>;
+type Branch = { name: string };
 
 export default function UploadPage() {
   const router = useRouter();
@@ -54,8 +55,8 @@ export default function UploadPage() {
           setBranches([]);
           return;
         }
-        const data = await res.json();
-        const branchNames = data.map((b: any) => b.name);
+        const data: Branch[] = await res.json();
+        const branchNames = data.map((b) => b.name);
         setBranches(branchNames);
         
         // Auto-select main or master if available
@@ -86,8 +87,9 @@ export default function UploadPage() {
       const env = response;
       toast.success("Sandbox created! Building image...");
       router.push(`/environments/${env.id}`);
-    } catch (error: any) {
-      toast.error(error.message);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Failed to deploy project";
+      toast.error(message);
     } finally {
       setIsSubmitting(false);
     }

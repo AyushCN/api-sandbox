@@ -13,6 +13,24 @@ const fetcher = async (url: string) => {
   return fetchWithAuth(url);
 };
 
+type EnvironmentLog = {
+  message: string;
+  level: string;
+};
+
+type TerminalLike = {
+  writeln: (data: string) => void;
+  loadAddon: (addon: unknown) => void;
+  open: (parent: HTMLElement) => void;
+  dispose: () => void;
+  clear: () => void;
+  _logCount?: number;
+};
+
+type FitAddonLike = {
+  fit: () => void;
+};
+
 const statusColors: Record<string, string> = {
   IDLE: "text-gray-400 bg-gray-400/10 border-gray-400/20",
   BUILDING: "text-blue-400 bg-blue-400/10 border-blue-400/20 animate-pulse",
@@ -28,7 +46,7 @@ export default function EnvironmentDetail() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
   const terminalRef = useRef<HTMLDivElement>(null);
-  const xtermRef = useRef<any>(null);
+  const xtermRef = useRef<TerminalLike | null>(null);
   
   const { data: env, error } = useSWR(`/api/environments/${id}`, fetcher, {
     refreshInterval: (data) => (data?.status === 'BUILDING' ? 1000 : 5000),
@@ -38,8 +56,8 @@ export default function EnvironmentDetail() {
   useEffect(() => {
     if (!terminalRef.current || xtermRef.current) return;
 
-    let term: any;
-    let fitAddon: any;
+    let term: TerminalLike | undefined;
+    let fitAddon: FitAddonLike | undefined;
 
     const initTerminal = async () => {
       const { Terminal } = await import("xterm");
@@ -57,15 +75,15 @@ export default function EnvironmentDetail() {
         cursorBlink: true,
       });
 
-      fitAddon = new FitAddon();
+      fitAddon = new FitAddon() as FitAddonLike;
       term.loadAddon(fitAddon);
       term.open(terminalRef.current!);
       fitAddon.fit();
       xtermRef.current = term;
 
       if (env?.logs) {
-        env.logs.forEach((l: any) => {
-          let msg = l.message.replace(/\n$/, '');
+        env.logs.forEach((l: EnvironmentLog) => {
+          const msg = l.message.replace(/\n$/, '');
           term.writeln(`[${l.level.toUpperCase()}] ${msg}`);
         });
         term._logCount = env.logs.length;
@@ -94,8 +112,8 @@ export default function EnvironmentDetail() {
     
     if (env.logs.length > currentLength) {
       const newLogs = env.logs.slice(currentLength);
-      newLogs.forEach((l: any) => {
-        let msg = l.message.replace(/\n$/, '');
+      newLogs.forEach((l: EnvironmentLog) => {
+        const msg = l.message.replace(/\n$/, '');
         term.writeln(`[${l.level.toUpperCase()}] ${msg}`);
       });
       term._logCount = env.logs.length;
@@ -114,8 +132,9 @@ export default function EnvironmentDetail() {
       if (!res.ok) throw new Error("Failed to delete sandbox");
       toast.success("Sandbox deleted successfully");
       router.push("/dashboard");
-    } catch (e: any) {
-      toast.error(e.message);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Failed to delete sandbox";
+      toast.error(message);
       setIsDeleting(false);
     }
   };
@@ -136,8 +155,9 @@ export default function EnvironmentDetail() {
         xtermRef.current.clear();
         xtermRef.current._logCount = 0;
       }
-    } catch (e: any) {
-      toast.error(e.message);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Failed to restart sandbox";
+      toast.error(message);
     } finally {
       setIsRestarting(false);
     }

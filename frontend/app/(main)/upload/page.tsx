@@ -77,7 +77,7 @@ export default function UploadPage() {
           return;
         }
         const data = await res.json();
-        const branchNames = data.map((b: any) => b.name);
+        const branchNames = data.map((b: { name: string }) => b.name);
         setBranches(branchNames);
         
         // Auto-select main or master if available
@@ -159,7 +159,7 @@ export default function UploadPage() {
                 {...register("projectId")}
                 className="w-full bg-surface-container px-4 py-3 rounded-lg border border-outline-variant text-on-surface focus:border-primary-fixed focus:ring-1 focus:ring-primary-fixed transition-all appearance-none"
               >
-                {projects?.map((p: any) => (
+                {projects?.map((p: { id: string; name: string }) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
                 <option value="new">+ Create New Workspace Project</option>

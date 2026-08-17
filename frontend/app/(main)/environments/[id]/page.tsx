@@ -382,7 +382,7 @@ export default function EnvironmentDetail() {
   const { data: currentUser } = useSWR("/api/user/me", fetcher);
 
   const isEnvOwner = currentUser && env && currentUser.id === env.userId;
-  const myCollab = project?.collaborators?.find((c: any) => c.userId === currentUser?.id);
+  const myCollab = project?.collaborators?.find((c: { userId: string; role: string }) => c.userId === currentUser?.id);
   const isViewerRole = !isEnvOwner && myCollab && myCollab.role === 'VIEWER';
 
   const handleRemoveCollaborator = async (userId: string) => {
@@ -550,8 +550,8 @@ export default function EnvironmentDetail() {
   useEffect(() => {
     if (!terminalRef.current || xtermRef.current || activeTab !== "logs") return;
 
-    let term: any;
-    let fitAddon: any;
+    let term: { writeln: (data: string) => void; loadAddon: (addon: unknown) => void; open: (parent: HTMLElement) => void; dispose: () => void; clear: () => void; _logCount?: number; };
+    let fitAddon: { fit: () => void; };
 
     const initTerminal = async () => {
       const { Terminal } = await import("xterm");
@@ -577,7 +577,7 @@ export default function EnvironmentDetail() {
 
       if (env?.logs) {
         const sortedLogs = [...env.logs].reverse();
-        sortedLogs.forEach((l: any) => {
+        sortedLogs.forEach((l: { message: string; level: string }) => {
           const msg = l.message.replace(/\n$/, '');
           term.writeln(`[${l.level.toUpperCase()}] ${msg}`);
         });
@@ -602,13 +602,13 @@ export default function EnvironmentDetail() {
   useEffect(() => {
     if (!env?.logs || !xtermRef.current || activeTab !== "logs") return;
     
-    const term = xtermRef.current as any;
+    const term = xtermRef.current as { writeln: (data: string) => void; loadAddon: (addon: unknown) => void; open: (parent: HTMLElement) => void; dispose: () => void; clear: () => void; _logCount?: number; };
     const currentLength = term._logCount || 0;
     
     if (env.logs.length > currentLength) {
       const sortedLogs = [...env.logs].reverse();
       const newLogs = sortedLogs.slice(currentLength);
-      newLogs.forEach((l: any) => {
+      newLogs.forEach((l: { message: string; level: string }) => {
         const msg = l.message.replace(/\n$/, '');
         term.writeln(`[${l.level.toUpperCase()}] ${msg}`);
       });
@@ -654,8 +654,8 @@ export default function EnvironmentDetail() {
       toast.success("Sandbox restart initiated");
       mutate(`/api/environments/${id}`);
       if (xtermRef.current) {
-        (xtermRef.current as any).clear();
-        (xtermRef.current as any)._logCount = 0;
+        (xtermRef.current as { clear: () => void }).clear();
+        (xtermRef.current as { _logCount?: number })._logCount = 0;
       }
     } catch (e: unknown) {
       toast.error((e as Error).message);
@@ -916,9 +916,9 @@ export default function EnvironmentDetail() {
               <div className="flex justify-center items-center h-full text-white/50 animate-pulse">Loading collaborators...</div>
             ) : (
               <div className="max-w-3xl mx-auto space-y-4">
-                {project.collaborators?.map((collab: any) => {
+                {project.collaborators?.map((collab: { userId: string; role: string }) => {
                   const isMe = currentUser && currentUser.id === collab.userId;
-                  const myCollab = project.collaborators.find((c: any) => c.userId === currentUser?.id);
+                  const myCollab = project.collaborators.find((c: { userId: string; role: string }) => c.userId === currentUser?.id);
                   const iAmAdminOrOwner = myCollab && (myCollab.role === 'ADMIN' || myCollab.role === 'OWNER');
                   const canRemove = isMe || (iAmAdminOrOwner && collab.role !== 'OWNER');
 
@@ -1135,7 +1135,7 @@ export default function EnvironmentDetail() {
                 {/* Dropdown for search results */}
                 {showUserDropdown && userSearchResults.length > 0 && (
                   <div className="absolute z-10 w-full mt-1 bg-surface-container-lowest border border-outline-variant rounded-lg shadow-xl max-h-48 overflow-y-auto">
-                    {userSearchResults.map((user: any) => (
+                    {userSearchResults.map((user: { id: string; username: string; email: string }) => (
                       <button
                         key={user.id}
                         type="button"
@@ -1223,7 +1223,7 @@ export default function EnvironmentDetail() {
                     className="w-full bg-surface-container px-4 py-3 rounded-lg border border-outline-variant text-on-surface focus:border-primary-fixed focus:ring-1 focus:ring-primary-fixed transition-all"
                   >
                     <option value="" disabled>-- Select a Project --</option>
-                    {projects?.filter((p: any) => p.id !== env?.projectId).map((p: any) => (
+                    {projects?.filter((p: { id: string }) => p.id !== env?.projectId).map((p: { id: string; name: string }) => (
                       <option key={p.id} value={p.id}>{p.name}</option>
                     ))}
                   </select>

@@ -40,7 +40,7 @@ import TeamCollaborationDashboard from "@/components/TeamCollaborationDashboard"
 import EnvironmentSettings from "@/components/EnvironmentSettings";
 import { useEnvironmentChanges } from "@/hooks/useEnvironmentChanges";
 import ActiveEditors from "@/components/ActiveEditors";
-import { CommitModal, BranchPicker, GitStatusPanel } from "@/components/GitUI";
+import { CommitModal, BranchPicker, GitStatusPanel, CommitHistoryPanel } from "@/components/GitUI";
 
 const fetcher = async (url: string) => {
   return fetchWithAuth(url);
@@ -356,6 +356,7 @@ export default function EnvironmentDetail() {
     }
   }, [activeTab]);
 
+
   const handleTransfer = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!transferProjectId) return;
@@ -438,6 +439,13 @@ export default function EnvironmentDetail() {
   const { data: env, error } = useSWR(`/api/environments/${id}`, fetcher, {
     refreshInterval: (data) => (data?.status === "BUILDING" ? 1000 : 5000),
   });
+
+  // Auto-switch to logs tab when environment is BUILDING or FAILED
+  useEffect(() => {
+    if (env?.status === "BUILDING" || env?.status === "FAILED") {
+      setActiveTab("logs");
+    }
+  }, [env?.status]);
 
   const { data: files } = useSWR(
     activeTab === "workspace" ? `/api/environments/${id}/files` : null,
@@ -880,9 +888,17 @@ export default function EnvironmentDetail() {
                 {env.status}
               </div>
               {env.status === "FAILED" && (
-                <span className="text-xs text-red-400 font-semibold flex items-center gap-1">
-                  <AlertCircle className="w-3.5 h-3.5" /> Check Build Logs
-                </span>
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-xs font-semibold">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  Build failed — check logs below
+                  <button
+                    onClick={handleRestart}
+                    disabled={isRestarting || isViewerRole}
+                    className="ml-2 px-2 py-0.5 rounded bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 transition-colors disabled:opacity-50"
+                  >
+                    {isRestarting ? <Loader2 className="w-3 h-3 animate-spin" /> : "Retry"}
+                  </button>
+                </div>
               )}
               {env.publicUrl && env.status === "RUNNING" && (
                 <a
@@ -1043,6 +1059,42 @@ export default function EnvironmentDetail() {
                   Build Logs
                 </h3>
               </div>
+
+              {/* Step indicator strip — only shown during BUILDING */}
+              {env?.status === "BUILDING" && (() => {
+                const lastLog = (env.logs && env.logs.length > 0)
+                  ? (env.logs[env.logs.length - 1]?.message || "").toLowerCase()
+                  : "";
+                const step = lastLog.includes("starting") ? 3
+                  : lastLog.includes("install") ? 2
+                  : lastLog.includes("clon") ? 1
+                  : 0;
+                const steps = ["Cloning", "Installing", "Starting", "Live"];
+                return (
+                  <div className="flex items-center gap-0 px-4 py-2 border-b border-white/5 bg-[#0d1020]">
+                    {steps.map((s, i) => (
+                      <div key={s} className="flex items-center">
+                        <div className={`flex items-center gap-1.5 text-xs font-medium ${
+                          i < step ? "text-emerald-400" : i === step ? "text-blue-400 animate-pulse" : "text-white/20"
+                        }`}>
+                          {i < step ? (
+                            <Check className="w-3 h-3" />
+                          ) : i === step ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <span className="w-3 h-3 rounded-full border border-white/20 inline-block" />
+                          )}
+                          {s}
+                        </div>
+                        {i < steps.length - 1 && (
+                          <span className="mx-2 text-white/15 text-xs">→</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+
               <div
                 ref={terminalRef}
                 className="flex-1 w-full bg-[#0a0e17] overflow-hidden p-2"
@@ -1236,8 +1288,9 @@ export default function EnvironmentDetail() {
               </div>
 
               {/* Git Status Panel */}
-              <div className="border-t border-outline-variant p-2 shrink-0 bg-surface-container/20">
+              <div className="border-t border-outline-variant p-2 shrink-0 bg-surface-container/20 flex flex-col gap-2">
                 <GitStatusPanel envId={id} />
+                <CommitHistoryPanel envId={id} />
               </div>
             </div>
 

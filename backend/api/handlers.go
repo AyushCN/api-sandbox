@@ -96,6 +96,7 @@ func SetupRoutes(router *gin.Engine) {
 			protected.POST("/:id/git/branch", GitBranch)
 			protected.POST("/:id/git/checkout", GitCheckout)
 			protected.POST("/:id/git/pull", GitPull)
+			protected.GET("/:id/git/log", GitLog)
 		}
 
 		wsGroup := api.Group("/ws/environments")

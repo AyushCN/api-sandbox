@@ -38,9 +38,17 @@ fi
 echo "🔨 Building containers..."
 docker compose up -d --build
 
-# Wait for backend health
+# Wait for backend health (via Traefik)
 echo "⏳ Waiting for backend to be healthy..."
-timeout 60 bash -c 'until curl -s http://localhost:8080/api/health; do sleep 2; done' || { echo "❌ Backend failed to start"; exit 1; }
+timeout 60 bash -c 'until curl -sf http://localhost/api/health; do sleep 2; done' || { echo "❌ Backend failed to start"; exit 1; }
+
+# Pre-pull sandbox base images to reduce cold-start latency
+echo "🐳 Pre-pulling sandbox base images (this improves first-run speed)..."
+docker pull node:20-alpine &
+docker pull python:3.11-slim &
+docker pull golang:alpine &
+wait
+echo "✅ Base images pre-pulled."
 
 echo "✅ API Sandbox is ready!"
 echo "📍 Open http://localhost in your browser"

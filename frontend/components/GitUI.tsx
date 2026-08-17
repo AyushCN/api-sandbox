@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import useSWR from "swr";
-import { GitBranch, Loader2, Save, X, Plus, Check, DownloadCloud, UploadCloud, RefreshCw } from "lucide-react";
+import { GitBranch, Loader2, Save, X, Plus, Check, DownloadCloud, UploadCloud, RefreshCw, GitCommit, Clock, User } from "lucide-react";
 import toast from "react-hot-toast";
 import { fetchWithAuth } from "@/lib/auth";
 
@@ -142,7 +142,6 @@ export function BranchPicker({
   const handleCheckout = async (branch: string) => {
     setIsCheckingOut(true);
     try {
-      // Prompt for stash/discard if we have uncommitted changes (this could be improved to a real dialog, but prompt is okay for this edge case constraint)
       const res = await fetch(`/api/environments/${envId}/git/checkout`, {
         method: "POST",
         headers: {
@@ -302,7 +301,7 @@ export function GitStatusPanel({ envId }: { envId: string }) {
   if (!status) return <div className="flex items-center justify-center p-8"><Loader2 className="w-5 h-5 animate-spin text-white/30" /></div>;
 
   return (
-    <div className="bg-[#1a1c23] border border-outline-variant rounded-xl p-4 flex flex-col gap-4">
+    <div className="bg-[#1a1c23] border border-outline-variant rounded-xl p-4 flex flex-col gap-3">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-bold text-white flex items-center gap-2">
           <GitBranch className="w-4 h-4 text-primary-fixed" />
@@ -314,11 +313,9 @@ export function GitStatusPanel({ envId }: { envId: string }) {
       </div>
       
       <div className="flex items-center justify-between bg-white/5 border border-white/10 rounded-lg p-3">
-        <div className="flex items-center gap-3">
-          <div className="flex flex-col">
-            <span className="text-xs text-white/50">Current Branch</span>
-            <span className="text-sm font-mono text-white">{status.branch.replace("remotes/origin/", "")}</span>
-          </div>
+        <div className="flex flex-col">
+          <span className="text-xs text-white/50">Current Branch</span>
+          <span className="text-sm font-mono text-white">{status.branch.replace("remotes/origin/", "")}</span>
         </div>
         <div className="flex items-center gap-4 text-sm font-mono">
           <div className="flex items-center gap-1.5 text-emerald-400" title="Commits ahead of remote">
@@ -332,20 +329,91 @@ export function GitStatusPanel({ envId }: { envId: string }) {
         </div>
       </div>
 
-      {status.behind > 0 && (
-        <button
-          onClick={handlePull}
-          disabled={isPulling || status.dirty}
-          className="w-full py-2 rounded-lg text-sm font-semibold bg-sky-500/10 text-sky-400 border border-sky-500/30 hover:bg-sky-500/20 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-        >
-          {isPulling ? <Loader2 className="w-4 h-4 animate-spin" /> : <DownloadCloud className="w-4 h-4" />}
-          Pull {status.behind} {status.behind === 1 ? 'commit' : 'commits'}
-        </button>
-      )}
+      {/* Pull button — always visible, disabled when not behind or when dirty */}
+      <button
+        onClick={handlePull}
+        disabled={isPulling || status.behind === 0 || status.dirty}
+        className="w-full py-2 rounded-lg text-sm font-semibold bg-sky-500/10 text-sky-400 border border-sky-500/30 hover:bg-sky-500/20 transition-colors disabled:opacity-40 flex items-center justify-center gap-2"
+        title={status.dirty ? "Commit your changes before pulling" : status.behind === 0 ? "Already up to date" : `Pull ${status.behind} commit(s)`}
+      >
+        {isPulling ? <Loader2 className="w-4 h-4 animate-spin" /> : <DownloadCloud className="w-4 h-4" />}
+        {isPulling ? "Pulling..." : status.behind > 0 ? `Pull ${status.behind} commit${status.behind === 1 ? "" : "s"}` : "Up to date"}
+      </button>
 
       {status.dirty && status.behind > 0 && (
         <div className="text-xs text-amber-500 bg-amber-500/10 border border-amber-500/20 p-2 rounded">
-          Please commit or stash your changes before pulling.
+          Commit or stash your changes before pulling.
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface CommitEntry {
+  hash: string;
+  shortHash: string;
+  message: string;
+  author: string;
+  date: string;
+}
+
+function relativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+export function CommitHistoryPanel({ envId }: { envId: string }) {
+  const { data, error, isLoading, mutate } = useSWR<{ commits: CommitEntry[] }>(
+    `/api/environments/${envId}/git/log`,
+    fetchWithAuth,
+    { refreshInterval: 15000 }
+  );
+
+  return (
+    <div className="bg-[#1a1c23] border border-outline-variant rounded-xl p-4 flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-bold text-white flex items-center gap-2">
+          <GitCommit className="w-4 h-4 text-primary-fixed" />
+          Commit History
+        </h3>
+        <button onClick={() => mutate()} className="text-white/40 hover:text-white transition-colors" title="Refresh">
+          <RefreshCw className="w-3.5 h-3.5" />
+        </button>
+      </div>
+
+      {isLoading && (
+        <div className="flex justify-center p-4">
+          <Loader2 className="w-4 h-4 animate-spin text-white/30" />
+        </div>
+      )}
+
+      {error && (
+        <div className="text-xs text-red-400 p-2">Failed to load commit history.</div>
+      )}
+
+      {!isLoading && !error && (!data?.commits || data.commits.length === 0) && (
+        <div className="text-xs text-white/30 p-2 text-center">No commits yet.</div>
+      )}
+
+      {data?.commits && data.commits.length > 0 && (
+        <div className="flex flex-col divide-y divide-white/5 max-h-64 overflow-y-auto">
+          {data.commits.map((c) => (
+            <div key={c.hash} className="py-2.5 flex flex-col gap-0.5">
+              <div className="flex items-start justify-between gap-2">
+                <span className="text-xs text-white leading-snug line-clamp-2 flex-1">{c.message}</span>
+                <span className="font-mono text-xs text-white/30 shrink-0 pt-0.5">{c.shortHash}</span>
+              </div>
+              <div className="flex items-center gap-3 text-xs text-white/40">
+                <span className="flex items-center gap-1"><User className="w-3 h-3" />{c.author}</span>
+                <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{relativeTime(c.date)}</span>
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>

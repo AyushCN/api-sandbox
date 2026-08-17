@@ -394,6 +394,61 @@ func GitPull(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Successfully pulled", "output": string(out)})
 }
 
+// GitLog returns the last 20 commits for an environment.
+func GitLog(c *gin.Context) {
+	id := c.Param("id")
+	_, err := checkWorkspaceAccess(c, id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+
+	wd, _ := os.Getwd()
+	workspaceDir := filepath.Join(wd, "workspaces", id)
+
+	if _, err := os.Stat(workspaceDir); os.IsNotExist(err) {
+		c.JSON(http.StatusOK, gin.H{"commits": []interface{}{}})
+		return
+	}
+
+	cmd := exec.Command("git", "log", "-n", "20", "--format=%H|%h|%s|%an|%aI")
+	cmd.Dir = workspaceDir
+	out, err := cmd.Output()
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"commits": []interface{}{}})
+		return
+	}
+
+	type Commit struct {
+		Hash      string `json:"hash"`
+		ShortHash string `json:"shortHash"`
+		Message   string `json:"message"`
+		Author    string `json:"author"`
+		Date      string `json:"date"`
+	}
+
+	var commits []Commit
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "|", 5)
+		if len(parts) < 5 {
+			continue
+		}
+		commits = append(commits, Commit{
+			Hash:      parts[0],
+			ShortHash: parts[1],
+			Message:   parts[2],
+			Author:    parts[3],
+			Date:      parts[4],
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{"commits": commits})
+}
+
+
 type GitActivity struct {
 	Timestamp     time.Time `json:"timestamp"`
 	TimestampStr  string    `json:"timestampStr"`

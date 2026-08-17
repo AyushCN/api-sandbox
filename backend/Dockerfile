@@ -19,8 +19,8 @@ RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o api-sandbox-backe
 # Stage 2: Create a minimal runner image
 FROM alpine:3.19
 
-# Install required runtime dependencies (Docker client needs to be available if executing raw docker commands, though we use the Go SDK. However, Nixpacks and git are required for buildpack auto-detection and clone)
-RUN apk add --no-cache ca-certificates git docker-cli curl bash
+# Install required runtime dependencies (Nixpacks and git are required for buildpack auto-detection and clone)
+RUN apk add --no-cache ca-certificates git curl bash
 
 # Create an app directory and set it as the working directory
 WORKDIR /app
@@ -34,6 +34,10 @@ COPY --from=builder /app/api-sandbox-backend /usr/local/bin/
 
 # Create workspaces directory
 RUN mkdir -p /app/workspaces
+
+# Add health check
+HEALTHCHECK --interval=10s --timeout=5s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
 
 EXPOSE 8080
 

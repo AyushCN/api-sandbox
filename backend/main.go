@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"log/slog"
 	"net/http"
 	"os"
@@ -62,16 +63,26 @@ func main() {
 		slog.Error("CRITICAL: TOKEN_ENCRYPTION_KEY is missing. Refusing to boot.")
 		os.Exit(1)
 	}
+
+	keyBytes, err := hex.DecodeString(encryptionKey)
+	if err != nil {
+		slog.Error("CRITICAL: TOKEN_ENCRYPTION_KEY must be valid hex", "error", err)
+		os.Exit(1)
+	}
+
+	if len(keyBytes) != 16 && len(keyBytes) != 24 && len(keyBytes) != 32 {
+		slog.Error("CRITICAL: TOKEN_ENCRYPTION_KEY must be 16, 24, or 32 bytes", 
+			"got_bytes", len(keyBytes), 
+			"got_hex_chars", len(encryptionKey))
+		os.Exit(1)
+	}
+
 	if os.Getenv("JWT_SECRET") == "" {
 		slog.Error("CRITICAL: JWT_SECRET is missing. Refusing to boot.")
 		os.Exit(1)
 	}
 	if os.Getenv("GITHUB_CLIENT_ID") == "" || os.Getenv("GITHUB_CLIENT_SECRET") == "" {
 		slog.Error("CRITICAL: GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET are required for OAuth.")
-		os.Exit(1)
-	}
-	if len(encryptionKey) != 16 && len(encryptionKey) != 24 && len(encryptionKey) != 32 {
-		slog.Error("CRITICAL: TOKEN_ENCRYPTION_KEY must be exactly 16, 24, or 32 bytes.")
 		os.Exit(1)
 	}
 

@@ -45,7 +45,7 @@ tmp/
 coverage/
 .temp/
 backups/
-workspaces/
+/workspaces/
 
 # AI and Agent Specific
 .agents/

@@ -69,3 +69,9 @@ Navigate to `http://localhost` to begin provisioning environments.
 - [Technical Details & APIs](docs/DETAILS.md)
 - [Performance Evaluation](docs/EVALUATION.md)
 - [Monitoring & Observability](docs/MONITORING.md)
+
+## License
+
+MIT License — Copyright (c) 2026 API Sandbox.
+
+See [LICENSE](LICENSE) for full terms.

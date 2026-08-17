@@ -1,68 +1,49 @@
-# Monitoring & Operations
+# Monitoring & Observability
 
-This document covers baseline operations, monitoring, and database management for a self-hosted Sandbox VM.
+Because the API Sandbox orchestrates dynamic containers on a single host, standard monitoring tools are essential for tracing errors and identifying misbehaving user sandboxes.
 
-## 1. System Monitoring
+## Accessing Logs
 
-The Sandbox platform relies on Docker Compose. You can monitor the health of the system via standard Docker metrics and API health checks.
-
-### API Health Polling
-Configure your monitoring system (Prometheus, UptimeRobot, Datadog) to poll the health endpoint:
+### 1. Go Backend (Orchestrator)
+The backend manages the database, the Docker socket, and the WebSocket hub. It uses structured `slog` JSON logging.
 ```bash
-curl https://<YOUR_DOMAIN>/api/health
+docker logs -f api-sandbox-backend
 ```
-**Expected Response:** `200 OK` `{"status":"ok","db":"ok","redis":"ok"}`
+Look out for `"level":"WARN"` entries related to `"touch-on-save failed"`, which indicate a sandbox container has crashed or `Air` / `nodemon` has died.
 
-### Host Resource Constraints
-The platform spins up ephemeral containers. Keep an eye on Host Memory and Swap.
-- **View Container Stats:** `docker stats`
-- **View Host Disk Space:** `df -h`
-- **View Inodes Usage:** `df -i` (heavy Node.js environments create many tiny files, which can exhaust inodes before disk space).
-
-## 2. Garbage Collection
-
-The system features two layers of automated garbage collection:
-1. **Idle GC:** Environments are automatically stopped, their DB sidecars destroyed, and host disk workspaces wiped after `IDLE_TIMEOUT_HOURS` (default: 6 hours) of inactivity.
-2. **Orphan Reaper:** An hourly cron job strictly scans the host Docker daemon for `api-sandbox-env-*` or `api-sandbox-db-*` containers that crashed, failed to delete cleanly, or no longer match an active database row, and forcefully removes them to prevent silent host exhaustion.
-
-## 3. Backups
-
-The platform includes automated scripts to backup the control-plane PostgreSQL database.
-
-> [!WARNING]
-> **Scope of Backups:** The database backup *only* captures metadata (users, sandbox URLs, settings). It **does not** backup the live `workspaces/` files on disk. Users are expected to sync and push their workspace changes to GitHub.
-
-### Manual Backup
-Run the backup script on the host VM:
+### 2. Traefik Proxy (Routing)
+Traefik handles all ingress for both the API and the user sandboxes.
 ```bash
-./scripts/backup.sh
+docker logs -f api-sandbox-traefik
 ```
-This drops a `.sql.gz` dump into `./backups/` and automatically prunes backups older than 7 days.
+You can view the live Traefik dashboard by exposing port 8080 (if enabled in `docker-compose.yml`) to visualize the dynamic routers being created and destroyed as sandboxes spin up and down.
 
-### Restoring a Backup
-> [!CAUTION]
-> **Downtime Required:** Restoring drops the database connections. You MUST stop the backend application before restoring, otherwise active connections will block the restore.
-
-1. Stop the application services:
-   ```bash
-   docker compose stop backend
-   ```
-2. Run the restore script:
-   ```bash
-   ./scripts/restore.sh ./backups/db_backup_20260816_120000.sql.gz
-   ```
-3. Restart the application:
-   ```bash
-   docker compose start backend
-   ```
-
-## 4. Troubleshooting Orphan Containers
-If you suspect the automated Reaper is missing a stalled container, you can manually prune the host:
+### 3. Ephemeral Sandboxes (User Environments)
+User sandboxes are prefixed with `api-sandbox-env-`.
 ```bash
-# Stop and remove ALL sandboxes (Warning: disruptive to active users)
-docker rm -f $(docker ps -a -q --filter name=api-sandbox-env-)
-docker rm -f $(docker ps -a -q --filter name=api-sandbox-db-)
-
-# Wipe all workspaces
-sudo rm -rf /var/lib/api-sandbox/workspaces/*
+docker ps | grep api-sandbox-env-
+docker logs -f <container_id>
 ```
+
+## System Telemetry & Metrics
+
+### The `measure_loop` Tool
+You can run the built-in benchmark locally at any time to verify the latency of your host machine's I/O and process watchers.
+```bash
+export JWT_SECRET=$(grep JWT_SECRET .env | cut -d= -f2)
+cd backend
+go run scripts/measure_loop/main.go
+```
+
+### PostgreSQL Status Sync
+The orchestrator maintains a tight loop syncing Docker socket states with the `environments` table in PostgreSQL. If an environment is listed as `RUNNING` in the database but `docker ps` shows it is absent, the backend Orphan Reaper will attempt to reconcile the state. 
+
+You can manually inspect the state by checking the DB:
+```sql
+SELECT id, status, port FROM environments;
+```
+
+## Known Bottlenecks
+1. **Inotify Limits**: The platform uses bind mounts heavily. If you provision hundreds of node environments, the host may exhaust its inotify watchers. 
+   - *Fix:* `sysctl fs.inotify.max_user_watches=524288`
+2. **Socket Exhaustion**: If the HTTP Readiness polling loop is misconfigured to leak response bodies, the Go backend will exhaust host TCP ports. Ensure `resp.Body.Close()` is aggressively utilized.

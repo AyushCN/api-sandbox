@@ -23,6 +23,8 @@
 # misc
 .DS_Store
 *.pem
+*.tsbuildinfo
+next-env.d.ts
 
 # debug
 npm-debug.log*
@@ -30,13 +32,16 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files
 .env*
 
 # vercel
 .vercel
 
-# typescript
-*.tsbuildinfo
-next-env.d.ts
-
+# editor / ai
+.vscode/
+.idea/
+.agents/
+.claude/
+.gemini/
+.windsurf/

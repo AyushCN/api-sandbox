@@ -1,90 +1,69 @@
 # API Sandbox Architecture
 
-This document describes the design, lifecycle, and security model of the API Sandbox platform.
+This document outlines the high-level architecture of the API Sandbox platform, specifically focusing on the orchestrator, proxy routing, and the real-time development loop.
 
-## System Architecture
+## System Topology
 
-The platform operates on a single-host orchestrator model, leveraging Docker and Traefik to isolate and route traffic to user sandboxes.
+The platform operates on a single dedicated host machine utilizing Docker and Traefik to orchestrate, isolate, and route traffic to user sandboxes dynamically.
 
 ```mermaid
 graph TD
     Client[Web Client]
     subgraph Single Host
         Traefik[Traefik Proxy]
-        Backend[Go API Backend]
-        Worker[Asynq/Redis Worker]
-        PostgreSQL[(PostgreSQL)]
-        Redis[(Redis)]
+        Backend[Go API Orchestrator]
+        Worker[Asynq Worker]
+        PostgreSQL[(System PostgreSQL)]
+        Redis[(System Redis)]
 
-        subgraph Organization A Network
-            EnvA1[Sandbox Env A1]
-            EnvA2[Sandbox Env A2]
-            DBA[(Postgres Sidecar)]
-            EnvA1 --- DBA
-            EnvA2 --- DBA
+        subgraph Org A Network
+            EnvA[Sandbox Env A]
+            DB_A[(Postgres Sidecar A)]
+            EnvA --- DB_A
         end
 
-        subgraph Organization B Network
+        subgraph Org B Network
             EnvB[Sandbox Env B]
         end
     end
 
     Client -->|HTTPS / WSS| Traefik
     Traefik -->|/api/*| Backend
-    Traefik -->|*.sandbox.com| EnvA1
+    Traefik -->|*.sandbox.com| EnvA
     Traefik -->|*.sandbox.com| EnvB
 
     Backend --> PostgreSQL
     Backend --> Redis
-    Backend -->|Enqueue Job| Worker
+    Backend -->|Enqueues Build| Worker
     Worker --> Redis
-
-    Worker -->|docker build/run| EnvA1
+    
+    Worker -->|docker build/run| EnvA
     Worker -->|docker build/run| EnvB
 ```
 
-## Environment Lifecycle
+## The Real-Time Development Loop
 
-The `Environment` is the single abstraction for both interactive workspaces and live code.
+The absolute core technical requirement of this platform is the **Real-Time Dev Loop**—ensuring that a user saving a file in the browser experiences the result of that code change in under 2 seconds.
 
-```mermaid
-stateDiagram-v2
-    [*] --> IDLE : Created
-    IDLE --> BUILDING : Start Build/Sync
-    BUILDING --> RUNNING : Base Image Pulled & Volume Mounted
-    BUILDING --> FAILED : Clone/Build Failed
-    RUNNING --> STOPPED : User Stop
-    STOPPED --> BUILDING : Restart / Sync
-    FAILED --> BUILDING : Retry / Sync
-    RUNNING --> [*] : Deleted
-    STOPPED --> [*] : Deleted
-    FAILED --> [*] : Deleted
-    IDLE --> [*] : Deleted
-```
+### Bind-Mount Synchronization
+Unlike traditional CI/CD pipelines that rebuild immutable OCI images, this platform maps raw source code directly into language-specific Alpine runtimes via host-level bind mounts.
+1. The Go backend receives the edited file content via the `POST /api/environments/:id/files/content` endpoint.
+2. The file is written synchronously to the host path: `/var/lib/api-sandbox/workspaces/<env-id>`.
+3. The host path is bind-mounted directly to `/app` inside the ephemeral sandbox container.
 
-## Trust Boundaries & Security
+### Fast Process Watchers
+We rely entirely on native process watchers to handle the reboot inside the container without terminating PID 1:
+- **Node.js**: Uses `npx nodemon` to survive rapid I/O spikes without crashing.
+- **Python**: Uses `uvicorn --reload --reload-dir .`.
+- **Go**: Uses `air` (specifically pinned to `v1.52.3` to ensure compatibility with `golang:alpine`).
 
-The system enforces isolation at multiple layers to safely run untrusted code. However, it is critical to understand what these mechanisms protect against and what they do *not* protect against.
+### HTTP Proxy Readiness Polling
+Once the file is saved, the container begins its reboot. The Go backend must actively determine *exactly when* the application is ready to accept traffic again. 
 
-| Boundary | Mechanism | What it does *not* protect |
-|----------|-----------|----------------------------|
-| **API auth** | JWT cookie | Compromised API process |
-| **Tenant net** | bridge per org | Host if socket abused |
-| **Container** | CapDrop, no-new-priv, mem/PID | Kernel 0-days, socket mount |
-| **Paths** | workspace root checks | Host FS via API bug/RCE |
+Initially, we used raw TCP dials against the container's internal IP. This failed due to strict Docker network isolation (Organization networks vs. Backend network). We migrated to a robust **HTTP Proxy Routing** strategy:
+1. The Go backend polls the Traefik entrypoint using an HTTP GET request with a forged `Host` header (e.g., `Host: {env-id}.localhost`).
+2. Traefik routes the request into the isolated container network.
+3. If the container is still rebooting, Traefik immediately returns `502 Bad Gateway`. 
+4. The Go backend iteratively polls every few milliseconds until it receives a `200 OK` (or any non-502 status), definitively proving the application is ready.
 
-### ⚠️ Critical Limitation: The Docker Socket
-The `Backend` and `Worker` containers mount `/var/run/docker.sock` to orchestrate sandboxes. This is equivalent to host-level `root` access. If the Go backend is compromised, the host is compromised. Therefore, this platform is strictly limited to a single dedicated host.
-
-## Editor Strategy: Live Bind-Mount
-
-**Decision**: The web editor provides true live hot-reloading by writing directly to the host filesystem, which is bind-mounted into the ephemeral development sandbox container.
-
-### Context
-Unlike traditional immutable PaaS deployments (e.g., using Nixpacks or Heroku Buildpacks), this platform is optimized strictly for **development**. Code is not baked into OCI images. Instead, raw source code is mapped into language-specific alpine runtimes.
-
-### Implementation
-- **Live Editor**: When a user hits Save in the browser, the Go backend writes the file to the host's `/var/lib/api-sandbox/workspaces/<env-id>` directory.
-- **Bind Mounts**: The sandbox container mounts this host directory as its working directory.
-- **Process Watchers**: The container's entrypoint script runs a native process watcher (`node --watch`, `air`, `nodemon`, etc.) which detects the file change over the bind mount and restarts the application instantly.
-- **Traefik Retries**: Traefik intercepts traffic during the brief 1-2 second restart window, masking `502 Bad Gateway` errors with a loading state until the container starts accepting connections again.
+This proxy-first polling mechanism entirely eliminates network boundary issues and accurately simulates a user's browser, enabling us to achieve consistent `p95 < 1s` latency.

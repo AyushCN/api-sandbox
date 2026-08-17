@@ -1,4 +1,4 @@
-# Environment variables
+# Environment Variables
 .env
 .env.local
 .env.development
@@ -6,29 +6,36 @@
 .env.production
 *.env
 
-# Go build artifacts
+# Go Build Artifacts
 backend/server
 backend/main
 backend/backend
 server
 main
 
-# Test/Temp files
+# Test / Temp Files
 *.txt
 *.pid
 *.log
 test_*
 test-*/
+tmp/
+coverage/
+.temp/
+backups/
 
-# Node modules
+# Frontend / Node Specific
 node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-
-# Next.js build output
+.pnpm-debug.log*
 .next/
 out/
+build/
+.eslintcache
+*.tsbuildinfo
+next-env.d.ts
 
 # IDEs and Editors
 .vscode/
@@ -40,30 +47,20 @@ out/
 *.sw?
 .DS_Store
 
-# Temporary files
-tmp/
-coverage/
-.temp/
-backups/
-/workspaces/
-
 # AI and Agent Specific
 .agents/
 .claude/
 .windsurf/
 .gemini/
 skills-lock.json
-AGENTS.md
-CLAUDE.md
 
-# Dynamic workspaces
+# API Sandbox Workspaces & Infrastructure
 backend/workspaces/
-
-# Custom Scripts Binaries
+backend/sandbox-start.sh
 backend/scripts/**/main
-test.db
+/workspaces/
 
-# Database and Secrets
+# Database, Data, and Secrets
 *.db
 *.sqlite
 *.sqlite3
@@ -71,20 +68,11 @@ postgres-data/
 redis-data/
 dump.rdb
 acme.json
+*.pem
 
-# Docker overrides
+# Docker Overrides
 docker-compose.override.yml
-
-# Frontend specifics
-frontend/.env
-frontend/.env.local
-frontend/.env.*
-.eslintcache
 
 # Archives
 *.tar.gz
 *.zip
-
-# Backend Sandbox Workspaces
-backend/workspaces/
-backend/sandbox-start.sh

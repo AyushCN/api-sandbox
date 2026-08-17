@@ -18,7 +18,7 @@ const schema = z
       .string()
       .url("Must be a valid URL")
       .regex(/^https:\/\/github\.com/, "Must be a GitHub repository"),
-    githubBranch: z.string().min(1, "Branch is required").default("main"),
+    githubBranch: z.string().min(1, "Branch is required"),
     projectId: z.string().min(1, "Project is required"),
     newProjectName: z.string().optional(),
   })

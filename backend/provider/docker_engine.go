@@ -339,7 +339,7 @@ func WaitForContainerPort(ctx context.Context, containerID string, port int) err
 		return fmt.Errorf("no IP address found for container %s", containerID)
 	}
 
-	target := fmt.Sprintf("%s:%d", ipAddress, port)
+	target := net.JoinHostPort(ipAddress, strconv.Itoa(port))
 	timeout := time.After(30 * time.Second)
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()

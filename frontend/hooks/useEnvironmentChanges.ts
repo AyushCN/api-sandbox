@@ -22,6 +22,11 @@ export function useEnvironmentChanges(envId: string | undefined, options?: UseEn
   const [hasUncommittedChanges, setHasUncommittedChanges] = useState<boolean>(false);
   const [recentChanges, setRecentChanges] = useState<EnvironmentChangeMessage[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
+  const onReloadReadyRef = useRef(options?.onReloadReady);
+
+  useEffect(() => {
+    onReloadReadyRef.current = options?.onReloadReady;
+  }, [options?.onReloadReady]);
 
   useEffect(() => {
     if (!envId) return;
@@ -65,8 +70,8 @@ export function useEnvironmentChanges(envId: string | undefined, options?: UseEn
             break;
             
           case 'reload_ready':
-            if (options?.onReloadReady) {
-              options.onReloadReady();
+            if (onReloadReadyRef.current) {
+              onReloadReadyRef.current();
             }
             break;
         }

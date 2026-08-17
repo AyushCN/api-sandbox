@@ -52,18 +52,6 @@ func DetectDevRuntime(repoPath string, subDir string) (DevRuntimeConfig, error) 
 		config, err = detectPythonRuntime(appDir, subDir)
 	} else if _, errStat := os.Stat(filepath.Join(appDir, "go.mod")); errStat == nil {
 		config, err = detectGoRuntime(appDir, subDir)
-	} else if _, errStat := os.Stat(filepath.Join(appDir, "Gemfile")); errStat == nil {
-		config, err = detectRubyRuntime(appDir, subDir)
-	} else if _, errStat := os.Stat(filepath.Join(appDir, "composer.json")); errStat == nil {
-		config, err = detectPHPRuntime(appDir, subDir)
-	} else if _, errStat := os.Stat(filepath.Join(appDir, "Cargo.toml")); errStat == nil {
-		config, err = detectRustRuntime(appDir, subDir)
-	} else if len(globFiles(appDir, "*.csproj")) > 0 || len(globFiles(appDir, "*.sln")) > 0 {
-		config, err = detectDotnetRuntime(appDir, subDir)
-	} else if fileExists(filepath.Join(appDir, "pom.xml")) || fileExists(filepath.Join(appDir, "build.gradle")) || len(globFiles(appDir, "*.java")) > 0 {
-		config, err = detectJavaRuntime(appDir, subDir)
-	} else if fileExists(filepath.Join(appDir, "CMakeLists.txt")) || fileExists(filepath.Join(appDir, "Makefile")) || len(globFiles(appDir, "*.c")) > 0 || len(globFiles(appDir, "*.cpp")) > 0 {
-		config, err = detectCppRuntime(appDir, subDir)
 	} else {
 		err = fmt.Errorf("no supported language detected")
 	}
@@ -250,55 +238,6 @@ func detectGoRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
 	}, nil
 }
 
-func detectRubyRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
-	startCmd := "ruby main.rb"
-	gemfile, _ := os.ReadFile(filepath.Join(appDir, "Gemfile"))
-	gemStr := strings.ToLower(string(gemfile))
-
-	if strings.Contains(gemStr, "rails") {
-		startCmd = "bin/rails server -b 0.0.0.0"
-	}
-
-	return DevRuntimeConfig{
-		BaseImage:   "ruby:3.3-alpine",
-		InstallCmd:  "bundle install",
-		StartCmd:    startCmd,
-		WatchHint:   "Ruby/Rails detected.",
-		WorkDir:     getWorkDir(subDir),
-		ExposedPort: "3000",
-	}, nil
-}
-
-func detectPHPRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
-	startCmd := "php -S 0.0.0.0:8000"
-	composer, _ := os.ReadFile(filepath.Join(appDir, "composer.json"))
-	compStr := strings.ToLower(string(composer))
-
-	if strings.Contains(compStr, "laravel/framework") {
-		startCmd = "php artisan serve --host=0.0.0.0 --port=8000"
-	}
-
-	return DevRuntimeConfig{
-		BaseImage:   "php:8.2-cli-alpine",
-		InstallCmd:  "apk add composer && composer install",
-		StartCmd:    startCmd,
-		WatchHint:   "PHP/Laravel detected.",
-		WorkDir:     getWorkDir(subDir),
-		ExposedPort: "8000",
-	}, nil
-}
-
-func detectRustRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
-	return DevRuntimeConfig{
-		BaseImage:   "rust:1-slim",
-		InstallCmd:  "cargo install cargo-watch",
-		StartCmd:    "cargo watch -x run",
-		WatchHint:   "Rust detected. cargo-watch used for live reloading.",
-		WorkDir:     getWorkDir(subDir),
-		ExposedPort: "8000",
-	}, nil
-}
-
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
@@ -310,78 +249,6 @@ func globFiles(dir, pattern string) []string {
 		return nil
 	}
 	return files
-}
-
-func detectDotnetRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
-	return DevRuntimeConfig{
-		BaseImage:   "mcr.microsoft.com/dotnet/sdk:8.0-alpine",
-		InstallCmd:  "dotnet restore",
-		StartCmd:    "dotnet watch run --non-interactive",
-		WatchHint:   ".NET detected. Native 'dotnet watch' used for live reloading.",
-		WorkDir:     getWorkDir(subDir),
-		ExposedPort: "8080",
-	}, nil
-}
-
-func detectJavaRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
-	installCmd := "apk add --no-cache nodejs npm && npm install -g nodemon"
-	startCmd := "nodemon -e java --exec \"javac *.java && java Main\""
-
-	if _, err := os.Stat(filepath.Join(appDir, "pom.xml")); err == nil {
-		installCmd = "chmod +x mvnw 2>/dev/null || true"
-		startCmd = "if [ -f mvnw ]; then ./mvnw spring-boot:run; else mvn spring-boot:run; fi"
-	} else if _, err := os.Stat(filepath.Join(appDir, "build.gradle")); err == nil {
-		installCmd = "chmod +x gradlew 2>/dev/null || true"
-		startCmd = "if [ -f gradlew ]; then ./gradlew bootRun; else gradle bootRun; fi"
-	} else {
-		// Try to find a single main class file
-		files := globFiles(appDir, "*.java")
-		if len(files) == 1 {
-			base := strings.TrimSuffix(filepath.Base(files[0]), ".java")
-			startCmd = fmt.Sprintf("nodemon -e java --exec \"javac %s.java && java %s\"", base, base)
-		}
-	}
-
-	return DevRuntimeConfig{
-		BaseImage:   "eclipse-temurin:21-jdk-alpine",
-		InstallCmd:  installCmd,
-		StartCmd:    startCmd,
-		WatchHint:   "Java detected. Fallback uses nodemon for recompilation.",
-		WorkDir:     getWorkDir(subDir),
-		ExposedPort: "8080",
-	}, nil
-}
-
-func detectCppRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
-	installCmd := "apk add --no-cache build-base cmake nodejs npm && npm install -g nodemon"
-	startCmd := "nodemon -e c,cpp,h,hpp --exec \"gcc *.c -o app && ./app\""
-
-	if _, err := os.Stat(filepath.Join(appDir, "CMakeLists.txt")); err == nil {
-		startCmd = "nodemon -e c,cpp,h,hpp,txt --exec \"cmake . && make && ./app\""
-	} else if _, err := os.Stat(filepath.Join(appDir, "Makefile")); err == nil {
-		startCmd = "nodemon -e c,cpp,h,hpp --exec \"make && ./app\""
-	} else if len(globFiles(appDir, "*.cpp")) > 0 {
-		files := globFiles(appDir, "*.cpp")
-		if len(files) == 1 {
-			startCmd = fmt.Sprintf("nodemon -e cpp,hpp --exec \"g++ %s -o app && ./app\"", filepath.Base(files[0]))
-		} else {
-			startCmd = "nodemon -e cpp,hpp --exec \"g++ *.cpp -o app && ./app\""
-		}
-	} else {
-		files := globFiles(appDir, "*.c")
-		if len(files) == 1 {
-			startCmd = fmt.Sprintf("nodemon -e c,h --exec \"gcc %s -o app && ./app\"", filepath.Base(files[0]))
-		}
-	}
-
-	return DevRuntimeConfig{
-		BaseImage:   "alpine:3.19",
-		InstallCmd:  installCmd,
-		StartCmd:    startCmd,
-		WatchHint:   "C/C++ detected. nodemon watches for changes to recompile automatically.",
-		WorkDir:     getWorkDir(subDir),
-		ExposedPort: "8080",
-	}, nil
 }
 
 func GenerateSandboxStartScript(config DevRuntimeConfig) string {

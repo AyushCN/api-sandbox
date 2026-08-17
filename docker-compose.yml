@@ -83,8 +83,6 @@ services:
       - "traefik.http.routers.backend.tls=${ENABLE_TLS:-false}"
       - "traefik.http.routers.backend.tls.certresolver=myresolver"
       - "traefik.http.services.backend.loadbalancer.server.port=8080"
-      - "traefik.http.middlewares.backend-stripprefix.stripprefix.prefixes=/api"
-      - "traefik.http.routers.backend.middlewares=backend-stripprefix"
   frontend:
     build:
       context: ./frontend

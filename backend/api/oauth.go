@@ -16,7 +16,6 @@ import (
 	"github.com/api-sandbox/backend/models"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
-	"golang.org/x/crypto/bcrypt"
 )
 
 func generateStateString() string {
@@ -165,9 +164,6 @@ func GithubCallback(c *gin.Context) {
 	err = db.DB.Where("github_id = ? OR email = ?", ghIDStr, ghUser.Email).First(&user).Error
 	if err != nil {
 		// Create new user
-		randomPassword := generateStateString() + generateStateString()
-		hashedPassword, _ := bcrypt.GenerateFromPassword([]byte(randomPassword), bcrypt.DefaultCost)
-
 		username := ghUser.Login
 		if username == "" {
 			username = strings.Split(ghUser.Email, "@")[0]
@@ -175,9 +171,7 @@ func GithubCallback(c *gin.Context) {
 
 		user = models.User{
 			Email:           ghUser.Email,
-			Password:        string(hashedPassword),
 			Username:        username,
-			IsEmailVerified: true,
 			GithubID:        ghIDStr,
 			GithubUsername:  ghUser.Login,
 			GithubToken:     encryptedToken,

@@ -9,7 +9,7 @@ if ! command -v docker &> /dev/null; then
     exit 1
 fi
 
-if ! command -v docker-compose &> /dev/null; then
+if ! docker compose version &> /dev/null; then
     echo "❌ Docker Compose not found."
     exit 1
 fi
@@ -36,11 +36,11 @@ fi
 
 # Build and start
 echo "🔨 Building containers..."
-docker-compose up -d --build
+docker compose up -d --build
 
 # Wait for backend health
 echo "⏳ Waiting for backend to be healthy..."
-timeout 60 bash -c 'until curl -s http://localhost:8080/health; do sleep 2; done' || { echo "❌ Backend failed to start"; exit 1; }
+timeout 60 bash -c 'until curl -s http://localhost:8080/api/health; do sleep 2; done' || { echo "❌ Backend failed to start"; exit 1; }
 
 echo "✅ API Sandbox is ready!"
 echo "📍 Open http://localhost in your browser"

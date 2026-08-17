@@ -1,8 +1,10 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { GitBranch, Loader2, Save, X, Plus, Check } from "lucide-react";
+import useSWR from "swr";
+import { GitBranch, Loader2, Save, X, Plus, Check, DownloadCloud, UploadCloud, RefreshCw } from "lucide-react";
 import toast from "react-hot-toast";
+import { fetchWithAuth } from "@/lib/auth";
 
 export function CommitModal({
   isOpen,
@@ -268,6 +270,82 @@ export function BranchPicker({
               })
             )}
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function GitStatusPanel({ envId }: { envId: string }) {
+  const [isPulling, setIsPulling] = useState(false);
+  const { data: status, mutate, error } = useSWR(`/api/environments/${envId}/git/status`, fetchWithAuth, { refreshInterval: 10000 });
+
+  const handlePull = async () => {
+    setIsPulling(true);
+    try {
+      const res = await fetch(`/api/environments/${envId}/git/pull`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${localStorage.getItem("token")}` }
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to pull");
+      toast.success("Successfully pulled latest changes");
+      mutate();
+    } catch (e: unknown) {
+      toast.error((e as Error).message);
+    } finally {
+      setIsPulling(false);
+    }
+  };
+
+  if (error) return <div className="text-red-400 text-sm">Failed to load git status</div>;
+  if (!status) return <div className="flex items-center justify-center p-8"><Loader2 className="w-5 h-5 animate-spin text-white/30" /></div>;
+
+  return (
+    <div className="bg-[#1a1c23] border border-outline-variant rounded-xl p-4 flex flex-col gap-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-bold text-white flex items-center gap-2">
+          <GitBranch className="w-4 h-4 text-primary-fixed" />
+          Git Sync Status
+        </h3>
+        <button onClick={() => mutate()} className="text-white/40 hover:text-white transition-colors" title="Refresh">
+          <RefreshCw className="w-3.5 h-3.5" />
+        </button>
+      </div>
+      
+      <div className="flex items-center justify-between bg-white/5 border border-white/10 rounded-lg p-3">
+        <div className="flex items-center gap-3">
+          <div className="flex flex-col">
+            <span className="text-xs text-white/50">Current Branch</span>
+            <span className="text-sm font-mono text-white">{status.branch.replace("remotes/origin/", "")}</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-4 text-sm font-mono">
+          <div className="flex items-center gap-1.5 text-emerald-400" title="Commits ahead of remote">
+            <UploadCloud className="w-4 h-4" />
+            {status.ahead}
+          </div>
+          <div className="flex items-center gap-1.5 text-sky-400" title="Commits behind remote">
+            <DownloadCloud className="w-4 h-4" />
+            {status.behind}
+          </div>
+        </div>
+      </div>
+
+      {status.behind > 0 && (
+        <button
+          onClick={handlePull}
+          disabled={isPulling || status.dirty}
+          className="w-full py-2 rounded-lg text-sm font-semibold bg-sky-500/10 text-sky-400 border border-sky-500/30 hover:bg-sky-500/20 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+        >
+          {isPulling ? <Loader2 className="w-4 h-4 animate-spin" /> : <DownloadCloud className="w-4 h-4" />}
+          Pull {status.behind} {status.behind === 1 ? 'commit' : 'commits'}
+        </button>
+      )}
+
+      {status.dirty && status.behind > 0 && (
+        <div className="text-xs text-amber-500 bg-amber-500/10 border border-amber-500/20 p-2 rounded">
+          Please commit or stash your changes before pulling.
         </div>
       )}
     </div>

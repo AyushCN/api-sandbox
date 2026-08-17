@@ -20,7 +20,6 @@ import (
 	"github.com/api-sandbox/backend/queue"
 	"github.com/gin-gonic/gin"
 	"github.com/hibiken/asynq"
-	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
@@ -43,12 +42,7 @@ func SetupRoutes(router *gin.Engine) {
 	{
 		api.GET("/health", HealthCheck)
 
-		api.POST("/auth/register", RateLimitRegister(), Register)
-		api.POST("/auth/login", RateLimitLogin(), Login)
 		api.POST("/auth/logout", Logout)
-		api.GET("/auth/verify", RateLimitVerifyEmail(), VerifyEmail)
-		api.POST("/auth/forgot-password", RateLimitPasswordReset(), ForgotPassword)
-		api.POST("/auth/reset-password", RateLimitPasswordReset(), ResetPassword)
 		api.GET("/auth/github", GithubLogin)
 		api.GET("/auth/github/callback", GithubCallback)
 
@@ -117,7 +111,6 @@ func SetupRoutes(router *gin.Engine) {
 			userGroup.PUT("/me", UpdateMe)
 			userGroup.DELETE("/me", DeleteAccount)
 			userGroup.GET("/activity", GetUserActivity)
-			userGroup.PUT("/me/password", ChangePassword)
 			userGroup.GET("/invites", GetUserInvites)
 		}
 
@@ -826,7 +819,7 @@ func GetMe(c *gin.Context) {
 		Username:         user.Username,
 		GithubUsername:   user.GithubUsername,
 		AvatarURL:        user.AvatarURL,
-		IsEmailVerified:  user.IsEmailVerified,
+		IsEmailVerified:  true,
 		MaxEnvironments:  user.MaxEnvironments,
 		MaxBuildsPerHour: user.MaxBuildsPerHour,
 		Bio:              user.Bio,
@@ -894,53 +887,6 @@ func UpdateMe(c *gin.Context) {
 	})
 
 	c.JSON(http.StatusOK, gin.H{"message": "Profile updated successfully"})
-}
-
-type ChangePasswordRequest struct {
-	CurrentPassword string `json:"currentPassword" binding:"required"`
-	NewPassword     string `json:"newPassword" binding:"required,min=12"`
-}
-
-func ChangePassword(c *gin.Context) {
-	userID, _ := c.Get("userId")
-
-	var req ChangePasswordRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	var user models.User
-	if err := db.DB.First(&user, "id = ?", userID).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
-		return
-	}
-
-	// Verify current password
-	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.CurrentPassword)); err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Current password is incorrect"})
-		return
-	}
-
-	// Validate new password strength
-	if err := ValidatePassword(req.NewPassword); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	// Hash and save
-	hashed, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
-		return
-	}
-
-	if err := db.DB.Model(&user).Update("password", string(hashed)).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update password"})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "Password changed successfully"})
 }
 
 func DeleteAccount(c *gin.Context) {

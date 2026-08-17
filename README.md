@@ -1,6 +1,6 @@
 # Live Testing Sandbox Platform
 
-A high-utility orchestration platform for ephemeral, high-speed development sandboxes. This project provides backend developers with instant, safe, and disposable cloud-based development environments to test server-side applications with live hot-reloading and automated database provisioning.
+A high-utility orchestration platform for ephemeral, high-speed development sandboxes. This project provides backend developers with instant, container-isolated, and disposable development environments to test server-side applications with live hot-reloading and automated database provisioning.
 
 Instead of deploying static images, this platform mounts your code into language-specific development runtimes with sidecar databases, enabling live code edits via an integrated web IDE synced directly to your GitHub repository.
 
@@ -10,7 +10,7 @@ Instead of deploying static images, this platform mounts your code into language
 2. **GitHub-First Source of Truth**: End-to-end GitHub OAuth integration. The sandbox acts as a temporary mirror. You can commit and push directly to GitHub from the browser.
 3. **Zero-Config Databases**: Automatic provisioning of isolated sidecar databases (PostgreSQL, MySQL, Redis) strictly tied to the lifecycle of the ephemeral sandbox.
 4. **Browser IDE & Terminal**: Integrated file editing and terminal access to instantly test backend APIs before pushing.
-5. **Team Collaboration & RBAC**: Real-time user search for inviting teammates. Strict Role-Based Access Control ensures `VIEWER` roles have true read-only access (enforced at both UI and API levels), while `OWNER` and `COLLABORATOR` roles can edit, commit, and push changes.
+5. **Role-Based Access Control**: Strict Role-Based Access Control ensures `VIEWER` roles have true read-only access, while `OWNER` and `COLLABORATOR` roles can edit, commit, and push changes.
 6. **Isolated Workspaces**: Sandboxes can be launched in isolated, shared workspaces. A private "Default Workspace" is automatically created for all new users.
 7. **Fork Sandbox**: Seamlessly clone any environment you have access to. Forking duplicates the entire container and sidecar context into your own isolated sandbox to avoid team conflict.
 8. **Strict Invitation Security**: Pending invitations grant zero access to sandboxes or code until the user explicitly accepts the invitation.
@@ -71,7 +71,6 @@ Instead of deploying static images, this platform mounts your code into language
 | Node.js | Supported |
 | Python | Supported |
 | Go | Supported |
-| Others (Java, C++, Rust, .NET) | Experimental / best-effort |
 
 ### Security & Isolation
 | Capability | Reality |

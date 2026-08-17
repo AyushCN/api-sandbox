@@ -80,33 +80,7 @@ func TestDetectDevRuntime(t *testing.T) {
 			expectedInst: "go mod download && go install github.com/air-verse/air@latest",
 			expectedStrt: "if [ ! -f .air.toml ]; then air init; fi && air || go run .",
 		},
-		{
-			name: "Ruby on Rails",
-			setupFiles: map[string]string{
-				"Gemfile": "source 'https://rubygems.org'\ngem 'rails'\n",
-			},
-			expectedBase: "ruby:3.3-alpine",
-			expectedInst: "bundle install",
-			expectedStrt: "bin/rails server -b 0.0.0.0",
-		},
-		{
-			name: "PHP Laravel",
-			setupFiles: map[string]string{
-				"composer.json": `{"require": {"laravel/framework": "^10.0"}}`,
-			},
-			expectedBase: "php:8.2-cli-alpine",
-			expectedInst: "apk add composer && composer install",
-			expectedStrt: "php artisan serve --host=0.0.0.0 --port=8000",
-		},
-		{
-			name: "Rust Cargo",
-			setupFiles: map[string]string{
-				"Cargo.toml": "[package]\nname = \"example\"\n",
-			},
-			expectedBase: "rust:1-slim",
-			expectedInst: "cargo install cargo-watch",
-			expectedStrt: "cargo watch -x run",
-		},
+
 		{
 			name: "sandbox.toml Override",
 			setupFiles: map[string]string{

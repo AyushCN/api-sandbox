@@ -37,7 +37,7 @@ RUN mkdir -p /app/workspaces
 
 # Add health check
 HEALTHCHECK --interval=10s --timeout=5s --retries=3 \
-    CMD curl -f http://localhost:8080/health || exit 1
+    CMD curl -f http://localhost:8080/api/health || exit 1
 
 EXPOSE 8080
 

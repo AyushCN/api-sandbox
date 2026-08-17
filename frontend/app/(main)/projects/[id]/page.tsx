@@ -5,7 +5,6 @@ import Link from "next/link";
 import { ArrowLeft, Folder, Users, Loader2, GitBranch, Clock, Box, XCircle, Code, ArrowRight } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { fetchWithAuth } from "@/lib/auth";
-import TeamCollaborationDashboard from "@/components/TeamCollaborationDashboard";
 import { motion } from "framer-motion";
 
 const fetcher = (url: string) => fetchWithAuth(url);
@@ -160,18 +159,6 @@ export default function ProjectDetailsPage({ params }: { params: Promise<{ id: s
         )}
       </div>
 
-      {/* Collaboration Dashboard Component (Hidden for Default Workspace) */}
-      {!isDefaultWorkspace && (
-        <div className="space-y-4">
-          <h2 className="text-lg font-bold text-on-surface flex items-center gap-2">
-            <Users className="w-5 h-5 text-primary-fixed" />
-            Team Collaboration
-          </h2>
-          <div className="bg-surface-container-lowest border border-outline-variant rounded-xl overflow-hidden h-[500px]">
-            <TeamCollaborationDashboard projectId={id} />
-          </div>
-        </div>
-      )}
     </div>
   );
 }

@@ -51,7 +51,7 @@ The `Environment` is the single abstraction for both interactive workspaces and 
 stateDiagram-v2
     [*] --> IDLE : Created
     IDLE --> BUILDING : Start Build/Sync
-    BUILDING --> RUNNING : Image Built & Container Started
+    BUILDING --> RUNNING : Base Image Pulled & Volume Mounted
     BUILDING --> FAILED : Clone/Build Failed
     RUNNING --> STOPPED : User Stop
     STOPPED --> BUILDING : Restart / Sync

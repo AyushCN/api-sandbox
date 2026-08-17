@@ -21,12 +21,6 @@ type User struct {
 	ID                string     `gorm:"type:text;primaryKey" json:"id"`
 	Email             string     `gorm:"type:text;unique;not null" json:"email"`
 	Username          string     `gorm:"type:text;uniqueIndex" json:"username"`
-	Password          string     `gorm:"type:text;not null" json:"-"` // never return password to client
-	IsEmailVerified   bool       `gorm:"default:false" json:"isEmailVerified"`
-	VerificationCode  string     `gorm:"type:text" json:"-"`
-	VerificationExp   *time.Time `gorm:"type:timestamp" json:"-"`
-	ResetPasswordCode string     `gorm:"type:text" json:"-"`
-	ResetPasswordExp  *time.Time `gorm:"type:timestamp" json:"-"`
 	MaxEnvironments   int        `gorm:"default:5" json:"maxEnvironments"`
 	MaxBuildsPerHour  int        `gorm:"default:10" json:"maxBuildsPerHour"`
 	Bio               string     `gorm:"type:text" json:"bio"`

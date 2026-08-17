@@ -17,7 +17,7 @@ import TeamCollaborationDashboard from "@/components/TeamCollaborationDashboard"
 import EnvironmentSettings from "@/components/EnvironmentSettings";
 import { useEnvironmentChanges } from "@/hooks/useEnvironmentChanges";
 import ActiveEditors from "@/components/ActiveEditors";
-import { CommitModal, BranchPicker } from "@/components/GitUI";
+import { CommitModal, BranchPicker, GitStatusPanel } from "@/components/GitUI";
 
 const fetcher = async (url: string) => {
   return fetchWithAuth(url);
@@ -1006,6 +1006,11 @@ export default function EnvironmentDetail() {
                   {files ? "No files found." : "Loading files..."}
                 </div>
               )}
+            </div>
+            
+            {/* Git Status Panel */}
+            <div className="border-t border-outline-variant p-2 shrink-0 bg-surface-container/20">
+              <GitStatusPanel envId={id} />
             </div>
           </div>
 

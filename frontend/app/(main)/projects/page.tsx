@@ -88,7 +88,7 @@ export default function ProjectsPage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {projects?.map((project: { id: string; name: string; status: string; environments: { id: string }[] }, idx: number) => (
+            {projects?.map((project: { id: string; name: string; description?: string; status: string; environments: { id: string }[] }, idx: number) => (
               <motion.div key={project.id} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.04, duration: 0.35 }}>
                 <Link href={`/projects/${project.id}`} className="block group h-full">
                   <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-5 h-full flex flex-col gap-4 transition-all duration-300 hover:border-primary-fixed/40 hover:shadow-[0_0_24px_rgba(0,240,255,0.08)] relative overflow-hidden">

@@ -221,7 +221,7 @@ export default function EnvironmentDetail() {
   const [isForking, setIsForking] = useState(false);
   const { data: projects, isLoading: isProjectsLoading } = useSWR("/api/projects", fetcher);
 
-  const [userSearchResults, setUserSearchResults] = useState<unknown[]>([]);
+  const [userSearchResults, setUserSearchResults] = useState<{ id: string; username: string; email: string }[]>([]);
   const [isSearchingUsers, setIsSearchingUsers] = useState(false);
   const [showUserDropdown, setShowUserDropdown] = useState(false);
 
@@ -550,8 +550,8 @@ export default function EnvironmentDetail() {
   useEffect(() => {
     if (!terminalRef.current || xtermRef.current || activeTab !== "logs") return;
 
-    let term: { writeln: (data: string) => void; loadAddon: (addon: unknown) => void; open: (parent: HTMLElement) => void; dispose: () => void; clear: () => void; _logCount?: number; };
-    let fitAddon: { fit: () => void; };
+    let term: { writeln: (data: string) => void; loadAddon: (addon: import("xterm").ITerminalAddon) => void; open: (parent: HTMLElement) => void; dispose: () => void; clear: () => void; _logCount?: number; };
+    let fitAddon: { fit: () => void; } & import("xterm").ITerminalAddon;
 
     const initTerminal = async () => {
       const { Terminal } = await import("xterm");
@@ -602,7 +602,7 @@ export default function EnvironmentDetail() {
   useEffect(() => {
     if (!env?.logs || !xtermRef.current || activeTab !== "logs") return;
     
-    const term = xtermRef.current as { writeln: (data: string) => void; loadAddon: (addon: unknown) => void; open: (parent: HTMLElement) => void; dispose: () => void; clear: () => void; _logCount?: number; };
+    const term = xtermRef.current as { writeln: (data: string) => void; loadAddon: (addon: import("xterm").ITerminalAddon) => void; open: (parent: HTMLElement) => void; dispose: () => void; clear: () => void; _logCount?: number; };
     const currentLength = term._logCount || 0;
     
     if (env.logs.length > currentLength) {
@@ -916,7 +916,7 @@ export default function EnvironmentDetail() {
               <div className="flex justify-center items-center h-full text-white/50 animate-pulse">Loading collaborators...</div>
             ) : (
               <div className="max-w-3xl mx-auto space-y-4">
-                {project.collaborators?.map((collab: { userId: string; role: string }) => {
+                {project.collaborators?.map((collab: { id: string; userId: string; role: string; acceptedAt?: string; user?: { email: string; username?: string; avatarUrl?: string } }) => {
                   const isMe = currentUser && currentUser.id === collab.userId;
                   const myCollab = project.collaborators.find((c: { userId: string; role: string }) => c.userId === currentUser?.id);
                   const iAmAdminOrOwner = myCollab && (myCollab.role === 'ADMIN' || myCollab.role === 'OWNER');

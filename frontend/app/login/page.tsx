@@ -154,9 +154,9 @@ export default function LoginPage() {
             setTimeout(() => {
                 login();
             }, 1500); // Simulate the beautiful loader animation for a bit before navigating
-        } catch (err: any) {
-            setError(err.message);
-            toast.error(err.message);
+        } catch (err: unknown) {
+            setError((err as Error).message);
+            toast.error((err as Error).message);
         } finally {
             setLoading(false);
         }
@@ -311,7 +311,7 @@ export default function LoginPage() {
                         </div>
                         
                         <div className="mt-8 text-center text-on-surface-variant text-sm">
-                            <p>We've moved fully to GitHub. Email/password login is disabled.</p>
+                            <p>We&apos;ve moved fully to GitHub. Email/password login is disabled.</p>
                         </div>
                     </div>
                     

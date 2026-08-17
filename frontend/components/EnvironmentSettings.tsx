@@ -2,10 +2,10 @@ import { useState } from "react"
 import toast from "react-hot-toast"
 import { Loader2, Settings, Save } from "lucide-react"
 
-export default function EnvironmentSettings({ env, mutate, isViewerRole }: { env: Record<string, any>, mutate: () => void, isViewerRole: boolean }) {
-  const [startCommand, setStartCommand] = useState(env.startCommand || "")
-  const [port, setPort] = useState(env.port?.toString() || "")
-  const [healthCheckType, setHealthCheckType] = useState(env.healthCheckType || "tcp")
+export default function EnvironmentSettings({ env, mutate, isViewerRole }: { env: Record<string, unknown>, mutate: () => void, isViewerRole: boolean }) {
+  const [startCommand, setStartCommand] = useState((env.startCommand as string) || "")
+  const [port, setPort] = useState((env.port as number)?.toString() || "")
+  const [healthCheckType, setHealthCheckType] = useState((env.healthCheckType as string) || "tcp")
   const [isSaving, setIsSaving] = useState(false)
 
   const handleSave = async () => {
@@ -32,7 +32,7 @@ export default function EnvironmentSettings({ env, mutate, isViewerRole }: { env
       }
     } catch(err) {
       if (err instanceof Error) {
-        toast.error(err.message)
+        toast.error((err as Error).message)
       } else {
         toast.error("An unknown error occurred")
       }

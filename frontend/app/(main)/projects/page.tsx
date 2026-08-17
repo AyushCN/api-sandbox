@@ -32,8 +32,8 @@ export default function ProjectsPage() {
       setNewProjectName("");
       setNewProjectDesc("");
       mutate();
-    } catch (err: any) {
-      toast.error(err.message || "Failed to create project");
+    } catch (err: unknown) {
+      toast.error((err as Error).message || "Failed to create project");
     } finally {
       setIsCreating(false);
     }

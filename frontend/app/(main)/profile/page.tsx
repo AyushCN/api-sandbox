@@ -160,8 +160,8 @@ function EditProfileModal({ user, onClose, onSaved }: { user: UserProfile; onClo
       toast.success("Profile updated!");
       onSaved();
       onClose();
-    } catch (err: any) {
-      toast.error(err.message || "Failed to update profile");
+    } catch (err: unknown) {
+      toast.error((err as Error).message || "Failed to update profile");
     } finally {
       setSaving(false);
     }
@@ -235,8 +235,8 @@ function DeleteAccountModal({ user, onClose }: { user: UserProfile; onClose: () 
       toast.success("Account deleted successfully.");
       localStorage.removeItem("token");
       window.location.href = "/login";
-    } catch (err: any) {
-      toast.error(err.message || "Failed to delete account");
+    } catch (err: unknown) {
+      toast.error((err as Error).message || "Failed to delete account");
       setDeleting(false);
     }
   };
@@ -477,8 +477,8 @@ export default function ProfilePage() {
                                 toast.success("Invite accepted!");
                                 mutateInvites();
                                 mutateUser();
-                              } catch (err: any) {
-                                toast.error(err.message || "Failed to accept");
+                              } catch (err: unknown) {
+                                toast.error((err as Error).message || "Failed to accept");
                               }
                             }}
                             className="w-7 h-7 flex items-center justify-center bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded transition-colors"
@@ -492,8 +492,8 @@ export default function ProfilePage() {
                                 await fetchWithAuth(`/api/projects/${invite.projectId}/invites/decline`, { method: "POST" });
                                 toast.success("Invite declined");
                                 mutateInvites();
-                              } catch (err: any) {
-                                toast.error(err.message || "Failed to decline");
+                              } catch (err: unknown) {
+                                toast.error((err as Error).message || "Failed to decline");
                               }
                             }}
                             className="w-7 h-7 flex items-center justify-center bg-error/10 hover:bg-error/20 text-error rounded transition-colors"

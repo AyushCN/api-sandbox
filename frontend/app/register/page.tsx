@@ -218,9 +218,9 @@ export default function SignupPage() {
             setTimeout(() => {
                 router.push("/login");
             }, 2000);
-        } catch (err: any) {
-            setError(err.message || 'Something went wrong');
-            toast.error(err.message);
+        } catch (err: unknown) {
+            setError((err as Error).message || 'Something went wrong');
+            toast.error((err as Error).message);
         } finally {
             setIsSubmitting(false);
         }
@@ -309,7 +309,7 @@ export default function SignupPage() {
                             </a>
                         </div>
                         <div className="mt-8 text-center text-on-surface-variant text-sm">
-                            <p>We've moved fully to GitHub. Email/password registration is disabled.</p>
+                            <p>We&apos;ve moved fully to GitHub. Email/password registration is disabled.</p>
                         </div>
                         </div>
 

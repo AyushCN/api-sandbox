@@ -1,14 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 import { Suspense } from "react";
 
 function VerifyContent() {
   const searchParams = useSearchParams();
-  const router = useRouter();
   const code = searchParams.get("code");
   
   const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
@@ -16,8 +15,11 @@ function VerifyContent() {
 
   useEffect(() => {
     if (!code) {
-      setStatus("error");
-      setMessage("No verification code provided.");
+      // setTimeout to avoid setting state synchronously during render in effect
+      setTimeout(() => {
+        setStatus("error");
+        setMessage("No verification code provided.");
+      }, 0);
       return;
     }
 
@@ -33,7 +35,8 @@ function VerifyContent() {
           setStatus("error");
           setMessage(data.error || "Failed to verify email.");
         }
-      } catch (err) {
+      } catch (err: unknown) {
+        console.error(err);
         setStatus("error");
         setMessage("An error occurred during verification.");
       }

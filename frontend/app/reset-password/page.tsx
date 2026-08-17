@@ -34,8 +34,8 @@ function ResetPasswordForm() {
       
       toast.success(data.message || "Password successfully reset");
       router.push("/login");
-    } catch (err: any) {
-      toast.error(err.message);
+    } catch (err: unknown) {
+      toast.error((err as Error).message);
     } finally {
       setLoading(false);
     }

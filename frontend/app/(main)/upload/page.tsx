@@ -125,8 +125,8 @@ export default function UploadPage() {
       const env = response;
       toast.success("Sandbox created! Building image...");
       router.push(`/environments/${env.id}`);
-    } catch (error: any) {
-      toast.error(error.message);
+    } catch (error: unknown) {
+      toast.error((error as Error).message);
     } finally {
       setIsSubmitting(false);
     }

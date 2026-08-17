@@ -175,8 +175,8 @@ export function BranchPicker({
       toast.success(`Checked out ${branch}`);
       setIsOpen(false);
       onBranchChanged();
-    } catch (err: any) {
-      toast.error(err.message);
+    } catch (err: unknown) {
+      toast.error((err as Error).message);
     } finally {
       setIsCheckingOut(false);
     }
@@ -202,8 +202,8 @@ export function BranchPicker({
       setNewBranchName("");
       setIsOpen(false);
       onBranchChanged();
-    } catch (err: any) {
-      toast.error(err.message);
+    } catch (err: unknown) {
+      toast.error((err as Error).message);
     } finally {
       setIsCreating(false);
     }

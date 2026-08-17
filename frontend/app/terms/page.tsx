@@ -66,9 +66,9 @@ export default function TermsPage() {
         </section>
 
         <section className="flex flex-col gap-4">
-          <h2 className="text-2xl font-bold text-white">4. "As Is" Warranty Disclaimer</h2>
+          <h2 className="text-2xl font-bold text-white">4. &quot;As Is&quot; Warranty Disclaimer</h2>
           <p>
-            API Sandbox is provided on an <strong>"AS IS"</strong> and <strong>"AS AVAILABLE"</strong> basis. 
+            API Sandbox is provided on an <strong>&quot;AS IS&quot;</strong> and <strong>&quot;AS AVAILABLE&quot;</strong> basis. 
             We make no warranties, explicit or implied, regarding the uptime, availability, or reliability of the service.
             Self-hosted operators are solely responsible for their own infrastructure uptime, data retention, and compliance.
           </p>

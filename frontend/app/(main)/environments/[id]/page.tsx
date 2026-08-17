@@ -120,7 +120,7 @@ export default function EnvironmentDetail() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
   const terminalRef = useRef<HTMLDivElement>(null);
-  const xtermRef = useRef<any>(null);
+  const xtermRef = useRef<unknown>(null);
   
   const { hasUncommittedChanges, setHasUncommittedChanges, activeEditors } = useEnvironmentChanges(id);
   const [isCommitting, setIsCommitting] = useState(false);
@@ -147,8 +147,8 @@ export default function EnvironmentDetail() {
       } else {
         throw new Error(data.error || "Commit failed");
       }
-    } catch(err: any) {
-      toast.error(err.message);
+    } catch(err: unknown) {
+      toast.error((err as Error).message);
       throw err; // Re-throw to prevent pushing if commit failed
     } finally {
       setIsCommitting(false);
@@ -171,8 +171,8 @@ export default function EnvironmentDetail() {
       } else {
         throw new Error(data.error || "Push failed");
       }
-    } catch(err: any) {
-      toast.error(err.message);
+    } catch(err: unknown) {
+      toast.error((err as Error).message);
       throw err;
     } finally {
       setIsPushing(false);
@@ -221,14 +221,16 @@ export default function EnvironmentDetail() {
   const [isForking, setIsForking] = useState(false);
   const { data: projects, isLoading: isProjectsLoading } = useSWR("/api/projects", fetcher);
 
-  const [userSearchResults, setUserSearchResults] = useState<any[]>([]);
+  const [userSearchResults, setUserSearchResults] = useState<unknown[]>([]);
   const [isSearchingUsers, setIsSearchingUsers] = useState(false);
   const [showUserDropdown, setShowUserDropdown] = useState(false);
 
   useEffect(() => {
     if (!inviteIdentifier.trim() || inviteIdentifier.trim().length < 2) {
-      setUserSearchResults([]);
-      setShowUserDropdown(false);
+      setTimeout(() => {
+        setUserSearchResults([]);
+        setShowUserDropdown(false);
+      }, 0);
       return;
     }
 
@@ -272,8 +274,8 @@ export default function EnvironmentDetail() {
       }
       const text = await res.text();
       setDockerLogs(text || "(No output yet. The container might still be starting.)");
-    } catch (e: any) {
-      setDockerLogs(`Error: ${e.message}`);
+    } catch (e: unknown) {
+      setDockerLogs(`Error: ${(e as Error).message}`);
     } finally {
       setIsLoadingDockerLogs(false);
     }
@@ -281,7 +283,9 @@ export default function EnvironmentDetail() {
 
   useEffect(() => {
     if (activeTab === "logs") {
-      fetchDockerLogs();
+      setTimeout(() => {
+        fetchDockerLogs();
+      }, 0);
       const interval = setInterval(fetchDockerLogs, 3000);
       return () => clearInterval(interval);
     }
@@ -303,8 +307,8 @@ export default function EnvironmentDetail() {
       mutate(`/api/environments?projectId=${env?.projectId}`); // old project
       mutate(`/api/environments?projectId=${transferProjectId}`); // new project
       mutate(`/api/environments`); // dashboard list
-    } catch (e: any) {
-      toast.error(e.message);
+    } catch (e: unknown) {
+      toast.error((e as Error).message);
     } finally {
       setIsTransferring(false);
     }
@@ -320,8 +324,8 @@ export default function EnvironmentDetail() {
       toast.success("Sandbox forked successfully!");
       // The response contains the new environment
       router.push(`/environments/${res.id}`);
-    } catch (e: any) {
-      toast.error(e.message || "Failed to fork sandbox");
+    } catch (e: unknown) {
+      toast.error((e as Error).message || "Failed to fork sandbox");
       setIsForking(false);
     }
   };
@@ -354,8 +358,8 @@ export default function EnvironmentDetail() {
       setInviteIdentifier("");
       setInviteRole("COLLABORATOR");
       mutate(`/api/projects/${env.projectId}`);
-    } catch (e: any) {
-      toast.error(e.message);
+    } catch (e: unknown) {
+      toast.error((e as Error).message);
     } finally {
       setIsInviting(false);
     }
@@ -397,8 +401,8 @@ export default function EnvironmentDetail() {
       }
       toast.success("Collaborator removed successfully");
       mutate(`/api/projects/${env.projectId}`);
-    } catch (e: any) {
-      toast.error(e.message);
+    } catch (e: unknown) {
+      toast.error((e as Error).message);
     }
   };
 
@@ -425,8 +429,8 @@ export default function EnvironmentDetail() {
         setFileContent(data.content);
         setOriginalFileContent(data.content);
         setIsEditingFile(false);
-      } catch (e: any) {
-        toast.error(e.message);
+      } catch (e: unknown) {
+        toast.error((e as Error).message);
         setSelectedFilePath("");
       } finally {
         setIsLoadingFile(false);
@@ -463,8 +467,8 @@ export default function EnvironmentDetail() {
       
       // Mutate env cache to update environment status immediately
       mutate(`/api/environments/${id}`);
-    } catch (e: any) {
-      toast.error(e.message);
+    } catch (e: unknown) {
+      toast.error((e as Error).message);
     } finally {
       setIsSavingFile(false);
     }
@@ -498,8 +502,8 @@ export default function EnvironmentDetail() {
       toast.success(`${typeStr} created successfully!`);
       // Re-fetch files list
       mutate(`/api/environments/${id}/files`);
-    } catch (e: any) {
-      toast.error(e.message);
+    } catch (e: unknown) {
+      toast.error((e as Error).message);
     }
   };
 
@@ -537,8 +541,8 @@ export default function EnvironmentDetail() {
       mutate(`/api/environments/${id}/files`);
       // Refresh logs
       mutate(`/api/environments/${id}`);
-    } catch (e: any) {
-      toast.error(e.message);
+    } catch (e: unknown) {
+      toast.error((e as Error).message);
     }
   };
 
@@ -598,7 +602,7 @@ export default function EnvironmentDetail() {
   useEffect(() => {
     if (!env?.logs || !xtermRef.current || activeTab !== "logs") return;
     
-    const term = xtermRef.current;
+    const term = xtermRef.current as any;
     const currentLength = term._logCount || 0;
     
     if (env.logs.length > currentLength) {
@@ -631,8 +635,8 @@ export default function EnvironmentDetail() {
       mutate(`/api/environments?projectId=${env?.projectId}`);
       mutate(`/api/projects/${env?.projectId}`);
       router.push("/dashboard");
-    } catch (e: any) {
-      toast.error(e.message);
+    } catch (e: unknown) {
+      toast.error((e as Error).message);
       setIsDeleting(false);
     }
   };
@@ -650,11 +654,11 @@ export default function EnvironmentDetail() {
       toast.success("Sandbox restart initiated");
       mutate(`/api/environments/${id}`);
       if (xtermRef.current) {
-        xtermRef.current.clear();
-        xtermRef.current._logCount = 0;
+        (xtermRef.current as any).clear();
+        (xtermRef.current as any)._logCount = 0;
       }
-    } catch (e: any) {
-      toast.error(e.message);
+    } catch (e: unknown) {
+      toast.error((e as Error).message);
     } finally {
       setIsRestarting(false);
     }
@@ -1131,7 +1135,7 @@ export default function EnvironmentDetail() {
                 {/* Dropdown for search results */}
                 {showUserDropdown && userSearchResults.length > 0 && (
                   <div className="absolute z-10 w-full mt-1 bg-surface-container-lowest border border-outline-variant rounded-lg shadow-xl max-h-48 overflow-y-auto">
-                    {userSearchResults.map((user) => (
+                    {userSearchResults.map((user: any) => (
                       <button
                         key={user.id}
                         type="button"

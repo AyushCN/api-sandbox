@@ -24,8 +24,8 @@ export default function ForgotPasswordPage() {
       
       toast.success(data.message || "Reset link sent");
       setSubmitted(true);
-    } catch (err: any) {
-      toast.error(err.message);
+    } catch (err: unknown) {
+      toast.error((err as Error).message);
     } finally {
       setLoading(false);
     }
@@ -36,8 +36,8 @@ export default function ForgotPasswordPage() {
       <div className="max-w-md mx-auto mt-20 bg-surface-container-lowest border border-outline-variant p-8 text-center rounded-2xl shadow-xl">
         <h1 className="text-2xl font-bold text-on-surface mb-4">Check Your Email</h1>
         <p className="text-on-surface-variant mb-6">
-          If an account exists for that email, we've sent a password reset link.
-          Please check your spam folder if you don't see it.
+          If an account exists for that email, we&apos;ve sent a password reset link.
+          Please check your spam folder if you don&apos;t see it.
         </p>
         <Link href="/login" className="bg-primary-container text-on-primary-fixed-variant px-6 py-2.5 rounded-lg font-bold hover:shadow-[0_0_15px_rgba(0,240,255,0.2)] active:scale-95 transition-all inline-block">
           Back to Login
@@ -50,7 +50,7 @@ export default function ForgotPasswordPage() {
     <div className="max-w-md mx-auto mt-20 bg-surface-container-lowest border border-outline-variant p-8 rounded-2xl shadow-xl">
       <h1 className="text-2xl font-bold text-on-surface mb-2 text-center">Reset Password</h1>
       <p className="text-center text-on-surface-variant text-sm mb-6">
-        Enter your email address and we'll send you a link to reset your password.
+        Enter your email address and we&apos;ll send you a link to reset your password.
       </p>
       
       <form onSubmit={handleSubmit} className="space-y-4">

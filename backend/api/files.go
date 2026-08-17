@@ -237,7 +237,7 @@ func UpdateWorkspaceFileContent(c *gin.Context) {
 	reloadSignaled := false
 
 	// Synchronous touch for reliable feedback (usually takes < 30ms)
-	if env.Status == "running" && env.ContainerID != nil && *env.ContainerID != "" {
+	if env.Status == models.StatusRunning && env.ContainerID != nil && *env.ContainerID != "" {
 		inContainerPath := "/app/" + strings.TrimPrefix(cleanPath, "/")
 
 		touchCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -319,12 +319,24 @@ func UpdateWorkspaceFileContent(c *gin.Context) {
 		// Broadcast to team via WebSocket
 		BroadcastToProjectMembers(env.ID, data)
 
+		slog.Info("Checking readiness polling condition", 
+			"reloadSignaled", reloadSignaled, 
+			"env.Port", env.Port, 
+			"env.Status", env.Status, 
+			"env.ContainerID", env.ContainerID,
+		)
+
 		// --- Readiness Polling ---
 		if reloadSignaled && env.Port != nil && *env.Port > 0 {
-			waitCtx, cancelWait := context.WithTimeout(context.Background(), 5*time.Second)
+			waitCtx, cancelWait := context.WithTimeout(context.Background(), 10*time.Second) // Increased to 10s for slow startups
 			defer cancelWait()
 
-			if waitErr := provider.WaitForContainerPort(waitCtx, *env.ContainerID, *env.Port); waitErr == nil {
+			domain := os.Getenv("DOMAIN")
+			if domain == "" {
+				domain = "localhost"
+			}
+
+			if waitErr := provider.WaitForAppReady(waitCtx, env.ID, domain); waitErr == nil {
 				latency := time.Since(saveTime)
 				slog.Info("DevLoop Latency", "envID", env.ID, "duration_ms", latency.Milliseconds())
 

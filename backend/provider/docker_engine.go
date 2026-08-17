@@ -7,7 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
-	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
@@ -166,17 +166,10 @@ func ProvisionDevSandbox(ctx context.Context, envID string, config DevRuntimeCon
 		// Security headers
 		labels[fmt.Sprintf("traefik.http.middlewares.security-%s.headers.customresponseheaders.X-Sandbox-Environment", envID)] = envID
 
-		// Retry middleware to prevent 502 Bad Gateway during fast dev reloads (e.g. nodemon restart)
-		labels[fmt.Sprintf("traefik.http.middlewares.retry-%s.retry.attempts", envID)] = "10"
-		labels[fmt.Sprintf("traefik.http.middlewares.retry-%s.retry.initialinterval", envID)] = "100ms"
-
 		// Apply middlewares
-		labels[fmt.Sprintf("traefik.http.routers.env-%s.middlewares", envID)] = fmt.Sprintf("security-%s,retry-%s", envID, envID)
+		labels[fmt.Sprintf("traefik.http.routers.env-%s.middlewares", envID)] = fmt.Sprintf("security-%s", envID)
 	} else {
 		labels[fmt.Sprintf("traefik.http.routers.env-%s.entrypoints", envID)] = "web"
-		labels[fmt.Sprintf("traefik.http.middlewares.retry-%s.retry.attempts", envID)] = "10"
-		labels[fmt.Sprintf("traefik.http.middlewares.retry-%s.retry.initialinterval", envID)] = "100ms"
-		labels[fmt.Sprintf("traefik.http.routers.env-%s.middlewares", envID)] = fmt.Sprintf("retry-%s", envID)
 	}
 
 	networkName, networkID, err := EnsureOrgNetwork(ctx, orgID)
@@ -260,18 +253,9 @@ func ProvisionDevSandbox(ctx context.Context, envID string, config DevRuntimeCon
 		return "", 0, fmt.Errorf("failed to start container: %v", err)
 	}
 
-	inspect, err := dockerClient.InspectContainer(container.ID)
-	if err != nil {
-		return container.ID, 0, fmt.Errorf("failed to inspect container: %v", err)
-	}
-
-	var assignedPort int
-	for _, bindings := range inspect.NetworkSettings.Ports {
-		if len(bindings) > 0 {
-			port, _ := strconv.Atoi(bindings[0].HostPort)
-			assignedPort = port
-			break
-		}
+	assignedPort, _ := strconv.Atoi(config.ExposedPort)
+	if assignedPort == 0 {
+		assignedPort = 8080 // fallback
 	}
 
 	createLog(envID, fmt.Sprintf("Dev Sandbox started successfully on port %d (Container ID: %s).", assignedPort, container.ID[:12]), models.LogLevelInfo)
@@ -318,28 +302,10 @@ func GetContainerPort(containerID string) (int, error) {
 	return assignedPort, nil
 }
 
-func WaitForContainerPort(ctx context.Context, containerID string, port int) error {
-	inspect, err := dockerClient.InspectContainer(containerID)
-	if err != nil {
-		return err
-	}
-
-	ipAddress := inspect.NetworkSettings.IPAddress
-	if ipAddress == "" {
-		// Fallback to searching networks
-		for _, net := range inspect.NetworkSettings.Networks {
-			ipAddress = net.IPAddress
-			if ipAddress != "" {
-				break
-			}
-		}
-	}
-
-	if ipAddress == "" {
-		return fmt.Errorf("no IP address found for container %s", containerID)
-	}
-
-	target := net.JoinHostPort(ipAddress, strconv.Itoa(port))
+func WaitForAppReady(ctx context.Context, envID string, domain string) error {
+	host := fmt.Sprintf("%s.%s", envID, domain)
+	client := &http.Client{} // Removed 500ms timeout which aborted connections prematurely
+	
 	timeout := time.After(30 * time.Second)
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
@@ -349,12 +315,27 @@ func WaitForContainerPort(ctx context.Context, containerID string, port int) err
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-timeout:
-			return fmt.Errorf("timed out waiting for port %d to be reachable on %s", port, ipAddress)
+			return fmt.Errorf("timed out waiting for app %s to be reachable", envID)
 		case <-ticker.C:
-			// Dial the internal IP and Port of the container directly
-			conn, err := net.DialTimeout("tcp", target, 500*time.Millisecond)
-			if err == nil {
-				conn.Close()
+			req, err := http.NewRequestWithContext(ctx, "GET", "http://api-sandbox-traefik/", nil)
+			if err != nil {
+				continue
+			}
+			req.Host = host
+			
+			resp, err := client.Do(req)
+			if err != nil {
+				slog.Warn("WaitForAppReady HTTP error", "err", err)
+				continue
+			}
+			
+			// Must close immediately, not defer, to prevent connection leaks
+			statusCode := resp.StatusCode
+			resp.Body.Close()
+
+			slog.Info("WaitForAppReady HTTP response", "statusCode", statusCode)
+			
+			if statusCode != http.StatusBadGateway {
 				return nil
 			}
 		}

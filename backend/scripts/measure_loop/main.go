@@ -8,7 +8,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"sort"
 	"strings"
 	"time"
@@ -61,45 +60,53 @@ func main() {
 	}{
 		{
 			name: "Node Express",
-			repo: "https://github.com/expressjs/express",
+			repo: "https://github.com/render-examples/express-hello-world.git",
 			files: map[string]string{
-				"package.json": `{"scripts":{"dev":"node index.js"},"dependencies":{"express":"^4.18.2"}}`,
-				"index.js": `const express = require('express');
+				"app.js": `const express = require("express");
 const app = express();
-app.get('/', (req, res) => res.send('Hello V%d'));
-app.listen(3000, '0.0.0.0', () => console.log('Ready'));`,
+const port = process.env.PORT || 3001;
+
+app.get("/", (req, res) => res.type('html').send('<html><body><h1>Hello World V%d</h1></body></html>'));
+
+const server = app.listen(port, () => console.log('Ready'));
+`,
 			},
 		},
 		{
 			name: "Python FastAPI",
-			repo: "https://github.com/pallets/flask", // just for python detection
+			repo: "https://github.com/render-examples/fastapi.git",
 			files: map[string]string{
-				"requirements.txt": `fastapi
-uvicorn[standard]`,
-				"main.py": `from fastapi import FastAPI
+				"main.py": `from typing import Union
+from fastapi import FastAPI
 app = FastAPI()
+
 @app.get("/")
 def read_root():
-    return {"Hello": "V%d"}`,
+    return {"Hello": "World V%d"}
+`,
 			},
 		},
 		{
 			name: "Go Basic",
-			repo: "https://github.com/gin-gonic/gin", // just for go detection
+			repo: "https://github.com/render-examples/go-gin-web-server.git",
 			files: map[string]string{
-				"go.mod": `module example.com/m
-go 1.22`,
 				"main.go": `package main
+
 import (
-	"fmt"
 	"net/http"
+	"github.com/gin-gonic/gin"
 )
+
 func main() {
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "Hello V%%d")
+	r := gin.Default()
+	r.GET("/", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"message": "pong V%d",
+		})
 	})
-	http.ListenAndServe("0.0.0.0:8080", nil)
-}`,
+	r.Run()
+}
+`,
 			},
 		},
 	}
@@ -148,36 +155,6 @@ func runBenchmark(name string, repo string, files map[string]string) {
 		fmt.Printf("Deleted Env %s\n", envID)
 	}()
 
-	// 2. Write Files
-	for path, content := range files {
-		// Just replace %d with 0
-		content = strings.ReplaceAll(content, "%d", "0")
-		writeBody := map[string]interface{}{
-			"path":    path,
-			"content": content,
-		}
-		wb, _ := json.Marshal(writeBody)
-		req, _ = http.NewRequest("POST", appURL+"/api/environments/"+envID+"/files/content", bytes.NewReader(wb))
-		req.Header.Set("Cookie", "token="+sessionCookie)
-		req.Header.Set("Content-Type", "application/json")
-		resp, _ = http.DefaultClient.Do(req)
-		resp.Body.Close()
-	}
-
-	// 2.5 Restart Env so it picks up the new files and port
-	fmt.Printf("Restarting env to pick up changes...\n")
-	req, _ = http.NewRequest("POST", appURL+"/api/environments/"+envID+"/restart", nil)
-	req.Header.Set("Cookie", "token="+sessionCookie)
-	resp, _ = http.DefaultClient.Do(req)
-	resp.Body.Close()
-
-	// Force port 3000 in DB for node and 8000 for Python/Go
-	port := 3000
-	if strings.Contains(name, "Python") || strings.Contains(name, "Go") {
-		port = 8000
-	}
-	exec.Command("docker", "exec", "api-sandbox-postgres-1", "psql", "-U", "postgres", "-d", "api_sandbox", "-c", fmt.Sprintf("UPDATE environments SET port = %d WHERE id = '%s'", port, envID)).Run()
-
 	// 3. Wait for RUNNING
 	fmt.Printf("Waiting for RUNNING...")
 	for i := 0; i < 60; i++ {
@@ -213,11 +190,13 @@ func runBenchmark(name string, repo string, files map[string]string) {
 		for {
 			_, message, err := c.ReadMessage()
 			if err != nil {
+				fmt.Printf("WS Read error: %v\n", err)
 				return
 			}
+			// fmt.Printf("WS RECV: %s\n", string(message))
 			var msg map[string]interface{}
 			json.Unmarshal(message, &msg)
-			if t, ok := msg["type"].(string); ok {
+			if t, ok := msg["Type"].(string); ok {
 				if t == "reload_ready" || t == "reload_failed" {
 					wsEvents <- t
 				}

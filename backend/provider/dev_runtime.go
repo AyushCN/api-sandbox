@@ -150,9 +150,13 @@ func detectNodeRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
 			}
 		} else {
 			if _, err := os.Stat(filepath.Join(appDir, "src", "index.js")); err == nil {
-				startCmd = "node --watch src/index.js"
+				startCmd = "npx nodemon src/index.js"
+			} else if _, err := os.Stat(filepath.Join(appDir, "server.js")); err == nil {
+				startCmd = "npx nodemon server.js"
+			} else if _, err := os.Stat(filepath.Join(appDir, "app.js")); err == nil {
+				startCmd = "npx nodemon app.js"
 			} else {
-				startCmd = "node --watch index.js"
+				startCmd = "npx nodemon index.js"
 			}
 		}
 	}
@@ -229,8 +233,8 @@ func detectPythonRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
 
 func detectGoRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
 	return DevRuntimeConfig{
-		BaseImage:   "golang:1.22-alpine",
-		InstallCmd:  "go mod download && go install github.com/air-verse/air@latest",
+		BaseImage:   "golang:alpine",
+		InstallCmd:  "go mod download && go install github.com/air-verse/air@v1.52.3",
 		StartCmd:    "if [ ! -f .air.toml ]; then air init && sed -i 's/poll = false/poll = true/g' .air.toml; fi && air || go run .",
 		WatchHint:   "Go detected. Air uses native file events via touch-on-save.",
 		WorkDir:     getWorkDir(subDir),

@@ -238,7 +238,7 @@ export default function LandingPage() {
           </nav>
           <div className="flex items-center gap-4">
             <Link
-              href="/login"
+              href="/api/auth/github"
               className="bg-primary-container text-on-primary-fixed-variant px-6 py-2 rounded-lg font-bold primary-glow active:scale-95 transition-all"
             >
               Login
@@ -438,7 +438,7 @@ export default function LandingPage() {
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <Link
-                href="/signup"
+                href="/api/auth/github"
                 className="bg-primary-container text-on-primary-fixed-variant px-8 py-4 rounded-xl font-bold text-lg primary-glow active:scale-95 transition-all"
               >
                 Sign Up Free

@@ -77,7 +77,8 @@ func GithubCallback(c *gin.Context) {
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to exchange token"})
+		slog.Error("Failed to exchange GitHub token", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to exchange token", "details": err.Error()})
 		return
 	}
 	defer resp.Body.Close()

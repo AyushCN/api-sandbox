@@ -23,11 +23,11 @@ Measurements (10 cycles each, single dev host, base images pre-pulled via `setup
 
 | Runtime | p50 | p95 | Max | Failures | Notes |
 |---------|-----|-----|-----|----------|-------|
-| Node.js Express | 14.2s | 15.1s | 16.5s | 0/10 | Dominated by `npm install` |
-| Python FastAPI | 21.5s | 23.2s | 24.8s | 0/10 | Dominated by `pip install` |
-| Go Basic | 28.3s | 30.1s | 31.5s | 0/10 | Dominated by `go mod download` and `air` compilation |
+| Node.js Express | 29.1s | 43.1s | 43.1s | 0/10 | Dominated by `npm install` and cold container boot |
+| Python FastAPI | >60.0s | >60.0s | >60.0s | 8/10 | Frequently exceeds 60s timeout due to `pip install` |
+| Go Basic | >60.0s | >60.0s | >60.0s | 10/10| Exceeds 60s timeout heavily due to `go mod download` |
 
-**Verdict:** Cold starts are acceptable for a dev tool (~15-30 seconds), but definitely not sub-second. Pre-pulling base images shaved ~10s off these times.
+**Verdict:** Cold starts are much slower than warm reloads, primarily bottlenecked by package managers pulling dependencies on a cold volume. The Node Express start is acceptable (~30s), but Python and Go exceed the 60-second preview timeout. Future optimizations (like persistent volume caching or pre-installing common modules) are required for a true "instant" experience.
 
 ## Results (August 2026, single dev host)
 

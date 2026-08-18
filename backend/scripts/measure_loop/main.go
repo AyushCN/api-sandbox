@@ -111,10 +111,145 @@ func main() {
 		},
 	}
 
-	for _, app := range apps {
-		fmt.Printf("\n=== Benchmarking %s ===\n", app.name)
-		runBenchmark(app.name, app.repo, app.files)
+	isCold := false
+	if len(os.Args) > 1 && os.Args[1] == "--cold" {
+		isCold = true
 	}
+
+	for _, app := range apps {
+		if isCold {
+			runColdBenchmark(app.name, app.repo)
+		} else {
+			fmt.Printf("\n=== Benchmarking %s ===\n", app.name)
+			runBenchmark(app.name, app.repo, app.files)
+		}
+	}
+}
+
+func runColdBenchmark(name string, repo string) {
+	fmt.Printf("\n=== Cold-Start Benchmarking %s ===\n", name)
+	cycles := 10
+	var latencies []time.Duration
+	failures := 0
+
+	for i := 1; i <= cycles; i++ {
+		t0 := time.Now()
+
+		// 1. Create Env
+		body := map[string]interface{}{
+			"name":        "Cold Benchmark " + name,
+			"gitUrl":      repo,
+			"description": "Measurement harness",
+		}
+		bodyBytes, _ := json.Marshal(body)
+		req, _ := http.NewRequest("POST", appURL+"/api/environments", bytes.NewReader(bodyBytes))
+		req.Header.Set("Cookie", "token="+sessionCookie)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			fmt.Printf("  Cycle %d: Create env failed: %v\n", i, err)
+			failures++
+			continue
+		}
+
+		respBody, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != 200 && resp.StatusCode != 201 {
+			fmt.Printf("  Cycle %d: Failed to create env: %d %s\n", i, resp.StatusCode, string(respBody))
+			failures++
+			continue
+		}
+
+		var envResp EnvResponse
+		json.Unmarshal(respBody, &envResp)
+		envID := envResp.ID
+		if envID == "" {
+			fmt.Printf("  Cycle %d: Invalid env ID\n", i)
+			failures++
+			continue
+		}
+
+		cleanup := func() {
+			req, _ := http.NewRequest("DELETE", appURL+"/api/environments/"+envID, nil)
+			req.Header.Set("Cookie", "token="+sessionCookie)
+			http.DefaultClient.Do(req)
+		}
+
+		// 2. Wait for RUNNING
+		running := false
+		for j := 0; j < 120; j++ { // up to 4 mins
+			req, _ := http.NewRequest("GET", appURL+"/api/environments/"+envID, nil)
+			req.Header.Set("Cookie", "token="+sessionCookie)
+			r, err := http.DefaultClient.Do(req)
+			if err == nil {
+				var statusResp EnvResponse
+				json.NewDecoder(r.Body).Decode(&statusResp)
+				r.Body.Close()
+				if strings.EqualFold(statusResp.Status, "running") {
+					running = true
+					break
+				} else if strings.EqualFold(statusResp.Status, "failed") {
+					break
+				}
+			}
+			time.Sleep(2 * time.Second)
+		}
+
+		if !running {
+			fmt.Printf("  Cycle %d: Failed to reach RUNNING\n", i)
+			cleanup()
+			failures++
+			continue
+		}
+
+		// 3. Wait for preview URL
+		previewReady := false
+		for j := 0; j < 60; j++ { // up to 60 secs
+			req, _ := http.NewRequest("GET", appURL+"/", nil)
+			req.Host = envID + ".localhost"
+			r, err := http.DefaultClient.Do(req)
+			if err == nil {
+				io.Copy(io.Discard, r.Body)
+				r.Body.Close()
+				if r.StatusCode != http.StatusBadGateway && r.StatusCode != http.StatusServiceUnavailable {
+					previewReady = true
+					break
+				}
+			}
+			time.Sleep(1 * time.Second)
+		}
+
+		if !previewReady {
+			fmt.Printf("  Cycle %d: Failed to reach preview URL\n", i)
+			cleanup()
+			failures++
+			continue
+		}
+
+		lat := time.Since(t0)
+		latencies = append(latencies, lat)
+		fmt.Printf("  Cycle %d: %v\n", i, lat)
+
+		cleanup()
+		// Wait a bit before next cycle to avoid overwhelming Docker
+		time.Sleep(3 * time.Second)
+	}
+
+	if len(latencies) == 0 {
+		fmt.Printf("All failed!\n")
+		return
+	}
+
+	sort.Slice(latencies, func(i, j int) bool { return latencies[i] < latencies[j] })
+	p50 := latencies[len(latencies)*50/100]
+	p95 := latencies[len(latencies)*95/100]
+	max := latencies[len(latencies)-1]
+
+	fmt.Printf("\n--- Cold-Start Results for %s ---\n", name)
+	fmt.Printf("p50: %v\n", p50)
+	fmt.Printf("p95: %v\n", p95)
+	fmt.Printf("Max: %v\n", max)
+	fmt.Printf("Failures: %d / %d\n", failures, cycles)
 }
 
 func runBenchmark(name string, repo string, files map[string]string) {

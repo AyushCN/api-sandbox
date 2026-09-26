@@ -103,21 +103,15 @@ func InviteToProject(c *gin.Context) {
 		return
 	}
 
-	// Make sure role is valid
-	if req.Role != models.ProjectMemberRoleOwner && req.Role != models.ProjectMemberRoleEditor && req.Role != models.ProjectMemberRoleViewer {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid role specified"})
+	// Make sure role is valid and not OWNER (ownership must be transferred)
+	if req.Role != models.ProjectMemberRoleEditor && req.Role != models.ProjectMemberRoleViewer {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid role specified. Cannot invite as OWNER."})
 		return
 	}
 
-	// Fetch the project to ensure we don't invite to Default Workspace
 	var project models.Project
 	if err := db.DB.First(&project, "id = ?", projectID).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
-		return
-	}
-
-	if project.Name == "Default Workspace" {
-		c.JSON(http.StatusForbidden, gin.H{"error": "You cannot invite members to your Default Workspace. Please create a new project to share with others."})
 		return
 	}
 
@@ -292,4 +286,85 @@ func UpdateMemberRole(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Role updated successfully", "member": targetMember})
+}
+
+func DeleteProject(c *gin.Context) {
+	projectID := c.Param("projectId")
+	
+	// Ensure the project exists
+	var project models.Project
+	if err := db.DB.Where("id = ?", projectID).First(&project).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+		return
+	}
+
+	// Delete project (cascade should handle related entities if setup correctly, 
+	// otherwise we just delete the project row and rely on constraints/cleanup)
+	if err := db.DB.Delete(&project).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete project"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Project deleted successfully"})
+}
+
+type TransferOwnershipRequest struct {
+	NewOwnerID string `json:"newOwnerId" binding:"required"`
+}
+
+func TransferProjectOwnership(c *gin.Context) {
+	projectID := c.Param("projectId")
+	currentOwnerIDVal, _ := c.Get("userId")
+	currentOwnerID := currentOwnerIDVal.(string)
+
+	var req TransferOwnershipRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid payload"})
+		return
+	}
+
+	if currentOwnerID == req.NewOwnerID {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "You are already the owner"})
+		return
+	}
+
+	tx := db.DB.Begin()
+
+	// Demote current owner to editor
+	var currentOwner models.ProjectMember
+	if err := tx.Where("project_id = ? AND user_id = ?", projectID, currentOwnerID).First(&currentOwner).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusNotFound, gin.H{"error": "Current owner member record not found"})
+		return
+	}
+	currentOwner.Role = models.ProjectMemberRoleEditor
+	if err := tx.Save(&currentOwner).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to demote current owner"})
+		return
+	}
+
+	// Promote new owner
+	var newOwner models.ProjectMember
+	if err := tx.Where("project_id = ? AND user_id = ?", projectID, req.NewOwnerID).First(&newOwner).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusNotFound, gin.H{"error": "Target user is not a member of this project"})
+		return
+	}
+	
+	if newOwner.Status != models.ProjectMemberStatusAccepted {
+		tx.Rollback()
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Target user has not accepted their invite yet"})
+		return
+	}
+
+	newOwner.Role = models.ProjectMemberRoleOwner
+	if err := tx.Save(&newOwner).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to promote new owner"})
+		return
+	}
+
+	tx.Commit()
+	c.JSON(http.StatusOK, gin.H{"message": "Ownership transferred successfully"})
 }

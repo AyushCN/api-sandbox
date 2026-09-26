@@ -160,9 +160,18 @@ func ReviewChangeRequest(c *gin.Context) {
 		var canonicalRepos []models.WorkspaceRepository
 		db.DB.Preload("ProjectRepository").Where("workspace_id = ?", canonicalWorkspace.ID).Find(&canonicalRepos)
 
+		if canonicalWorkspace.EnvironmentID == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Canonical workspace has no environment"})
+			return
+		}
+		if sourceWorkspace.EnvironmentID == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Source workspace has no environment"})
+			return
+		}
+
 		wd, _ := os.Getwd()
-		canonicalEnvDir := filepath.Join(wd, "..", "workspaces", *canonicalWorkspace.EnvironmentID) // Assuming we're running in backend/
-		editorEnvDir := filepath.Join(wd, "..", "workspaces", *sourceWorkspace.EnvironmentID)
+		canonicalEnvDir := filepath.Join(wd, "workspaces", *canonicalWorkspace.EnvironmentID)
+		editorEnvDir := filepath.Join(wd, "workspaces", *sourceWorkspace.EnvironmentID)
 		
 		for _, cRepo := range canonicalRepos {
 			var sRepo *models.WorkspaceRepository

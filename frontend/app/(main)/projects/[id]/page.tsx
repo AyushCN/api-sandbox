@@ -111,7 +111,6 @@ export default function ProjectDetailsPage({
     );
   }
 
-  const isDefaultWorkspace = project.name === "Default Workspace";
 
   return (
     <div className="flex flex-col gap-8 pb-12">
@@ -133,9 +132,7 @@ export default function ProjectDetailsPage({
             </h1>
             <div className="flex items-center gap-2 text-sm text-on-surface-variant mt-1">
               <Users className="w-4 h-4" />
-              <span>
-                {isDefaultWorkspace ? "Private Workspace" : "Team Workspace"}
-              </span>
+              <span>Team Workspace</span>
               {project.description && (
                 <>
                   <span className="w-1 h-1 rounded-full bg-on-surface-variant/30" />

@@ -83,14 +83,8 @@ func EditProject(c *gin.Context) {
 	var repos []models.ProjectRepository
 	db.DB.Where("project_id = ?", projectID).Find(&repos)
 
-	var gitURL string
-	var branch string = "main"
-	if len(repos) > 0 {
-		gitURL = repos[0].GitURL
-		if repos[0].DefaultBranch != "" {
-			branch = repos[0].DefaultBranch
-		}
-	}
+	var gitURL string = "workspace-driven"
+	var branch string = "workspace-driven"
 
 	// Create environment
 	env := models.Environment{
@@ -173,14 +167,8 @@ func StartWorkspace(c *gin.Context) {
 	var repos []models.ProjectRepository
 	db.DB.Where("project_id = ?", projectID).Find(&repos)
 
-	var gitURL string
-	var branch string = "main"
-	if len(repos) > 0 {
-		gitURL = repos[0].GitURL
-		if repos[0].DefaultBranch != "" {
-			branch = repos[0].DefaultBranch
-		}
-	}
+	var gitURL string = "workspace-driven"
+	var branch string = "workspace-driven"
 
 	env := models.Environment{
 		UserID:         workspace.OwnerUserID,

@@ -443,7 +443,10 @@ export default function EnvironmentDetail() {
   // Auto-switch to logs tab when environment is BUILDING or FAILED
   useEffect(() => {
     if (env?.status === "BUILDING" || env?.status === "FAILED") {
-      setActiveTab("logs");
+      const timer = setTimeout(() => {
+        setActiveTab("logs");
+      }, 0);
+      return () => clearTimeout(timer);
     }
   }, [env?.status]);
 

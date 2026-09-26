@@ -201,15 +201,28 @@ func GithubCallback(c *gin.Context) {
 			// Create Default Workspace Project
 			defaultProject := models.Project{
 				Name:                "Default Workspace",
-				OwnerOrganizationID: org.ID,
+				OwnerOrganizationID: &org.ID,
 				CreatedByUserID:     user.ID,
 			}
 			if err := db.DB.Create(&defaultProject).Error; err == nil {
-				db.DB.Create(&models.ProjectCollaborator{
-					ProjectID: defaultProject.ID,
-					UserID:    user.ID,
-					Role:      models.ProjectRoleOwner,
+				now := time.Now()
+				db.DB.Create(&models.ProjectMember{
+					ProjectID:       defaultProject.ID,
+					UserID:          user.ID,
+					Role:            models.ProjectMemberRoleOwner,
+					Status:          models.ProjectMemberStatusAccepted,
+					InvitedByUserID: &user.ID,
+					AcceptedAt:      &now,
 				})
+				
+				// Create Canonical Workspace
+				canonicalWorkspace := models.Workspace{
+					ProjectID:   defaultProject.ID,
+					OwnerUserID: user.ID,
+					Type:        models.WorkspaceTypeCanonical,
+					Status:      models.WorkspaceStatusActive,
+				}
+				db.DB.Create(&canonicalWorkspace)
 			}
 		}
 	} else {

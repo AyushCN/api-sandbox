@@ -12,16 +12,17 @@ Designed for trusted users on a dedicated single host. Do not expose to untruste
 
 ## What It Does
 
-1. **GitHub OAuth** — sign in, clone a repo, push changes back to GitHub from the browser.
-2. **Live file editing** — code is bind-mounted into a language runtime container; process watchers restart on save.
-3. **Sidecar databases** — PostgreSQL, MySQL, Redis provisioned per environment on demand.
-4. **Browser IDE** — Monaco editor + Xterm.js terminal.
-5. **Preview URLs** — Traefik routes `<env-id>.domain` to the running container.
-6. **Role-based access** — `OWNER`, `COLLABORATOR`, `VIEWER` enforced across all APIs.
-7. **Warm Container Pool** — Pre-started `node`, `python`, and `go` containers using Traefik Redis dynamically to eliminate container boot overhead.
-8. **Host-Side Dependency Caches** — Persistent `npm`, `pnpm`, `pip`, and `go` caches mounted to bypass repetitive downloads on cold environments.
-9. **Advanced Runtime Detection** — Automatic multi-layered detection with fallback attempts to find the correct start command.
-10. **TTL Cleanup** — Asynq workers clean up abandoned workspaces safely to free up resources.
+1. **GitHub OAuth** — sign in, authenticate, push changes back to GitHub.
+2. **Project Sharing & Auto-Forking** — owners can share projects with other users. When an `EDITOR` edits a project, an isolated Workspace (`FORK`) is automatically created for them with their own branch and container environment.
+3. **Change Requests & Review** — editors submit their workspace changes via Change Requests, which the `OWNER` can review, diff, and merge back into the canonical workspace.
+4. **Live file editing** — code is bind-mounted into a language runtime container; process watchers restart on save.
+5. **Scoped WebSockets** — real-time presence and updates scoped by Project, Workspace, and Environment.
+6. **Sidecar databases** — PostgreSQL, MySQL, Redis provisioned per environment on demand.
+7. **Browser IDE** — Monaco editor + Xterm.js terminal.
+8. **Preview URLs** — Traefik routes `<env-id>.domain` to the running container.
+9. **Role-based access** — `OWNER`, `EDITOR`, `VIEWER` enforced via robust backend middleware.
+10. **Warm Container Pool** — Pre-started `node`, `python`, and `go` containers using Traefik Redis dynamically to eliminate container boot overhead.
+11. **Host-Side Dependency Caches** — Persistent caches mounted to bypass repetitive downloads.
 
 ## What It Does Not Do
 

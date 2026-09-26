@@ -41,9 +41,35 @@ graph TD
     Worker -->|docker run| EnvB
 ```
 
+## Project and Workspace Hierarchy
+
+The fundamental architecture uses a hierarchical approach:
+
+```mermaid
+graph TD
+    Project[Canonical Project]
+    WorkspaceA[Workspace: Owner / Canonical]
+    WorkspaceB[Workspace: Editor 1 / Fork]
+    WorkspaceC[Workspace: Editor 2 / Fork]
+    EnvA[Environment A]
+    EnvB[Environment B]
+    EnvC[Environment C]
+
+    Project --> WorkspaceA
+    Project --> WorkspaceB
+    Project --> WorkspaceC
+    WorkspaceA --> EnvA
+    WorkspaceB --> EnvB
+    WorkspaceC --> EnvC
+```
+
+*   **Project**: Represents the overarching logical application, managing members and settings.
+*   **Workspace**: Represents an isolated git working tree. `OWNER` modifies the canonical workspace. Each `EDITOR` receives a unique isolated `FORK` workspace.
+*   **Environment**: The actual running Docker container connected to a Workspace.
+
 ## Environment Lifecycle
 
-The environment is the primary abstraction. Lifecycle state:
+The environment is the container abstraction attached to a Workspace. Lifecycle state:
 
 ```mermaid
 stateDiagram-v2

@@ -47,7 +47,7 @@ func setupEnvironmentTestRouter() *gin.Engine {
 	// Endpoint removed
 	// r.POST("/api/environments/:id/sync", SyncEnvironmentWithGitHub)
 	r.GET("/api/environments/:id/docker-logs", GetDockerLogs)
-	r.GET("/api/ws/environments/:id", ServeWS)
+	r.GET("/api/ws/environments/:id", ServeEnvironmentWS)
 
 	return r
 }

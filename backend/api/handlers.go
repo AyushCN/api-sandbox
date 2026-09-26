@@ -121,10 +121,12 @@ func SetupRoutes(router *gin.Engine) {
 			protected.GET("/:id/git/file-diff", GitFileDiff)
 		}
 
-		wsGroup := api.Group("/ws/environments")
+		wsGroup := api.Group("/ws")
 		wsGroup.Use(AuthMiddleware())
 		{
-			wsGroup.GET("/:id", ServeWS)
+			wsGroup.GET("/environments/:id", ServeEnvironmentWS)
+			wsGroup.GET("/projects/:projectId", ServeProjectWS)
+			wsGroup.GET("/projects/:projectId/workspaces/:workspaceId", ServeWorkspaceWS)
 		}
 
 		userGroup := api.Group("/user")

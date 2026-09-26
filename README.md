@@ -4,7 +4,7 @@ A single-host tool that clones a GitHub repo onto a Linux host, runs it in a Doc
 
 **What it is not:** a secure multi-tenant cloud, production hosting, or a platform with guaranteed latency under all conditions.
 
-**How isolation works:** Docker cgroups, capability drops, and per-org bridge networks — best-effort. The control plane mounts `/var/run/docker.sock`, which is equivalent to host root. If the Go backend is compromised, the host is compromised.
+**How isolation works:** Docker cgroups, capability drops, and per-project bridge networks — best-effort. The control plane mounts `/var/run/docker.sock`, which is equivalent to host root. If the Go backend is compromised, the host is compromised.
 
 Designed for trusted users on a dedicated single host. Do not expose to untrusted users or arbitrary public repos.
 
@@ -47,7 +47,7 @@ See [PROOF.md](PROOF.md) for raw numbers.
 
 | Concern | Reality |
 |---------|---------|
-| Isolation | Best-effort containers (cgroups, CapDrop, per-org networks) |
+| Isolation | Best-effort containers (cgroups, CapDrop, per-project networks) |
 | Hostile multi-tenant | **Not supported** |
 | Control plane | **Docker socket = host root equivalent** |
 | Public signups | **Do not do this** |

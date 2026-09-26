@@ -35,7 +35,7 @@ This guarantees that the system state eventually converges with the PostgreSQL s
 Sidecar databases (PostgreSQL, MySQL, MongoDB, Redis) are generated dynamically based on the repository's needs.
 1. The backend provisions the primary application container.
 2. It detects required database types (e.g., scanning `requirements.txt` for `psycopg2`).
-3. It spins up a secondary database container connected directly to the specific Organization's isolated Docker network (`api-sandbox-net-<org_id>`).
+3. It spins up a secondary database container connected directly to the specific Project's isolated Docker network (`api-sandbox-net-<project_id>`).
 4. The database credentials are injected into the primary sandbox via environment variables (e.g., `DATABASE_URL=postgres://user:pass@<db-alias>:5432/db`).
 
 ## Preventing HTTP Socket Leaks

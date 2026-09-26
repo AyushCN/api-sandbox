@@ -18,13 +18,13 @@ graph TD
         PostgreSQL[(PostgreSQL)]
         Redis[(Redis)]
 
-        subgraph Org A Network
+        subgraph Project A Network
             EnvA[Sandbox Container A]
             DB_A[(Postgres Sidecar)]
             EnvA --- DB_A
         end
 
-        subgraph Org B Network
+        subgraph Project B Network
             EnvB[Sandbox Container B]
         end
     end
@@ -104,7 +104,7 @@ Warm reload latency (Node.js): ~250ms. Cold starts are substantially longer.
 | Boundary | Mechanism | What it does not protect |
 |----------|-----------|--------------------------|
 | API auth | JWT cookie | Compromised API process |
-| Tenant network | Bridge per org | Host if socket is abused |
+| Tenant network | Bridge per project | Host if socket is abused |
 | Container | CapDrop, no-new-privs, mem/PID limits | Kernel exploits, socket mount |
 | Path validation | Workspace root checks | Host FS via RCE in Go backend |
 

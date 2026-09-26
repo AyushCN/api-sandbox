@@ -92,8 +92,10 @@ type Workspace struct {
 	UpdatedAt   time.Time       `gorm:"default:current_timestamp" json:"updatedAt"`
 
 	// Link to the environment representing the running instance of this workspace
-	EnvironmentID *string      `gorm:"type:text" json:"environmentId"`
-	Environment   *Environment `json:"environment"`
+	OwnerUser     *User                 `gorm:"foreignKey:OwnerUserID" json:"ownerUser,omitempty"`
+	Repositories  []WorkspaceRepository `gorm:"foreignKey:WorkspaceID" json:"repositories,omitempty"`
+	EnvironmentID *string               `gorm:"type:text" json:"environmentId"`
+	Environment   *Environment          `json:"environment,omitempty"`
 }
 
 func (m *Workspace) BeforeCreate(tx *gorm.DB) (err error) {

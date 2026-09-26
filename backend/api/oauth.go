@@ -186,45 +186,6 @@ func GithubCallback(c *gin.Context) {
 			return
 		}
 
-		// Create Personal Workspace Organization
-		orgName := fmt.Sprintf("%s's Workspace", user.Username)
-		org := models.Organization{
-			Name: orgName,
-		}
-		if err := db.DB.Create(&org).Error; err == nil {
-			db.DB.Create(&models.OrganizationMember{
-				OrganizationID: org.ID,
-				UserID:         user.ID,
-				Role:           models.RoleAdmin,
-			})
-
-			// Create Default Workspace Project
-			defaultProject := models.Project{
-				Name:                "Default Workspace",
-				OwnerOrganizationID: &org.ID,
-				CreatedByUserID:     user.ID,
-			}
-			if err := db.DB.Create(&defaultProject).Error; err == nil {
-				now := time.Now()
-				db.DB.Create(&models.ProjectMember{
-					ProjectID:       defaultProject.ID,
-					UserID:          user.ID,
-					Role:            models.ProjectMemberRoleOwner,
-					Status:          models.ProjectMemberStatusAccepted,
-					InvitedByUserID: &user.ID,
-					AcceptedAt:      &now,
-				})
-				
-				// Create Canonical Workspace
-				canonicalWorkspace := models.Workspace{
-					ProjectID:   defaultProject.ID,
-					OwnerUserID: user.ID,
-					Type:        models.WorkspaceTypeCanonical,
-					Status:      models.WorkspaceStatusActive,
-				}
-				db.DB.Create(&canonicalWorkspace)
-			}
-		}
 	} else {
 		// Update existing user with latest GitHub info
 		db.DB.Model(&user).Updates(map[string]interface{}{

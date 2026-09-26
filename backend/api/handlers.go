@@ -317,7 +317,6 @@ func CreateEnvironment(c *gin.Context) {
 
 	// Find project to assign to
 	var projectID string
-	var orgID string
 	if req.ProjectID != "" {
 		// Verify access
 		var member models.ProjectMember
@@ -330,39 +329,14 @@ func CreateEnvironment(c *gin.Context) {
 			return
 		}
 		projectID = req.ProjectID
-		if member.Project.OwnerOrganizationID != nil {
-			orgID = *member.Project.OwnerOrganizationID
-		}
 	} else {
-		// Fallback for legacy frontend: use first available project, or create one
+		// Fallback for legacy frontend: use first available project
 		var member models.ProjectMember
 		if err := db.DB.Preload("Project").Where("user_id = ? AND status = ?", uid, models.ProjectMemberStatusAccepted).First(&member).Error; err == nil {
 			projectID = member.ProjectID
-			if member.Project.OwnerOrganizationID != nil {
-				orgID = *member.Project.OwnerOrganizationID
-			}
 		} else {
-			// No projects exist, create a default one (legacy behavior fallback)
-			var orgMember models.OrganizationMember
-			if err := db.DB.Where("user_id = ?", uid).First(&orgMember).Error; err == nil {
-				defaultProject := models.Project{
-					Name:                "Default Workspace",
-					OwnerOrganizationID: &orgMember.OrganizationID,
-					CreatedByUserID:     uid,
-				}
-				db.DB.Create(&defaultProject)
-				now := time.Now()
-				db.DB.Create(&models.ProjectMember{
-					ProjectID:       defaultProject.ID,
-					UserID:          uid,
-					Role:            models.ProjectMemberRoleOwner,
-					Status:          models.ProjectMemberStatusAccepted,
-					InvitedByUserID: &uid,
-					AcceptedAt:      &now,
-				})
-				projectID = defaultProject.ID
-				orgID = orgMember.OrganizationID
-			}
+			c.JSON(http.StatusBadRequest, gin.H{"error": "No project available. Create a project first."})
+			return
 		}
 	}
 
@@ -374,7 +348,6 @@ func CreateEnvironment(c *gin.Context) {
 	env := models.Environment{
 		UserID:            uid,
 		ProjectID:         projectID,
-		OrganizationID:    orgID,
 		Name:              req.Name,
 		GitURL:            req.GitURL,
 		GithubBranch:      req.GithubBranch,
@@ -837,14 +810,7 @@ func GetMe(c *gin.Context) {
 	var envCount int64
 	db.DB.Model(&models.Environment{}).Where("user_id = ?", userID).Count(&envCount)
 
-	// Get org membership
-	var orgMember models.OrganizationMember
-	orgName := ""
-	orgRole := ""
-	if err := db.DB.Preload("Organization").Where("user_id = ?", userID).First(&orgMember).Error; err == nil {
-		orgName = orgMember.Organization.Name
-		orgRole = string(orgMember.Role)
-	}
+
 
 	c.JSON(http.StatusOK, MeResponse{
 		ID:               user.ID,
@@ -863,8 +829,8 @@ func GetMe(c *gin.Context) {
 		Github:           user.Github,
 		CreatedAt:        user.CreatedAt.Format(time.RFC3339),
 		EnvCount:         envCount,
-		OrgName:          orgName,
-		OrgRole:          orgRole,
+		OrgName:          "",
+		OrgRole:          "",
 	})
 }
 
@@ -999,7 +965,7 @@ func ForkEnvironment(c *gin.Context) {
 	newEnv := models.Environment{
 		UserID:            uid,
 		ProjectID:         originalEnv.ProjectID,
-		OrganizationID:    originalEnv.OrganizationID,
+
 		Name:              forkedName,
 		GitURL:            originalEnv.GitURL,
 		GithubBranch:      originalEnv.GithubBranch,

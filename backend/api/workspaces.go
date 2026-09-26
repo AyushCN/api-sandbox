@@ -96,14 +96,10 @@ func EditProject(c *gin.Context) {
 	env := models.Environment{
 		UserID:         uid,
 		ProjectID:      projectID,
-		OrganizationID: "",
 		Name:           fmt.Sprintf("Editor Workspace for %s", uid),
 		GitURL:         gitURL,
 		GithubBranch:   branch,
 		Status:         models.StatusBuilding,
-	}
-	if member.Project.OwnerOrganizationID != nil {
-		env.OrganizationID = *member.Project.OwnerOrganizationID
 	}
 
 	if err := db.DB.Create(&env).Error; err != nil {
@@ -193,10 +189,6 @@ func StartWorkspace(c *gin.Context) {
 		GitURL:         gitURL,
 		GithubBranch:   branch,
 		Status:         models.StatusBuilding,
-	}
-
-	if member.Project.OwnerOrganizationID != nil {
-		env.OrganizationID = *member.Project.OwnerOrganizationID
 	}
 
 	if err := db.DB.Create(&env).Error; err != nil {

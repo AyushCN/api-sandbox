@@ -83,39 +83,84 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 	}
 	workspaceDir := filepath.Join(wd, "workspaces", env.ID)
 
-	// 1. Clone Repo directly
-	db.DB.Create(&models.Log{
-		EnvironmentID: &env.ID,
-		Message:       fmt.Sprintf("Synchronizing repository %s (branch: %s)...", env.GitURL, env.GithubBranch),
-		Level:         models.LogLevelInfo,
-	})
+	// 1. Resolve Workspace and Repositories
+	var workspace models.Workspace
+	db.DB.Where("environment_id = ?", env.ID).First(&workspace)
 
-	err = ProviderCloneOrFetch(ctx, workspaceDir, env.GitURL, env.GithubBranch, githubToken)
-	if err != nil {
-		slog.Error("Clone failed", "env_id", envID, "error", err)
-		db.DB.Model(&env).Update("status", models.StatusFailed)
-		db.DB.Create(&models.Log{
-			EnvironmentID: &env.ID,
-			Message:       fmt.Sprintf("Git clone failed: %v", err),
-			Level:         models.LogLevelError,
-		})
-		return err
+	var workspaceRepos []models.WorkspaceRepository
+	if workspace.ID != "" {
+		db.DB.Preload("ProjectRepository").Where("workspace_id = ?", workspace.ID).Find(&workspaceRepos)
 	}
 
-	// Update WorkspaceRepository with BaseCommit and CurrentCommit
-	var workspace models.Workspace
-	if err := db.DB.Where("environment_id = ?", env.ID).First(&workspace).Error; err == nil {
-		// Get commit hash
+	if len(workspaceRepos) > 0 {
+		for _, wRepo := range workspaceRepos {
+			var cloneDir string
+			if len(workspaceRepos) == 1 {
+				cloneDir = workspaceDir
+			} else {
+				dirName := wRepo.WorkingDirectory
+				if dirName == "" {
+					dirName = wRepo.ProjectRepository.Name
+				}
+				if dirName == "" {
+					dirName = "repo_" + wRepo.ID[:8]
+				}
+				cloneDir = filepath.Join(workspaceDir, dirName)
+			}
+
+			db.DB.Create(&models.Log{
+				EnvironmentID: &env.ID,
+				Message:       fmt.Sprintf("Synchronizing repository %s (branch: %s)...", wRepo.ProjectRepository.GitURL, wRepo.Branch),
+				Level:         models.LogLevelInfo,
+			})
+
+			err = ProviderCloneOrFetch(ctx, cloneDir, wRepo.ProjectRepository.GitURL, wRepo.Branch, githubToken)
+			if err != nil {
+				slog.Error("Clone failed", "env_id", envID, "repo", wRepo.ProjectRepository.GitURL, "error", err)
+				db.DB.Model(&env).Update("status", models.StatusFailed)
+				db.DB.Create(&models.Log{
+					EnvironmentID: &env.ID,
+					Message:       fmt.Sprintf("Git clone failed for %s: %v", wRepo.ProjectRepository.GitURL, err),
+					Level:         models.LogLevelError,
+				})
+				return err
+			}
+
+			cmdHash := exec.Command("git", "rev-parse", "HEAD")
+			cmdHash.Dir = cloneDir
+			if hashOut, err := cmdHash.Output(); err == nil {
+				hashStr := strings.TrimSpace(string(hashOut))
+				db.DB.Model(&wRepo).Updates(map[string]interface{}{
+					"base_commit":    hashStr,
+					"current_commit": hashStr,
+				})
+				db.DB.Model(&env).Update("commit_hash", hashStr)
+			}
+		}
+	} else {
+		// Legacy behavior
+		db.DB.Create(&models.Log{
+			EnvironmentID: &env.ID,
+			Message:       fmt.Sprintf("Synchronizing repository %s (branch: %s)...", env.GitURL, env.GithubBranch),
+			Level:         models.LogLevelInfo,
+		})
+
+		err = ProviderCloneOrFetch(ctx, workspaceDir, env.GitURL, env.GithubBranch, githubToken)
+		if err != nil {
+			slog.Error("Clone failed", "env_id", envID, "error", err)
+			db.DB.Model(&env).Update("status", models.StatusFailed)
+			db.DB.Create(&models.Log{
+				EnvironmentID: &env.ID,
+				Message:       fmt.Sprintf("Git clone failed: %v", err),
+				Level:         models.LogLevelError,
+			})
+			return err
+		}
+
 		cmdHash := exec.Command("git", "rev-parse", "HEAD")
 		cmdHash.Dir = workspaceDir
 		if hashOut, err := cmdHash.Output(); err == nil {
 			hashStr := strings.TrimSpace(string(hashOut))
-			db.DB.Model(&models.WorkspaceRepository{}).
-				Where("workspace_id = ?", workspace.ID).
-				Updates(map[string]interface{}{
-					"base_commit":    hashStr,
-					"current_commit": hashStr,
-				})
 			db.DB.Model(&env).Update("commit_hash", hashStr)
 		}
 	}
@@ -138,10 +183,7 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 				Level:         models.LogLevelInfo,
 			})
 
-			netID := env.OrganizationID
-			if netID == "" {
-				netID = env.UserID
-			}
+			netID := env.UserID
 
 			url, err := provider.StartSidecarDatabase(ctx, env.ID, netID, dbType)
 			if err != nil {
@@ -172,10 +214,7 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 		return err
 	}
 
-	netID := env.OrganizationID
-	if netID == "" {
-		netID = env.UserID
-	}
+	netID := env.UserID
 
 	domain := os.Getenv("DOMAIN")
 	if domain == "" {

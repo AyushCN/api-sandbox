@@ -97,9 +97,11 @@ func CloneOrFetch(ctx context.Context, dir, gitURL, branch, githubToken string) 
 			if out2, err2 := fallbackFetch.CombinedOutput(); err2 != nil {
 				return fmt.Errorf("git fetch failed: %s - %v (fallback: %s - %v)", string(out), err, string(out2), err2)
 			}
-			return exec.CommandContext(ctx, "git", "-C", dir, "reset", "--hard", "FETCH_HEAD").Run()
+			exec.CommandContext(ctx, "git", "-C", dir, "reset", "--hard", "FETCH_HEAD").Run()
+			return exec.CommandContext(ctx, "git", "-C", dir, "checkout", "-B", branch).Run()
 		}
-		return exec.CommandContext(ctx, "git", "-C", dir, "reset", "--hard", "origin/"+branch).Run()
+		exec.CommandContext(ctx, "git", "-C", dir, "reset", "--hard", "origin/"+branch).Run()
+		return exec.CommandContext(ctx, "git", "-C", dir, "checkout", "-B", branch).Run()
 	}
 
 	// For a fresh clone, if private, we need the token. The safest way without leaking it in the process list
@@ -122,10 +124,11 @@ func CloneOrFetch(ctx context.Context, dir, gitURL, branch, githubToken string) 
 		if out2, err2 := fetchCmd.CombinedOutput(); err2 != nil {
 			return fmt.Errorf("git fetch failed: %s - %v (fallback: %s - %v)", string(out), err, string(out2), err2)
 		}
-		// Checkout default branch (whatever was fetched)
-		return exec.CommandContext(ctx, "git", "-C", dir, "checkout", "FETCH_HEAD").Run()
+		// Checkout default branch and create the requested branch
+		exec.CommandContext(ctx, "git", "-C", dir, "checkout", "FETCH_HEAD").Run()
+		return exec.CommandContext(ctx, "git", "-C", dir, "checkout", "-B", branch).Run()
 	}
-	return exec.CommandContext(ctx, "git", "-C", dir, "checkout", branch).Run()
+	return exec.CommandContext(ctx, "git", "-C", dir, "checkout", "-B", branch, "origin/"+branch).Run()
 }
 
 // ProvisionDevSandbox has been moved to warmpool.go

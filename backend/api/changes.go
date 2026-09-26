@@ -1,7 +1,12 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 
 	"github.com/api-sandbox/backend/db"
 	"github.com/api-sandbox/backend/models"
@@ -136,8 +141,85 @@ func ReviewChangeRequest(c *gin.Context) {
 	case "REJECT":
 		status = models.ChangeRequestStatusRejected
 	case "MERGE":
+		// Find Canonical Workspace
+		var canonicalWorkspace models.Workspace
+		if err := db.DB.Preload("Environment").Where("project_id = ? AND type = ?", projectID, models.WorkspaceTypeCanonical).First(&canonicalWorkspace).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Canonical workspace not found"})
+			return
+		}
+		
+		var sourceWorkspace models.Workspace
+		if err := db.DB.Preload("Environment").Where("id = ?", cr.WorkspaceID).First(&sourceWorkspace).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Source workspace not found"})
+			return
+		}
+
+		var sourceRepos []models.WorkspaceRepository
+		db.DB.Preload("ProjectRepository").Where("workspace_id = ?", sourceWorkspace.ID).Find(&sourceRepos)
+
+		var canonicalRepos []models.WorkspaceRepository
+		db.DB.Preload("ProjectRepository").Where("workspace_id = ?", canonicalWorkspace.ID).Find(&canonicalRepos)
+
+		wd, _ := os.Getwd()
+		canonicalEnvDir := filepath.Join(wd, "..", "workspaces", *canonicalWorkspace.EnvironmentID) // Assuming we're running in backend/
+		editorEnvDir := filepath.Join(wd, "..", "workspaces", *sourceWorkspace.EnvironmentID)
+		
+		for _, cRepo := range canonicalRepos {
+			var sRepo *models.WorkspaceRepository
+			for _, sr := range sourceRepos {
+				if sr.ProjectRepositoryID == cRepo.ProjectRepositoryID {
+					sRepo = &sr
+					break
+				}
+			}
+			
+			if sRepo != nil {
+				var repoDir string
+				var editorRepoDir string
+				if len(canonicalRepos) == 1 {
+					repoDir = canonicalEnvDir
+					editorRepoDir = editorEnvDir
+				} else {
+					dirName := cRepo.WorkingDirectory
+					if dirName == "" {
+						dirName = cRepo.ProjectRepository.Name
+					}
+					if dirName == "" {
+						dirName = "repo_" + cRepo.ID[:8]
+					}
+					repoDir = filepath.Join(canonicalEnvDir, dirName)
+					editorRepoDir = filepath.Join(editorEnvDir, dirName)
+				}
+				
+				fetchCmd := exec.Command("git", "fetch", editorRepoDir, sRepo.Branch)
+				fetchCmd.Dir = repoDir
+				if err := fetchCmd.Run(); err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch from source workspace"})
+					return
+				}
+				
+				mergeCmd := exec.Command("git", "merge", "FETCH_HEAD", "-m", fmt.Sprintf("Merge change request %s", cr.ID))
+				mergeCmd.Dir = repoDir
+				if err := mergeCmd.Run(); err != nil {
+					status = models.ChangeRequestStatusConflicted
+					cr.Status = status
+					db.DB.Save(&cr)
+					abortCmd := exec.Command("git", "merge", "--abort")
+					abortCmd.Dir = repoDir
+					abortCmd.Run()
+					c.JSON(http.StatusConflict, gin.H{"error": "Merge conflict detected"})
+					return
+				}
+				
+				hashCmd := exec.Command("git", "rev-parse", "HEAD")
+				hashCmd.Dir = repoDir
+				if hashOut, err := hashCmd.Output(); err == nil {
+					hashStr := strings.TrimSpace(string(hashOut))
+					db.DB.Model(&cRepo).Update("current_commit", hashStr)
+				}
+			}
+		}
 		status = models.ChangeRequestStatusMerged
-		// In a full implementation, you would perform a git merge from the workspace branch to the canonical branch here.
 	default:
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid action. Must be APPROVE, REJECT, or MERGE"})
 		return

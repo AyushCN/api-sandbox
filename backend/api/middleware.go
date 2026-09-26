@@ -186,15 +186,6 @@ func RateLimitVerifyEmail() gin.HandlerFunc {
 	}
 }
 
-func hasProjectPermission(userRole, requiredRole models.ProjectRole) bool {
-	hierarchy := map[models.ProjectRole]int{
-		models.ProjectRoleOwner:        3,
-		models.ProjectRoleAdmin:        2,
-		models.ProjectRoleCollaborator: 1,
-		models.ProjectRoleViewer:       0,
-	}
-	return hierarchy[userRole] >= hierarchy[requiredRole]
-}
 
 func hasProjectMemberPermission(userRole, requiredRole models.ProjectMemberRole) bool {
 	hierarchy := map[models.ProjectMemberRole]int{
@@ -203,56 +194,6 @@ func hasProjectMemberPermission(userRole, requiredRole models.ProjectMemberRole)
 		models.ProjectMemberRoleViewer: 0,
 	}
 	return hierarchy[userRole] >= hierarchy[requiredRole]
-}
-
-func AuthorizeProjectAccess(requiredRole models.ProjectRole) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		projectID := c.Param("projectId")
-		if projectID == "" {
-			projectID = c.Param("id")
-		}
-
-		userIDVal, exists := c.Get("userId")
-		if !exists {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-			c.Abort()
-			return
-		}
-		userID := userIDVal.(string)
-
-		var collab models.ProjectCollaborator
-		err := db.DB.
-			Where("project_id = ? AND user_id = ?", projectID, userID).
-			First(&collab).Error
-
-		if err != nil {
-			c.JSON(http.StatusForbidden, gin.H{
-				"error": "Not a collaborator on this project or project does not exist",
-			})
-			c.Abort()
-			return
-		}
-
-		if collab.AcceptedAt == nil {
-			c.JSON(http.StatusForbidden, gin.H{
-				"error": "Invite pending acceptance",
-			})
-			c.Abort()
-			return
-		}
-
-		if !hasProjectPermission(collab.Role, requiredRole) {
-			c.JSON(http.StatusForbidden, gin.H{
-				"error": "Insufficient permissions on this project",
-			})
-			c.Abort()
-			return
-		}
-
-		c.Set("projectRole", collab.Role)
-		c.Set("projectID", projectID)
-		c.Next()
-	}
 }
 
 func AuthorizeProjectMemberAccess(requiredRole models.ProjectMemberRole) gin.HandlerFunc {

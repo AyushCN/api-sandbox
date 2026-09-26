@@ -79,6 +79,13 @@ func SetupRoutes(router *gin.Engine) {
 				// Workspaces
 				projectDetail.GET("/workspaces", GetProjectWorkspaces)
 				projectDetail.GET("/workspaces/:workspaceId", GetWorkspace)
+				projectDetail.POST("/workspaces/:workspaceId/start", StartWorkspace)
+				
+				// Change Requests
+				projectDetail.GET("/change-requests", GetChangeRequests)
+				projectDetail.POST("/change-requests", CreateChangeRequest)
+				projectDetail.GET("/change-requests/:requestId", GetChangeRequest)
+				projectDetail.POST("/change-requests/:requestId/review", AuthorizeProjectMemberAccess(models.ProjectMemberRoleOwner), ReviewChangeRequest)
 			}
 		}
 

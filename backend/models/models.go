@@ -79,8 +79,8 @@ type Environment struct {
 	UserID            string            `gorm:"type:text;not null" json:"userId"` // Creator
 	User              User              `json:"-"`
 	Name              string            `gorm:"type:text;not null" json:"name"`
-	GitURL            string            `gorm:"type:text;not null" json:"gitUrl"`
-	GithubBranch      string            `gorm:"type:text;default:main;not null" json:"githubBranch"`
+	GitURL            string            `gorm:"type:text" json:"gitUrl,omitempty"`
+	GithubBranch      string            `gorm:"type:text" json:"githubBranch,omitempty"`
 	Status            EnvironmentStatus `gorm:"type:text;default:IDLE;not null" json:"status"`
 	PublicURL         *string           `gorm:"type:text" json:"publicUrl"`
 	UserProvidedDBURL *string           `gorm:"type:text" json:"userProvidedDbUrl"`

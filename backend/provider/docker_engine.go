@@ -79,7 +79,7 @@ func recordBenchmark(id string, timings []buildTiming, totalDuration time.Durati
 	db.DB.Create(&totalRun)
 }
 
-func CloneOrFetch(ctx context.Context, dir, gitURL, branch, githubToken string) error {
+func CloneOrFetch(ctx context.Context, dir, gitURL, branch, baseCommit, githubToken string) error {
 	// Securely inject token via insteadOf if provided
 	configToken := func() {
 		if githubToken != "" {
@@ -90,22 +90,18 @@ func CloneOrFetch(ctx context.Context, dir, gitURL, branch, githubToken string) 
 
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
 		configToken()
-		fetchCmd := exec.CommandContext(ctx, "git", "-C", dir, "fetch", "--depth", "1", "origin", branch)
-		if out, err := fetchCmd.CombinedOutput(); err != nil {
-			// Fallback: fetch default branch if specific branch fetch fails
-			fallbackFetch := exec.CommandContext(ctx, "git", "-C", dir, "fetch", "--depth", "1", "origin")
-			if out2, err2 := fallbackFetch.CombinedOutput(); err2 != nil {
-				return fmt.Errorf("git fetch failed: %s - %v (fallback: %s - %v)", string(out), err, string(out2), err2)
-			}
-			exec.CommandContext(ctx, "git", "-C", dir, "reset", "--hard", "FETCH_HEAD").Run()
-			return exec.CommandContext(ctx, "git", "-C", dir, "checkout", "-B", branch).Run()
+		// Just fetch everything we might need
+		exec.CommandContext(ctx, "git", "-C", dir, "fetch", "--all").Run()
+		
+		targetRef := branch
+		if baseCommit != "" {
+			targetRef = baseCommit
 		}
-		exec.CommandContext(ctx, "git", "-C", dir, "reset", "--hard", "origin/"+branch).Run()
-		return exec.CommandContext(ctx, "git", "-C", dir, "checkout", "-B", branch).Run()
+		
+		return exec.CommandContext(ctx, "git", "-C", dir, "checkout", "-B", branch, targetRef).Run()
 	}
 
-	// For a fresh clone, if private, we need the token. The safest way without leaking it in the process list
-	// is to init, config, and then fetch/checkout.
+	// For a fresh clone
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
@@ -117,18 +113,19 @@ func CloneOrFetch(ctx context.Context, dir, gitURL, branch, githubToken string) 
 		return err
 	}
 
-	fetchCmd := exec.CommandContext(ctx, "git", "-C", dir, "fetch", "--depth", "1", "origin", branch)
-	if out, err := fetchCmd.CombinedOutput(); err != nil {
-		// Fallback to fetch all if branch isn't found
-		fetchCmd = exec.CommandContext(ctx, "git", "-C", dir, "fetch", "--depth", "1", "origin")
-		if out2, err2 := fetchCmd.CombinedOutput(); err2 != nil {
-			return fmt.Errorf("git fetch failed: %s - %v (fallback: %s - %v)", string(out), err, string(out2), err2)
+	exec.CommandContext(ctx, "git", "-C", dir, "fetch", "--all").Run()
+
+	targetRef := "FETCH_HEAD"
+	if baseCommit != "" {
+		targetRef = baseCommit
+	} else {
+		// Try to fetch specific branch if no base commit is provided
+		if err := exec.CommandContext(ctx, "git", "-C", dir, "fetch", "--depth", "1", "origin", branch).Run(); err == nil {
+			targetRef = "origin/" + branch
 		}
-		// Checkout default branch and create the requested branch
-		exec.CommandContext(ctx, "git", "-C", dir, "checkout", "FETCH_HEAD").Run()
-		return exec.CommandContext(ctx, "git", "-C", dir, "checkout", "-B", branch).Run()
 	}
-	return exec.CommandContext(ctx, "git", "-C", dir, "checkout", "-B", branch, "origin/"+branch).Run()
+
+	return exec.CommandContext(ctx, "git", "-C", dir, "checkout", "-B", branch, targetRef).Run()
 }
 
 // ProvisionDevSandbox has been moved to warmpool.go

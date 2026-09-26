@@ -83,16 +83,11 @@ func EditProject(c *gin.Context) {
 	var repos []models.ProjectRepository
 	db.DB.Where("project_id = ?", projectID).Find(&repos)
 
-	var gitURL string = "workspace-driven"
-	var branch string = "workspace-driven"
-
 	// Create environment
 	env := models.Environment{
 		UserID:         uid,
 		ProjectID:      projectID,
 		Name:           fmt.Sprintf("Editor Workspace for %s", uid),
-		GitURL:         gitURL,
-		GithubBranch:   branch,
 		Status:         models.StatusBuilding,
 	}
 
@@ -114,13 +109,33 @@ func EditProject(c *gin.Context) {
 		return
 	}
 
+	// Fetch canonical workspace repos to get base commits
+	var canonicalWorkspace models.Workspace
+	db.DB.Where("project_id = ? AND type = ?", projectID, models.WorkspaceTypeCanonical).First(&canonicalWorkspace)
+	
+	var canonicalRepos []models.WorkspaceRepository
+	if canonicalWorkspace.ID != "" {
+		db.DB.Where("workspace_id = ?", canonicalWorkspace.ID).Find(&canonicalRepos)
+	}
+
 	for _, repo := range repos {
-		db.DB.Create(&models.WorkspaceRepository{
+		var baseCommit string
+		for _, cRepo := range canonicalRepos {
+			if cRepo.ProjectRepositoryID == repo.ID && cRepo.CurrentCommit != "" {
+				baseCommit = cRepo.CurrentCommit
+				break
+			}
+		}
+
+		wRepo := models.WorkspaceRepository{
 			WorkspaceID:         editorWorkspace.ID,
 			ProjectRepositoryID: repo.ID,
-			Branch:              fmt.Sprintf("editors/%s", uid), // In a real system we would create this branch on the remote or locally
+			Branch:              fmt.Sprintf("editors/%s", uid),
+			BaseCommit:          baseCommit,
+			CurrentCommit:       baseCommit,
 			Status:              "SYNCED",
-		})
+		}
+		db.DB.Create(&wRepo)
 	}
 	
 	// Preload the environment so it can be returned
@@ -167,15 +182,10 @@ func StartWorkspace(c *gin.Context) {
 	var repos []models.ProjectRepository
 	db.DB.Where("project_id = ?", projectID).Find(&repos)
 
-	var gitURL string = "workspace-driven"
-	var branch string = "workspace-driven"
-
 	env := models.Environment{
 		UserID:         workspace.OwnerUserID,
 		ProjectID:      projectID,
 		Name:           fmt.Sprintf("Workspace Environment %s", workspace.ID),
-		GitURL:         gitURL,
-		GithubBranch:   branch,
 		Status:         models.StatusBuilding,
 	}
 

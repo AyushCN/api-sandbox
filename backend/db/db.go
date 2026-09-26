@@ -76,8 +76,6 @@ func InitDB() {
 	DB.Exec("DROP TABLE IF EXISTS provider_configs CASCADE")
 	DB.Exec("DROP TABLE IF EXISTS deployments CASCADE")
 
-	// Migration: Create default projects for environments that only have OrganizationID
-
 
 	slog.Info("Database connection established and schemas migrated.")
 

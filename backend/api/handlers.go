@@ -66,6 +66,7 @@ func SetupRoutes(router *gin.Engine) {
 				projectDetail.POST("/transfer", AuthorizeProjectMemberAccess(models.ProjectMemberRoleOwner), TransferProjectOwnership)
 				projectDetail.GET("/activity", GetProjectActivity)
 				projectDetail.GET("/team-status", GetProjectTeamStatus)
+				projectDetail.GET("/members", GetProjectMembers)
 				projectDetail.POST("/invite", AuthorizeProjectMemberAccess(models.ProjectMemberRoleOwner), InviteToProject)
 				projectDetail.DELETE("/collaborators/:userId", RemoveCollaborator)
 				projectDetail.PUT("/collaborators/:userId/role", AuthorizeProjectMemberAccess(models.ProjectMemberRoleOwner), UpdateMemberRole)

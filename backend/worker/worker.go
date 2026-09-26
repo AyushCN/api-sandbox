@@ -21,7 +21,7 @@ import (
 
 var (
 	ProviderCleanupContainer           = provider.CleanupContainer
-	ProviderCloneOrFetch               = provider.CloneOrFetch
+	ProviderCloneOrFetch               func(ctx context.Context, dir, gitURL, branch, baseCommit, githubToken string) error = provider.CloneOrFetch
 	ProviderDetectDatabaseRequirements = provider.DetectDatabaseRequirements
 	ProviderStartSidecarDatabase       = provider.StartSidecarDatabase
 	ProviderCheckContainerHealth       = provider.CheckContainerHealth
@@ -77,11 +77,7 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 		_ = provider.CleanupContainer(ctx, *env.ContainerID)
 	}
 
-	wd, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("failed to get working directory: %v", err)
-	}
-	workspaceDir := filepath.Join(wd, "workspaces", env.ID)
+	workspaceDir := provider.GetWorkspacePath(env.ID)
 
 	// 1. Resolve Workspace and Repositories
 	var workspace models.Workspace
@@ -94,19 +90,7 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 
 	if len(workspaceRepos) > 0 {
 		for _, wRepo := range workspaceRepos {
-			var cloneDir string
-			if len(workspaceRepos) == 1 {
-				cloneDir = workspaceDir
-			} else {
-				dirName := wRepo.WorkingDirectory
-				if dirName == "" {
-					dirName = wRepo.ProjectRepository.Name
-				}
-				if dirName == "" {
-					dirName = "repo_" + wRepo.ID[:8]
-				}
-				cloneDir = filepath.Join(workspaceDir, dirName)
-			}
+			cloneDir := provider.GetWorkspaceRepositoryPath(env.ID, len(workspaceRepos), wRepo.WorkingDirectory, wRepo.ProjectRepository.Name, wRepo.ID)
 
 			db.DB.Create(&models.Log{
 				EnvironmentID: &env.ID,
@@ -114,7 +98,7 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 				Level:         models.LogLevelInfo,
 			})
 
-			err = ProviderCloneOrFetch(ctx, cloneDir, wRepo.ProjectRepository.GitURL, wRepo.Branch, githubToken)
+			err := ProviderCloneOrFetch(ctx, cloneDir, wRepo.ProjectRepository.GitURL, wRepo.Branch, wRepo.BaseCommit, githubToken)
 			if err != nil {
 				slog.Error("Clone failed", "env_id", envID, "repo", wRepo.ProjectRepository.GitURL, "error", err)
 				db.DB.Model(&env).Update("status", models.StatusFailed)
@@ -145,7 +129,7 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 			Level:         models.LogLevelInfo,
 		})
 
-		err = ProviderCloneOrFetch(ctx, workspaceDir, env.GitURL, env.GithubBranch, githubToken)
+		err := ProviderCloneOrFetch(ctx, workspaceDir, env.GitURL, env.GithubBranch, "", githubToken)
 		if err != nil {
 			slog.Error("Clone failed", "env_id", envID, "error", err)
 			db.DB.Model(&env).Update("status", models.StatusFailed)

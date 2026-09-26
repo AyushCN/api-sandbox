@@ -3,13 +3,12 @@ package api
 import (
 	"fmt"
 	"net/http"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"github.com/api-sandbox/backend/db"
 	"github.com/api-sandbox/backend/models"
+	"github.com/api-sandbox/backend/provider"
 	"github.com/gin-gonic/gin"
 )
 
@@ -169,10 +168,14 @@ func ReviewChangeRequest(c *gin.Context) {
 			return
 		}
 
-		wd, _ := os.Getwd()
-		canonicalEnvDir := filepath.Join(wd, "workspaces", *canonicalWorkspace.EnvironmentID)
-		editorEnvDir := filepath.Join(wd, "workspaces", *sourceWorkspace.EnvironmentID)
+
 		
+		type mergeOp struct {
+			RepoDir string
+			CRepo   models.WorkspaceRepository
+		}
+		var successfulMerges []mergeOp
+
 		for _, cRepo := range canonicalRepos {
 			var sRepo *models.WorkspaceRepository
 			for _, sr := range sourceRepos {
@@ -183,51 +186,55 @@ func ReviewChangeRequest(c *gin.Context) {
 			}
 			
 			if sRepo != nil {
-				var repoDir string
-				var editorRepoDir string
-				if len(canonicalRepos) == 1 {
-					repoDir = canonicalEnvDir
-					editorRepoDir = editorEnvDir
-				} else {
-					dirName := cRepo.WorkingDirectory
-					if dirName == "" {
-						dirName = cRepo.ProjectRepository.Name
-					}
-					if dirName == "" {
-						dirName = "repo_" + cRepo.ID[:8]
-					}
-					repoDir = filepath.Join(canonicalEnvDir, dirName)
-					editorRepoDir = filepath.Join(editorEnvDir, dirName)
-				}
+				repoDir := provider.GetWorkspaceRepositoryPath(*canonicalWorkspace.EnvironmentID, len(canonicalRepos), cRepo.WorkingDirectory, cRepo.ProjectRepository.Name, cRepo.ID)
+				editorRepoDir := provider.GetWorkspaceRepositoryPath(*sourceWorkspace.EnvironmentID, len(sourceRepos), sRepo.WorkingDirectory, sRepo.ProjectRepository.Name, sRepo.ID)
 				
 				fetchCmd := exec.Command("git", "fetch", editorRepoDir, sRepo.Branch)
 				fetchCmd.Dir = repoDir
 				if err := fetchCmd.Run(); err != nil {
+					// Rollback any successful merges
+					for _, sm := range successfulMerges {
+						exec.Command("git", "-C", sm.RepoDir, "merge", "--abort").Run()
+					}
 					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch from source workspace"})
 					return
 				}
 				
-				mergeCmd := exec.Command("git", "merge", "FETCH_HEAD", "-m", fmt.Sprintf("Merge change request %s", cr.ID))
+				mergeCmd := exec.Command("git", "merge", "FETCH_HEAD", "--no-commit", "--no-ff")
 				mergeCmd.Dir = repoDir
 				if err := mergeCmd.Run(); err != nil {
+					// Rollback this failed merge
+					exec.Command("git", "-C", repoDir, "merge", "--abort").Run()
+					// Rollback all previous successful merges
+					for _, sm := range successfulMerges {
+						exec.Command("git", "-C", sm.RepoDir, "merge", "--abort").Run()
+					}
+
 					status = models.ChangeRequestStatusConflicted
 					cr.Status = status
 					db.DB.Save(&cr)
-					abortCmd := exec.Command("git", "merge", "--abort")
-					abortCmd.Dir = repoDir
-					abortCmd.Run()
-					c.JSON(http.StatusConflict, gin.H{"error": "Merge conflict detected"})
+					c.JSON(http.StatusConflict, gin.H{"error": "Merge conflict detected in repository " + cRepo.ProjectRepository.Name})
 					return
 				}
-				
-				hashCmd := exec.Command("git", "rev-parse", "HEAD")
-				hashCmd.Dir = repoDir
-				if hashOut, err := hashCmd.Output(); err == nil {
-					hashStr := strings.TrimSpace(string(hashOut))
-					db.DB.Model(&cRepo).Update("current_commit", hashStr)
-				}
+
+				successfulMerges = append(successfulMerges, mergeOp{RepoDir: repoDir, CRepo: cRepo})
 			}
 		}
+
+		// Phase 2: Commit all successful merges
+		for _, sm := range successfulMerges {
+			commitCmd := exec.Command("git", "commit", "-m", fmt.Sprintf("Merge change request %s", cr.ID))
+			commitCmd.Dir = sm.RepoDir
+			commitCmd.Run() // Assuming this succeeds since the merge was clean
+
+			hashCmd := exec.Command("git", "rev-parse", "HEAD")
+			hashCmd.Dir = sm.RepoDir
+			if hashOut, err := hashCmd.Output(); err == nil {
+				hashStr := strings.TrimSpace(string(hashOut))
+				db.DB.Model(&sm.CRepo).Update("current_commit", hashStr)
+			}
+		}
+
 		status = models.ChangeRequestStatusMerged
 	default:
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid action. Must be APPROVE, REJECT, or MERGE"})

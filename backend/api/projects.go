@@ -150,6 +150,19 @@ func InviteToProject(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Member invited successfully", "member": newMember})
 }
 
+// GetProjectMembers returns all accepted and pending members of a project.
+func GetProjectMembers(c *gin.Context) {
+	projectID := c.Param("projectId")
+
+	var members []models.ProjectMember
+	if err := db.DB.Preload("User").Where("project_id = ?", projectID).Find(&members).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch members"})
+		return
+	}
+
+	c.JSON(http.StatusOK, members)
+}
+
 func GetUserInvites(c *gin.Context) {
 	userID, _ := c.Get("userId")
 

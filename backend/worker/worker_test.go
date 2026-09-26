@@ -43,7 +43,7 @@ func TestHandleBuildEnvironmentTask_CloneError(t *testing.T) {
 	db.DB.Create(&env)
 
 	// Mock ProviderCloneOrFetch to fail
-	ProviderCloneOrFetch = func(ctx context.Context, targetDir, repoURL, branch, token string) error {
+	ProviderCloneOrFetch = func(ctx context.Context, targetDir, repoURL, branch, baseCommit, token string) error {
 		return fmt.Errorf("mock clone failure")
 	}
 
@@ -79,7 +79,7 @@ func TestHandleBuildEnvironmentTask_SidecarError(t *testing.T) {
 	db.DB.Create(&env)
 
 	// Mock providers
-	ProviderCloneOrFetch = func(ctx context.Context, targetDir, repoURL, branch, token string) error {
+	ProviderCloneOrFetch = func(ctx context.Context, targetDir, repoURL, branch, baseCommit, token string) error {
 		return nil
 	}
 	ProviderCheckContainerHealth = func(containerID string) (bool, string, error) {

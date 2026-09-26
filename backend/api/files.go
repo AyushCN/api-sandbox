@@ -109,11 +109,11 @@ func checkWorkspaceWriteAccess(c *gin.Context, envID string) (*models.Environmen
 		return env, nil
 	}
 
-	// Check project collaborator role
+	// Check project member role
 	if env.ProjectID != "" {
-		var collab models.ProjectCollaborator
-		if err := db.DB.Where("project_id = ? AND user_id = ?", env.ProjectID, userIDStr).First(&collab).Error; err == nil {
-			if collab.Role == models.ProjectRoleViewer {
+		var member models.ProjectMember
+		if err := db.DB.Where("project_id = ? AND user_id = ? AND status = ?", env.ProjectID, userIDStr, models.ProjectMemberStatusAccepted).First(&member).Error; err == nil {
+			if member.Role == models.ProjectMemberRoleViewer {
 				return nil, fmt.Errorf("viewers cannot modify environments or use git commands")
 			}
 		}

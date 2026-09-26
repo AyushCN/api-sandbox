@@ -26,7 +26,7 @@ func setupTestDBForFiles(t *testing.T) {
 	err = db.DB.AutoMigrate(
 		&models.User{},
 		&models.Project{},
-		&models.ProjectCollaborator{},
+		&models.ProjectMember{},
 		&models.Environment{},
 		&models.Log{},
 		&models.Metric{},
@@ -42,10 +42,11 @@ func createTestEnvironmentForFiles(t *testing.T) (*models.Environment, *models.U
 
 	project := models.Project{Name: "Project Files", CreatedByUserID: user.ID}
 	db.DB.Create(&project)
-	db.DB.Create(&models.ProjectCollaborator{
+	db.DB.Create(&models.ProjectMember{
 		ProjectID: project.ID,
 		UserID:    user.ID,
-		Role:      models.ProjectRoleOwner,
+		Role:      models.ProjectMemberRoleOwner,
+		Status:    models.ProjectMemberStatusAccepted,
 	})
 
 	env := models.Environment{

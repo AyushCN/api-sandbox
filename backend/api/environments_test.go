@@ -65,7 +65,7 @@ func TestEnvironmentAuthz(t *testing.T) {
 	err = db.DB.AutoMigrate(
 		&models.User{},
 		&models.Project{},
-		&models.ProjectCollaborator{},
+		&models.ProjectMember{},
 		&models.Environment{},
 		&models.Log{},
 		&models.Metric{},
@@ -84,10 +84,11 @@ func TestEnvironmentAuthz(t *testing.T) {
 	// 2. Setup Project A owned by User 1
 	projectA := models.Project{Name: "Project A", CreatedByUserID: user1.ID}
 	db.DB.Create(&projectA)
-	db.DB.Create(&models.ProjectCollaborator{
+	db.DB.Create(&models.ProjectMember{
 		ProjectID: projectA.ID,
 		UserID:    user1.ID,
-		Role:      models.ProjectRoleOwner,
+		Role:      models.ProjectMemberRoleOwner,
+		Status:    models.ProjectMemberStatusAccepted,
 	})
 
 	// 3. Create Environment in Project A

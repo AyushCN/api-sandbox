@@ -113,8 +113,8 @@ func ServeWS(c *gin.Context) {
 	if env.UserID == userID {
 		hasAccess = true
 	} else if env.ProjectID != "" {
-		var member models.ProjectCollaborator
-		if err := db.DB.Where("project_id = ? AND user_id = ?", env.ProjectID, userID).First(&member).Error; err == nil {
+		var member models.ProjectMember
+		if err := db.DB.Where("project_id = ? AND user_id = ? AND status = ?", env.ProjectID, userID, models.ProjectMemberStatusAccepted).First(&member).Error; err == nil {
 			hasAccess = true
 		}
 	}

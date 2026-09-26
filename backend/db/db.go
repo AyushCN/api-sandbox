@@ -62,6 +62,11 @@ func InitDB() {
 		&models.AuditLog{},
 		&models.Activity{},
 		&models.BenchmarkRun{},
+		&models.ProjectRepository{},
+		&models.ProjectMember{},
+		&models.Workspace{},
+		&models.WorkspaceRepository{},
+		&models.ChangeRequest{},
 	)
 	if err != nil {
 		slog.Error("Failed to auto migrate database schemas", "error", err)
@@ -94,7 +99,7 @@ func InitDB() {
 				project = models.Project{
 					Name:                "Default Workspace",
 					Description:         "Auto-migrated default project",
-					OwnerOrganizationID: env.OrganizationID,
+					OwnerOrganizationID: &env.OrganizationID,
 					CreatedByUserID:     env.UserID,
 				}
 				DB.Create(&project)
@@ -121,6 +126,38 @@ func InitDB() {
 		slog.Error("Failed to auto-accept existing collaborators", "error", err)
 	} else {
 		slog.Info("Migrated existing collaborators to accepted status.")
+	}
+
+	// Migration: Migrate ProjectCollaborator to ProjectMember
+	err = DB.Exec(`
+		INSERT INTO project_members (id, project_id, user_id, role, status, invited_by_user_id, invited_at, accepted_at, created_at, updated_at)
+		SELECT 
+			c.id, 
+			c.project_id, 
+			c.user_id, 
+			CASE 
+				WHEN c.role = 'OWNER' THEN 'OWNER'
+				WHEN c.role = 'VIEWER' THEN 'VIEWER'
+				ELSE 'EDITOR'
+			END,
+			CASE
+				WHEN c.accepted_at IS NOT NULL THEN 'ACCEPTED'
+				ELSE 'PENDING'
+			END,
+			NULLIF(c.invited_by_user_id, ''),
+			c.invited_at,
+			c.accepted_at,
+			CURRENT_TIMESTAMP,
+			CURRENT_TIMESTAMP
+		FROM project_collaborators c
+		WHERE NOT EXISTS (
+			SELECT 1 FROM project_members m WHERE m.project_id = c.project_id AND m.user_id = c.user_id
+		)
+	`).Error
+	if err != nil {
+		slog.Error("Failed to migrate ProjectCollaborator to ProjectMember", "error", err)
+	} else {
+		slog.Info("Migrated ProjectCollaborator to ProjectMember.")
 	}
 
 	slog.Info("Database connection established and schemas migrated.")

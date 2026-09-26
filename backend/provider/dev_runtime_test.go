@@ -29,7 +29,7 @@ func TestDetectDevRuntime(t *testing.T) {
 			},
 			expectedBase: "node:20-alpine",
 			expectedInst: "npm install",
-			expectedStrt: "npx nodemon index.js",
+			expectedStrt: "npm run start",
 		},
 		{
 			name: "Node.js Next.js with yarn",
@@ -58,8 +58,8 @@ func TestDetectDevRuntime(t *testing.T) {
 				"main.py":          "",
 			},
 			expectedBase: "python:3.11-slim",
-			expectedInst: "pip install -r requirements.txt && pip install uvicorn[standard]",
-			expectedStrt: "uvicorn main:app --host 0.0.0.0 --reload --reload-dir .",
+			expectedInst: "pip install -r requirements.txt && pip install uvicorn[standard] fastapi",
+			expectedStrt: "uvicorn main:app --host 0.0.0.0 --reload",
 		},
 		{
 			name: "Python Django",
@@ -68,7 +68,7 @@ func TestDetectDevRuntime(t *testing.T) {
 				"manage.py":        "",
 			},
 			expectedBase: "python:3.11-slim",
-			expectedInst: "pip install -r requirements.txt && pip install uvicorn[standard]",
+			expectedInst: "pip install -r requirements.txt && pip install django",
 			expectedStrt: "python manage.py runserver 0.0.0.0:8000",
 		},
 		{
@@ -77,8 +77,8 @@ func TestDetectDevRuntime(t *testing.T) {
 				"go.mod": "module example.com/m\n\ngo 1.22\n",
 			},
 			expectedBase: "golang:alpine",
-			expectedInst: "go mod download && go install github.com/air-verse/air@v1.52.3",
-			expectedStrt: "if [ ! -f .air.toml ]; then air init && sed -i 's/poll = false/poll = true/g' .air.toml; fi && air || go run .",
+			expectedInst: "go mod download",
+			expectedStrt: "go run .",
 		},
 
 		{
@@ -112,10 +112,14 @@ start_cmd = "npm run custom"
 				}
 			}
 
-			config, err := DetectDevRuntime(repoDir, "")
+			configs, err := DetectDevRuntimes(repoDir, "")
 			if err != nil {
 				t.Fatalf("Expected no error, got: %v", err)
 			}
+			if len(configs) == 0 {
+				t.Fatalf("Expected at least one config, got none")
+			}
+			config := configs[0]
 
 			if config.BaseImage != tc.expectedBase {
 				t.Errorf("Expected BaseImage %q, got %q", tc.expectedBase, config.BaseImage)

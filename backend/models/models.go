@@ -91,9 +91,12 @@ type Project struct {
 	Description         string                `gorm:"type:text" json:"description"`
 	CreatedByUserID     string                `gorm:"type:text;not null" json:"createdBy"`
 	CreatedByUser       User                  `json:"-"`
-	OwnerOrganizationID string                `gorm:"type:text;not null;index" json:"ownerOrganizationId"`
-	OwnerOrganization   Organization          `json:"-"`
+	OwnerOrganizationID *string               `gorm:"type:text;index" json:"ownerOrganizationId"`
+	OwnerOrganization   *Organization         `json:"-"`
 	Collaborators       []ProjectCollaborator `json:"collaborators,omitempty"`
+	Members             []ProjectMember       `json:"members,omitempty"`
+	Repositories        []ProjectRepository   `json:"repositories,omitempty"`
+	Workspaces          []Workspace           `json:"workspaces,omitempty"`
 	Environments        []Environment         `json:"environments,omitempty"`
 	IsPublic            bool                  `gorm:"default:false" json:"isPublic"`
 	CreatedAt           time.Time             `gorm:"default:current_timestamp" json:"createdAt"`

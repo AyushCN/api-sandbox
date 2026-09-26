@@ -393,6 +393,44 @@ func GitPull(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Successfully pulled", "output": string(out)})
 }
+func GitDiff(c *gin.Context) {
+	id := c.Param("id")
+	_, err := checkWorkspaceAccess(c, id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+
+	wd, _ := os.Getwd()
+	workspaceDir := filepath.Join(wd, "workspaces", id)
+
+	// Get overall diff
+	cmd := exec.Command("git", "diff")
+	cmd.Dir = workspaceDir
+	out, _ := cmd.Output()
+
+	c.JSON(http.StatusOK, gin.H{"diff": string(out)})
+}
+
+func GitFileDiff(c *gin.Context) {
+	id := c.Param("id")
+	filePath := c.Query("file")
+	
+	_, err := checkWorkspaceAccess(c, id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+
+	wd, _ := os.Getwd()
+	workspaceDir := filepath.Join(wd, "workspaces", id)
+
+	cmd := exec.Command("git", "diff", "--", filePath)
+	cmd.Dir = workspaceDir
+	out, _ := cmd.Output()
+
+	c.JSON(http.StatusOK, gin.H{"diff": string(out)})
+}
 
 // GitLog returns the last 20 commits for an environment.
 func GitLog(c *gin.Context) {
@@ -788,6 +826,14 @@ func CommitChanges(c *gin.Context) {
 		"has_uncommitted_changes": false,
 		"commit_hash":             hashStr,
 	})
+
+	// Update WorkspaceRepository
+	var workspace models.Workspace
+	if err := db.DB.Where("environment_id = ?", env.ID).First(&workspace).Error; err == nil {
+		db.DB.Model(&models.WorkspaceRepository{}).
+			Where("workspace_id = ?", workspace.ID).
+			Update("current_commit", hashStr)
+	}
 
 	// Broadcast
 	BroadcastToProjectMembers(envID, map[string]interface{}{

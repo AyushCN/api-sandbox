@@ -7,7 +7,9 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/api-sandbox/backend/api"
@@ -98,6 +100,24 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 			Level:         models.LogLevelError,
 		})
 		return err
+	}
+
+	// Update WorkspaceRepository with BaseCommit and CurrentCommit
+	var workspace models.Workspace
+	if err := db.DB.Where("environment_id = ?", env.ID).First(&workspace).Error; err == nil {
+		// Get commit hash
+		cmdHash := exec.Command("git", "rev-parse", "HEAD")
+		cmdHash.Dir = workspaceDir
+		if hashOut, err := cmdHash.Output(); err == nil {
+			hashStr := strings.TrimSpace(string(hashOut))
+			db.DB.Model(&models.WorkspaceRepository{}).
+				Where("workspace_id = ?", workspace.ID).
+				Updates(map[string]interface{}{
+					"base_commit":    hashStr,
+					"current_commit": hashStr,
+				})
+			db.DB.Model(&env).Update("commit_hash", hashStr)
+		}
 	}
 
 	// 2. Database Provisioning

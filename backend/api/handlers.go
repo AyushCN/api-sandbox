@@ -59,13 +59,26 @@ func SetupRoutes(router *gin.Engine) {
 			projectDetail.POST("/invites/decline", DeclineProjectInvite)
 
 			// Authorized project endpoints
-			projectDetail.Use(AuthorizeProjectAccess(models.ProjectRoleViewer))
+			projectDetail.Use(AuthorizeProjectMemberAccess(models.ProjectMemberRoleViewer))
 			{
 				projectDetail.GET("", GetProject)
 				projectDetail.GET("/activity", GetProjectActivity)
 				projectDetail.GET("/team-status", GetProjectTeamStatus)
-				projectDetail.POST("/invite", AuthorizeProjectAccess(models.ProjectRoleAdmin), InviteToProject)
+				projectDetail.POST("/invite", AuthorizeProjectMemberAccess(models.ProjectMemberRoleOwner), InviteToProject)
 				projectDetail.DELETE("/collaborators/:userId", RemoveCollaborator)
+				projectDetail.PUT("/collaborators/:userId/role", AuthorizeProjectMemberAccess(models.ProjectMemberRoleOwner), UpdateMemberRole)
+				
+				// Editing
+				projectDetail.POST("/edit", AuthorizeProjectMemberAccess(models.ProjectMemberRoleEditor), EditProject)
+				
+				// Repositories
+				projectDetail.GET("/repositories", GetProjectRepositories)
+				projectDetail.POST("/repositories", AuthorizeProjectMemberAccess(models.ProjectMemberRoleOwner), AddProjectRepository)
+				projectDetail.DELETE("/repositories/:repositoryId", AuthorizeProjectMemberAccess(models.ProjectMemberRoleOwner), RemoveProjectRepository)
+
+				// Workspaces
+				projectDetail.GET("/workspaces", GetProjectWorkspaces)
+				projectDetail.GET("/workspaces/:workspaceId", GetWorkspace)
 			}
 		}
 
@@ -296,37 +309,45 @@ func CreateEnvironment(c *gin.Context) {
 	var orgID string
 	if req.ProjectID != "" {
 		// Verify access
-		var collab models.ProjectCollaborator
-		if err := db.DB.Preload("Project").Where("project_id = ? AND user_id = ?", req.ProjectID, uid).First(&collab).Error; err != nil {
+		var member models.ProjectMember
+		if err := db.DB.Preload("Project").Where("project_id = ? AND user_id = ? AND status = ?", req.ProjectID, uid, models.ProjectMemberStatusAccepted).First(&member).Error; err != nil {
 			c.JSON(http.StatusForbidden, gin.H{"error": "You do not have access to this project"})
 			return
 		}
-		if collab.Role == models.ProjectRoleViewer {
+		if member.Role == models.ProjectMemberRoleViewer {
 			c.JSON(http.StatusForbidden, gin.H{"error": "Viewers cannot create environments"})
 			return
 		}
 		projectID = req.ProjectID
-		orgID = collab.Project.OwnerOrganizationID
+		if member.Project.OwnerOrganizationID != nil {
+			orgID = *member.Project.OwnerOrganizationID
+		}
 	} else {
 		// Fallback for legacy frontend: use first available project, or create one
-		var collab models.ProjectCollaborator
-		if err := db.DB.Preload("Project").Where("user_id = ?", uid).First(&collab).Error; err == nil {
-			projectID = collab.ProjectID
-			orgID = collab.Project.OwnerOrganizationID
+		var member models.ProjectMember
+		if err := db.DB.Preload("Project").Where("user_id = ? AND status = ?", uid, models.ProjectMemberStatusAccepted).First(&member).Error; err == nil {
+			projectID = member.ProjectID
+			if member.Project.OwnerOrganizationID != nil {
+				orgID = *member.Project.OwnerOrganizationID
+			}
 		} else {
 			// No projects exist, create a default one (legacy behavior fallback)
 			var orgMember models.OrganizationMember
 			if err := db.DB.Where("user_id = ?", uid).First(&orgMember).Error; err == nil {
 				defaultProject := models.Project{
 					Name:                "Default Workspace",
-					OwnerOrganizationID: orgMember.OrganizationID,
+					OwnerOrganizationID: &orgMember.OrganizationID,
 					CreatedByUserID:     uid,
 				}
 				db.DB.Create(&defaultProject)
-				db.DB.Create(&models.ProjectCollaborator{
-					ProjectID: defaultProject.ID,
-					UserID:    uid,
-					Role:      models.ProjectRoleOwner,
+				now := time.Now()
+				db.DB.Create(&models.ProjectMember{
+					ProjectID:       defaultProject.ID,
+					UserID:          uid,
+					Role:            models.ProjectMemberRoleOwner,
+					Status:          models.ProjectMemberStatusAccepted,
+					InvitedByUserID: &uid,
+					AcceptedAt:      &now,
 				})
 				projectID = defaultProject.ID
 				orgID = orgMember.OrganizationID
@@ -423,11 +444,11 @@ func GetEnvironment(c *gin.Context) {
 }
 
 func getUserProjectIDs(userID interface{}) []string {
-	var collabs []models.ProjectCollaborator
-	db.DB.Where("user_id = ? AND accepted_at IS NOT NULL", userID).Find(&collabs)
+	var members []models.ProjectMember
+	db.DB.Where("user_id = ? AND status = ?", userID, models.ProjectMemberStatusAccepted).Find(&members)
 	var projectIDs []string
-	for _, c := range collabs {
-		projectIDs = append(projectIDs, c.ProjectID)
+	for _, m := range members {
+		projectIDs = append(projectIDs, m.ProjectID)
 	}
 	return projectIDs
 }
@@ -570,14 +591,14 @@ func TransferEnvironment(c *gin.Context) {
 		return
 	}
 
-	// Verify user has access to target project (Owner or Collaborator)
-	var collab models.ProjectCollaborator
-	if err := db.DB.Where("project_id = ? AND user_id = ? AND accepted_at IS NOT NULL", req.ProjectID, userID).First(&collab).Error; err != nil {
+	// Verify user has access to target project (Owner or Editor)
+	var member models.ProjectMember
+	if err := db.DB.Where("project_id = ? AND user_id = ? AND status = ?", req.ProjectID, userID, models.ProjectMemberStatusAccepted).First(&member).Error; err != nil {
 		c.JSON(http.StatusForbidden, gin.H{"error": "You do not have access to the target project"})
 		return
 	}
 
-	if collab.Role == models.ProjectRoleViewer {
+	if member.Role == models.ProjectMemberRoleViewer {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Viewers cannot transfer sandboxes into this project"})
 		return
 	}

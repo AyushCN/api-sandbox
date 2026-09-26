@@ -140,7 +140,7 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 	}
 
 	// 3. Detect Runtime or Use Overrides
-	devConfig, err := provider.ResolveRuntime(&env, workspaceDir, "")
+	configs, err := provider.ResolveRuntimes(&env, workspaceDir, "")
 	if err != nil {
 		slog.Error("Failed to detect Dev Runtime", "env_id", envID, "error", err)
 		db.DB.Model(&env).Update("status", models.StatusFailed)
@@ -152,61 +152,9 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 		return err
 	}
 
-	db.DB.Create(&models.Log{
-		EnvironmentID: &env.ID,
-		Message:       fmt.Sprintf("Detected %s environment. Generating sandbox-start.sh...", devConfig.BaseImage),
-		Level:         models.LogLevelInfo,
-	})
-
-	scriptContent := provider.GenerateSandboxStartScript(devConfig)
-	scriptPath := filepath.Join(workspaceDir, "sandbox-start.sh")
-	err = os.WriteFile(scriptPath, []byte(scriptContent), 0755)
-	if err != nil {
-		slog.Error("Failed to write sandbox-start.sh", "env_id", envID, "error", err)
-		return err
-	}
-
-	// 4. Start Dev Sandbox
 	netID := env.OrganizationID
 	if netID == "" {
 		netID = env.UserID
-	}
-
-	containerID, port, err := provider.ProvisionDevSandbox(ctx, env.ID, devConfig, netID, dbURL)
-	if err != nil {
-		slog.Error("Dev Sandbox start failed", "env_id", envID, "error", err)
-		db.DB.Model(&env).Update("status", models.StatusFailed)
-		db.DB.Create(&models.Log{
-			EnvironmentID: &env.ID,
-			Message:       fmt.Sprintf("Sandbox start failed: %v", err),
-			Level:         models.LogLevelError,
-		})
-		return err
-	}
-
-	// 5. Container Health Check on Boot
-	// Poll until the container is confirmed running OR exits.
-	// pip install / npm install / go mod download can take 60-120s on a cold image.
-	db.DB.Create(&models.Log{
-		EnvironmentID: &env.ID,
-		Message:       "Waiting for sandbox to initialize (dependency install + app boot)...",
-		Level:         models.LogLevelInfo,
-	})
-
-	bootTimeout := 120 * time.Second
-	pollInterval := 5 * time.Second
-	deadline := time.Now().Add(bootTimeout)
-	isRunning := false
-	var crashLogs string
-
-	healthType := "tcp"
-	if env.HealthCheckType != nil {
-		healthType = *env.HealthCheckType
-	}
-
-	// StartCommand port=0 heuristic
-	if env.StartCommand != nil && *env.StartCommand != "" && (env.Port == nil || *env.Port == 0) {
-		healthType = "none"
 	}
 
 	domain := os.Getenv("DOMAIN")
@@ -214,57 +162,101 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 		domain = "localhost"
 	}
 
-	for time.Now().Before(deadline) {
-		var checkErr error
-		isRunning, crashLogs, checkErr = ProviderCheckContainerHealth(containerID)
-		if checkErr != nil {
-			slog.Warn("Health check error during boot polling", "env_id", envID, "error", checkErr)
-			break
-		}
+	var finalContainerID string
+	var finalPort int
+	var finalCrashLogs string
+	var isRunning bool
+	var checkErr error
 
-		if !isRunning {
-			// Container has already exited
-			break
-		}
-
-		if healthType == "none" {
-			// Skip HTTP/TCP port check
-			break
-		}
-
-		// Traefik HTTP Check (Ensures port is bound and accepting traffic)
-		req, _ := http.NewRequest("GET", "http://api-sandbox-traefik", nil)
-		req.Host = fmt.Sprintf("%s.%s", envID, domain)
-
-		client := &http.Client{Timeout: 2 * time.Second}
-		resp, err := client.Do(req)
-
-		if err == nil {
-			// 502 Bad Gateway means Traefik can't reach the container port yet
-			if resp.StatusCode != http.StatusBadGateway {
-				resp.Body.Close()
-				break // Application is responding!
-			}
-			resp.Body.Close()
-		}
-
-		time.Sleep(pollInterval)
+	maxAttempts := 3
+	if len(configs) < maxAttempts {
+		maxAttempts = len(configs)
 	}
 
-	// If still not running after timeout, poll one last time
-	if !isRunning && time.Now().After(deadline) {
-		isRunning, crashLogs, _ = ProviderCheckContainerHealth(containerID)
+	var devConfig provider.DevRuntimeConfig
+
+	for i := 0; i < maxAttempts; i++ {
+		devConfig = configs[i]
+
+		db.DB.Create(&models.Log{
+			EnvironmentID: &env.ID,
+			Message:       fmt.Sprintf("Attempting to boot using %s runtime (Attempt %d/%d)...", devConfig.BaseImage, i+1, maxAttempts),
+			Level:         models.LogLevelInfo,
+		})
+
+		scriptContent := provider.GenerateSandboxStartScript(devConfig)
+		scriptPath := filepath.Join(workspaceDir, "sandbox-start.sh")
+		_ = os.WriteFile(scriptPath, []byte(scriptContent), 0755)
+
+		containerID, port, provErr := provider.ProvisionDevSandbox(ctx, env.ID, devConfig, netID, dbURL)
+		if provErr != nil {
+			slog.Error("Dev Sandbox start failed", "env_id", envID, "error", provErr)
+			continue
+		}
+
+		bootTimeout := 120 * time.Second
+		pollInterval := 5 * time.Second
+		deadline := time.Now().Add(bootTimeout)
+		isRunning = false
+		finalCrashLogs = ""
+
+		healthType := "tcp"
+		if env.HealthCheckType != nil {
+			healthType = *env.HealthCheckType
+		}
+
+		if env.StartCommand != nil && *env.StartCommand != "" && (env.Port == nil || *env.Port == 0) {
+			healthType = "none"
+		}
+
+		for time.Now().Before(deadline) {
+			isRunning, finalCrashLogs, checkErr = ProviderCheckContainerHealth(containerID)
+			if checkErr != nil || !isRunning {
+				break
+			}
+
+			if healthType == "none" {
+				break
+			}
+
+			req, _ := http.NewRequest("GET", "http://api-sandbox-traefik", nil)
+			req.Host = fmt.Sprintf("%s.%s", envID, domain)
+			client := &http.Client{Timeout: 2 * time.Second}
+			resp, httpErr := client.Do(req)
+
+			if httpErr == nil {
+				if resp.StatusCode != http.StatusBadGateway {
+					resp.Body.Close()
+					break // success!
+				}
+				resp.Body.Close()
+			}
+			time.Sleep(pollInterval)
+		}
+
+		if !isRunning && time.Now().After(deadline) {
+			isRunning, finalCrashLogs, _ = ProviderCheckContainerHealth(containerID)
+		}
+
+		if isRunning {
+			finalContainerID = containerID
+			finalPort = port
+			break
+		}
+
+		// Clean up before fallback
+		_ = ProviderCleanupContainer(ctx, containerID)
 	}
 
 	if !isRunning {
-		slog.Error("Dev Sandbox failed to start", "env_id", envID)
+		slog.Error("Dev Sandbox failed to start after fallbacks", "env_id", envID)
 		db.DB.Model(&env).Update("status", models.StatusFailed)
-		msg := "Sandbox failed to start"
-		if crashLogs != "" {
-			msg = fmt.Sprintf("Sandbox crashed on boot:\n%s", crashLogs)
-		} else if healthType == "tcp" {
-			msg = "Sandbox failed to start: No process listening on configured port before timeout. Check your port settings or disable the health check."
+
+		msg := "Couldn't auto-detect how to run this repo. Please manually configure the runtime and entry command."
+		if finalCrashLogs != "" {
+			msg = fmt.Sprintf("Last attempt crashed:\n%s\nCouldn't auto-detect how to run this repo.", finalCrashLogs)
 		}
+
 		db.DB.Create(&models.Log{
 			EnvironmentID: &env.ID,
 			Message:       msg,
@@ -272,8 +264,6 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 		})
 		return fmt.Errorf("container crashed or failed healthcheck on boot")
 	}
-
-	_ = pollInterval // used in future polling refinement
 
 	// 6. Update DB to RUNNING
 	protocol := "https"
@@ -284,11 +274,11 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 	publicURL := fmt.Sprintf("%s://%s.%s", protocol, env.ID, domain)
 	db.DB.Model(&env).Updates(map[string]interface{}{
 		"status":       models.StatusRunning,
-		"container_id": containerID,
-		"port":         port,
+		"container_id": finalContainerID,
+		"port":         finalPort,
 		"public_url":   publicURL,
 	})
 
-	slog.Info("Environment is now RUNNING", "env_id", env.ID, "port", port)
+	slog.Info("Environment is now RUNNING", "env_id", env.ID, "port", finalPort)
 	return nil
 }

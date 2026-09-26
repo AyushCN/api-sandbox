@@ -319,10 +319,10 @@ func UpdateWorkspaceFileContent(c *gin.Context) {
 		// Broadcast to team via WebSocket
 		BroadcastToProjectMembers(env.ID, data)
 
-		slog.Info("Checking readiness polling condition", 
-			"reloadSignaled", reloadSignaled, 
-			"env.Port", env.Port, 
-			"env.Status", env.Status, 
+		slog.Info("Checking readiness polling condition",
+			"reloadSignaled", reloadSignaled,
+			"env.Port", env.Port,
+			"env.Status", env.Status,
 			"env.ContainerID", env.ContainerID,
 		)
 

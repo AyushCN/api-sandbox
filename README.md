@@ -18,6 +18,10 @@ Designed for trusted users on a dedicated single host. Do not expose to untruste
 4. **Browser IDE** — Monaco editor + Xterm.js terminal.
 5. **Preview URLs** — Traefik routes `<env-id>.domain` to the running container.
 6. **Role-based access** — `OWNER`, `COLLABORATOR`, `VIEWER` enforced across all APIs.
+7. **Warm Container Pool** — Pre-started `node`, `python`, and `go` containers using Traefik Redis dynamically to eliminate container boot overhead.
+8. **Host-Side Dependency Caches** — Persistent `npm`, `pnpm`, `pip`, and `go` caches mounted to bypass repetitive downloads on cold environments.
+9. **Advanced Runtime Detection** — Automatic multi-layered detection with fallback attempts to find the correct start command.
+10. **TTL Cleanup** — Asynq workers clean up abandoned workspaces safely to free up resources.
 
 ## What It Does Not Do
 
@@ -70,7 +74,9 @@ Required values:
 
 ```bash
 sudo mkdir -p /var/lib/api-sandbox/workspaces
+sudo mkdir -p /var/lib/api-sandbox/cache
 sudo chown -R $USER:$USER /var/lib/api-sandbox/workspaces
+sudo chown -R $USER:$USER /var/lib/api-sandbox/cache
 ```
 
 ### 4. Start

@@ -2,7 +2,8 @@ package provider
 
 import (
 	"bytes"
-	"github.com/fsouza/go-dockerclient"
+
+	docker "github.com/fsouza/go-dockerclient"
 )
 
 func CheckContainerHealth(containerID string) (bool, string, error) {

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -129,140 +128,7 @@ func CloneOrFetch(ctx context.Context, dir, gitURL, branch, githubToken string) 
 	return exec.CommandContext(ctx, "git", "-C", dir, "checkout", branch).Run()
 }
 
-func ProvisionDevSandbox(ctx context.Context, envID string, config DevRuntimeConfig, orgID string, dbURL string) (string, int, error) {
-	createLog(envID, fmt.Sprintf("Provisioning Dev Sandbox (Image: %s)...", config.BaseImage), models.LogLevelInfo)
-
-	_ = CleanupContainer(ctx, fmt.Sprintf("api-sandbox-env-%s", envID))
-
-	// Pull image if not exists
-	err := dockerClient.PullImage(docker.PullImageOptions{
-		Repository: config.BaseImage,
-	}, docker.AuthConfiguration{})
-	if err != nil {
-		createLog(envID, fmt.Sprintf("Pulling base image %s...", config.BaseImage), models.LogLevelInfo)
-	}
-
-	domain := os.Getenv("DOMAIN")
-	if domain == "" {
-		domain = "localhost"
-	}
-
-	exposedPort := config.ExposedPort
-	if exposedPort == "" {
-		exposedPort = "5000" // Fallback
-	}
-
-	labels := map[string]string{
-		"traefik.enable": "true",
-		fmt.Sprintf("traefik.http.routers.env-%s.rule", envID):                      fmt.Sprintf("Host(`%s.%s`)", envID, domain),
-		fmt.Sprintf("traefik.http.services.env-%s.loadbalancer.server.port", envID): exposedPort,
-		"traefik.docker.network": fmt.Sprintf("api-sandbox-net-%s", orgID),
-	}
-
-	if domain != "localhost" {
-		labels[fmt.Sprintf("traefik.http.routers.env-%s.entrypoints", envID)] = "websecure"
-		labels[fmt.Sprintf("traefik.http.routers.env-%s.tls.certresolver", envID)] = "myresolver"
-
-		// Security headers
-		labels[fmt.Sprintf("traefik.http.middlewares.security-%s.headers.customresponseheaders.X-Sandbox-Environment", envID)] = envID
-
-		// Apply middlewares
-		labels[fmt.Sprintf("traefik.http.routers.env-%s.middlewares", envID)] = fmt.Sprintf("security-%s", envID)
-	} else {
-		labels[fmt.Sprintf("traefik.http.routers.env-%s.entrypoints", envID)] = "web"
-	}
-
-	networkName, networkID, err := EnsureOrgNetwork(ctx, orgID)
-	if err != nil {
-		createLog(envID, err.Error(), models.LogLevelError)
-		return "", 0, err
-	}
-
-	if networkID != "" {
-		_ = dockerClient.ConnectNetwork(networkID, docker.NetworkConnectionOptions{
-			Container: "api-sandbox-traefik",
-		})
-	}
-
-	wd, err := os.Getwd()
-	if err != nil {
-		return "", 0, fmt.Errorf("failed to get working directory: %v", err)
-	}
-
-	// Determine the host path for the bind mount
-	hostWorkspacesDir := os.Getenv("HOST_WORKSPACES_DIR")
-	var hostWorkspaceDir string
-	if hostWorkspacesDir != "" {
-		hostWorkspaceDir = filepath.Join(hostWorkspacesDir, envID)
-	} else {
-		hostWorkspaceDir = filepath.Join(wd, "workspaces", envID)
-	}
-
-	pidsLimit := int64(256)
-	opts := docker.CreateContainerOptions{
-		Name: fmt.Sprintf("api-sandbox-env-%s", envID),
-		Config: &docker.Config{
-			Image:      config.BaseImage,
-			WorkingDir: config.WorkDir,
-			Env: func() []string {
-				e := []string{fmt.Sprintf("PORT=%s", exposedPort), "HOST=0.0.0.0"}
-				if dbURL != "" {
-					e = append(e, fmt.Sprintf("DATABASE_URL=%s", dbURL), fmt.Sprintf("MONGO_URI=%s", dbURL))
-					if u, err := url.Parse(dbURL); err == nil {
-						e = append(e, fmt.Sprintf("DB_HOST=%s", u.Hostname()))
-						e = append(e, fmt.Sprintf("DB_PORT=%s", u.Port()))
-						e = append(e, fmt.Sprintf("DB_USER=%s", u.User.Username()))
-						if pwd, ok := u.User.Password(); ok {
-							e = append(e, fmt.Sprintf("DB_PASSWORD=%s", pwd))
-						}
-						e = append(e, fmt.Sprintf("DB_NAME=%s", strings.TrimPrefix(u.Path, "/")))
-					}
-				}
-				return e
-			}(),
-			Labels: labels,
-			Cmd:    []string{"/bin/sh", "sandbox-start.sh"},
-		},
-		HostConfig: &docker.HostConfig{
-			Memory:        512 * 1024 * 1024,
-			MemorySwap:    512 * 1024 * 1024,
-			CPUQuota:      100000,
-			CPUPeriod:     100000,
-			CPUShares:     1024,
-			PidsLimit:     &pidsLimit,
-			RestartPolicy: docker.RestartOnFailure(3),
-			SecurityOpt:   []string{"no-new-privileges:true"},
-			CapDrop:       []string{"ALL"},
-			Binds: []string{
-				fmt.Sprintf("%s:%s", hostWorkspaceDir, config.WorkDir),
-			},
-		},
-		NetworkingConfig: &docker.NetworkingConfig{
-			EndpointsConfig: map[string]*docker.EndpointConfig{
-				networkName: {},
-			},
-		},
-	}
-
-	container, err := dockerClient.CreateContainer(opts)
-	if err != nil {
-		return "", 0, fmt.Errorf("failed to create container: %v", err)
-	}
-
-	if err := dockerClient.StartContainer(container.ID, nil); err != nil {
-		return "", 0, fmt.Errorf("failed to start container: %v", err)
-	}
-
-	assignedPort, _ := strconv.Atoi(config.ExposedPort)
-	if assignedPort == 0 {
-		assignedPort = 8080 // fallback
-	}
-
-	createLog(envID, fmt.Sprintf("Dev Sandbox started successfully on port %d (Container ID: %s).", assignedPort, container.ID[:12]), models.LogLevelInfo)
-
-	return container.ID, assignedPort, nil
-}
-
+// ProvisionDevSandbox has been moved to warmpool.go
 func CleanupContainer(ctx context.Context, containerID string) error {
 	_ = dockerClient.StopContainer(containerID, 10)
 	return dockerClient.RemoveContainer(docker.RemoveContainerOptions{
@@ -279,7 +145,34 @@ func CleanupWorkspace(envID string) error {
 		return err
 	}
 	workspaceDir := filepath.Join(wd, "workspaces", envID)
-	return os.RemoveAll(workspaceDir)
+	err = os.RemoveAll(workspaceDir)
+	if err != nil {
+		// Fallback to docker if permission denied
+		slog.Warn("os.RemoveAll failed, trying docker rm -rf", "dir", workspaceDir, "error", err)
+		
+		hostWorkspacesDir := os.Getenv("HOST_WORKSPACES_DIR")
+		if hostWorkspacesDir == "" {
+			hostWorkspacesDir = filepath.Join(wd, "workspaces")
+		}
+		
+		opts := docker.CreateContainerOptions{
+			Config: &docker.Config{
+				Image: "alpine",
+				Cmd:   []string{"rm", "-rf", fmt.Sprintf("/workspaces/%s", envID)},
+			},
+			HostConfig: &docker.HostConfig{
+				Binds: []string{
+					fmt.Sprintf("%s:/workspaces", hostWorkspacesDir),
+				},
+				AutoRemove: true,
+			},
+		}
+		container, cErr := dockerClient.CreateContainer(opts)
+		if cErr == nil {
+			_ = dockerClient.StartContainer(container.ID, nil)
+		}
+	}
+	return nil
 }
 
 func RestartContainer(ctx context.Context, containerID string) error {
@@ -305,7 +198,7 @@ func GetContainerPort(containerID string) (int, error) {
 func WaitForAppReady(ctx context.Context, envID string, domain string) error {
 	host := fmt.Sprintf("%s.%s", envID, domain)
 	client := &http.Client{} // Removed 500ms timeout which aborted connections prematurely
-	
+
 	timeout := time.After(30 * time.Second)
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
@@ -322,19 +215,19 @@ func WaitForAppReady(ctx context.Context, envID string, domain string) error {
 				continue
 			}
 			req.Host = host
-			
+
 			resp, err := client.Do(req)
 			if err != nil {
 				slog.Warn("WaitForAppReady HTTP error", "err", err)
 				continue
 			}
-			
+
 			// Must close immediately, not defer, to prevent connection leaks
 			statusCode := resp.StatusCode
 			resp.Body.Close()
 
 			slog.Info("WaitForAppReady HTTP response", "statusCode", statusCode)
-			
+
 			if statusCode != http.StatusBadGateway {
 				return nil
 			}

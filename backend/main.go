@@ -216,6 +216,8 @@ func startWorker() *asynq.Server {
 	mux.HandleFunc(queue.TaskReapOrphans, worker.HandleReapOrphansTask)
 
 	slog.Info("Starting Asynq worker...")
+	go worker.MaintainWarmPool()
+
 	go func() {
 		if err := srv.Start(mux); err != nil {
 			slog.Error("Could not run Asynq server", "error", err)

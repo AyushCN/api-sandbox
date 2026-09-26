@@ -448,7 +448,6 @@ func GitLog(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"commits": commits})
 }
 
-
 type GitActivity struct {
 	Timestamp     time.Time `json:"timestamp"`
 	TimestampStr  string    `json:"timestampStr"`

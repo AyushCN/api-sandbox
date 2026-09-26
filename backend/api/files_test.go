@@ -2,15 +2,16 @@ package api
 
 import (
 	"bytes"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
 	"github.com/api-sandbox/backend/db"
 	"github.com/api-sandbox/backend/models"
 	"github.com/gin-gonic/gin"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
-	"net/http"
-	"net/http/httptest"
-	"testing"
 )
 
 func setupTestDBForFiles(t *testing.T) {

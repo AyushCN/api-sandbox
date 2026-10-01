@@ -239,6 +239,11 @@ func ProvisionDevSandbox(ctx context.Context, envID string, config DevRuntimeCon
 	if config.RuntimeType == "" || config.RuntimeType == "docker" || config.RuntimeType == "devcontainer" {
 		workingDir = config.WorkDir
 	}
+	// Fix: If the workspace is mounted at /app in the container, workingDir should be /app
+	// The workspace is mounted at /app via the bind mount: fmt.Sprintf("%s:/app", hostWorkspaceDir)
+	if strings.HasPrefix(workingDir, "/workspaces/") {
+		workingDir = "/app" + strings.TrimPrefix(workingDir, fmt.Sprintf("/workspaces/%s", envID))
+	}
 
 	execOpts := docker.CreateExecOptions{
 		Container:    containerID,

@@ -14,32 +14,6 @@ import (
 	"github.com/hibiken/asynq"
 )
 
-func HandleCollectMetricsTask(ctx context.Context, t *asynq.Task) error {
-	var envs []models.Environment
-	if err := db.DB.Where("status = ?", models.StatusRunning).Find(&envs).Error; err != nil {
-		return err
-	}
-
-	for _, env := range envs {
-		if env.ContainerID == nil || *env.ContainerID == "" {
-			continue
-		}
-
-		// In a real system, we'd use dockerClient.Stats() to read actual CPU/Memory.
-		// Since fsouza stats stream can be tricky to parse quickly in a cron,
-		// we'll mock the metrics insertion here to prove the architectural pipeline.
-		// This simulates reading Docker cgroups.
-		metric := models.Metric{
-			EnvironmentID: &env.ID,
-			CpuUsage:      2.5,   // Mock %
-			MemoryUsage:   150.0, // Mock MB
-		}
-		db.DB.Create(&metric)
-	}
-
-	return nil
-}
-
 func HandleCleanupContainersTask(ctx context.Context, t *asynq.Task) error {
 	var envs []models.Environment
 
@@ -51,8 +25,8 @@ func HandleCleanupContainersTask(ctx context.Context, t *asynq.Task) error {
 
 	idleThreshold := time.Now().Add(-1 * time.Duration(idleHours) * time.Hour)
 
-	// Find environments that are RUNNING and idle past threshold
-	if err := db.DB.Where("status = ? AND updated_at < ?", models.StatusRunning, idleThreshold).Find(&envs).Error; err != nil {
+	// Find environments that are RUNNING and idle past threshold (checking last_activity_at first)
+	if err := db.DB.Where("status = ? AND COALESCE(last_activity_at, updated_at) < ?", models.StatusRunning, idleThreshold).Find(&envs).Error; err != nil {
 		return err
 	}
 

@@ -150,6 +150,18 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 	}
 
 	// 2. Database Provisioning
+	// For multi-repo workspaces, DB detection runs against the primary repo dir.
+	// The primary repo is the first WorkspaceRepository (by stable order); for
+	// single-repo workspaces this is the workspace root itself.
+	var repoDirs []string
+	if len(workspaceRepos) > 0 {
+		for _, wRepo := range workspaceRepos {
+			d := provider.GetWorkspaceRepositoryPath(env.ID, len(workspaceRepos), wRepo.WorkingDirectory, wRepo.ProjectRepository.Name, wRepo.ID)
+			repoDirs = append(repoDirs, d)
+		}
+	}
+	primaryDir := provider.GetPrimaryRepositoryPath(env.ID, repoDirs)
+
 	var dbURL string
 	if env.UserProvidedDBURL != nil && *env.UserProvidedDBURL != "" {
 		dbURL = *env.UserProvidedDBURL
@@ -159,7 +171,7 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 			Level:         models.LogLevelInfo,
 		})
 	} else {
-		dbType, _ := provider.DetectDatabaseRequirements(workspaceDir)
+		dbType, _ := provider.DetectDatabaseRequirements(primaryDir)
 		if dbType != provider.DBTypeNone {
 			db.DB.Create(&models.Log{
 				EnvironmentID: &env.ID,
@@ -186,7 +198,10 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 	}
 
 	// 3. Detect Runtime or Use Overrides
-	configs, err := provider.ResolveRuntimes(&env, workspaceDir, "")
+	// Resolution runs against the primary repository directory so that
+	// language-specific files (package.json, go.mod, etc.) are found
+	// regardless of whether this is a single or multi-repo workspace.
+	configs, err := provider.ResolveRuntimes(&env, primaryDir, "")
 	if err != nil {
 		slog.Error("Failed to detect Dev Runtime", "env_id", envID, "error", err)
 		db.DB.Model(&env).Update("status", models.StatusFailed)
@@ -228,7 +243,9 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 		})
 
 		scriptContent := provider.GenerateSandboxStartScript(devConfig)
-		scriptPath := filepath.Join(workspaceDir, "sandbox-start.sh")
+		// Write the start script into the primary repo directory, which is the
+		// directory the container will mount as its working directory.
+		scriptPath := filepath.Join(primaryDir, "sandbox-start.sh")
 		_ = os.WriteFile(scriptPath, []byte(scriptContent), 0755)
 
 		containerID, port, provErr := provider.ProvisionDevSandbox(ctx, env.ID, devConfig, netID, dbURL)
@@ -252,6 +269,11 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 			healthType = "none"
 		}
 
+		healthy := false
+		if healthType == "none" {
+			healthy = true
+		}
+
 		for time.Now().Before(deadline) {
 			isRunning, finalCrashLogs, checkErr = ProviderCheckContainerHealth(containerID)
 			if checkErr != nil || !isRunning {
@@ -259,10 +281,15 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 			}
 
 			if healthType == "none" {
+				healthy = true
 				break
 			}
 
-			req, _ := http.NewRequest("GET", "http://api-sandbox-traefik", nil)
+			traefikURL := os.Getenv("TRAEFIK_URL")
+			if traefikURL == "" {
+				traefikURL = "http://api-sandbox-traefik"
+			}
+			req, _ := http.NewRequest("GET", traefikURL, nil)
 			req.Host = fmt.Sprintf("%s.%s", envID, domain)
 			client := &http.Client{Timeout: 2 * time.Second}
 			resp, httpErr := client.Do(req)
@@ -270,6 +297,7 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 			if httpErr == nil {
 				if resp.StatusCode != http.StatusBadGateway {
 					resp.Body.Close()
+					healthy = true
 					break // success!
 				}
 				resp.Body.Close()
@@ -277,21 +305,17 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 			time.Sleep(pollInterval)
 		}
 
-		if !isRunning && time.Now().After(deadline) {
-			isRunning, finalCrashLogs, _ = ProviderCheckContainerHealth(containerID)
-		}
-
-		if isRunning {
+		if isRunning && healthy {
 			finalContainerID = containerID
 			finalPort = port
 			break
 		}
 
-		// Clean up before fallback
+		// Clean up failed container before attempting next fallback
 		_ = ProviderCleanupContainer(ctx, containerID)
 	}
 
-	if !isRunning {
+	if finalContainerID == "" {
 		slog.Error("Dev Sandbox failed to start after fallbacks", "env_id", envID)
 		db.DB.Model(&env).Update("status", models.StatusFailed)
 

@@ -26,9 +26,48 @@ func InitDocker() {
 	var err error
 	dockerClient, err = docker.NewVersionedClientFromEnv("1.41")
 	if err != nil {
-		slog.Error("Failed to initialize docker client", "error", err)
-		os.Exit(1)
+		slog.Warn("Failed to initialize docker client", "error", err)
+		if os.Getenv("MODE") == "worker" {
+			slog.Error("Worker mode requires Docker daemon access. Exiting.")
+			os.Exit(1)
+		}
 	}
+}
+
+func getDockerClient() (*docker.Client, error) {
+	if dockerClient != nil {
+		return dockerClient, nil
+	}
+	var err error
+	dockerClient, err = docker.NewVersionedClientFromEnv("1.41")
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize docker client: %w", err)
+	}
+	return dockerClient, nil
+}
+
+func GetContainerLogs(ctx context.Context, containerID string, tail string) (string, error) {
+	cli, err := getDockerClient()
+	if err != nil {
+		return "", err
+	}
+
+	var buf bytes.Buffer
+	opts := docker.LogsOptions{
+		Context:      ctx,
+		Container:    containerID,
+		OutputStream: &buf,
+		ErrorStream:  &buf,
+		Stdout:       true,
+		Stderr:       true,
+		Tail:         tail,
+	}
+
+	err = cli.Logs(opts)
+	if err != nil {
+		return "", err
+	}
+	return buf.String(), nil
 }
 
 func createLog(entityID string, message string, level models.LogLevel) {
@@ -38,45 +77,6 @@ func createLog(entityID string, message string, level models.LogLevel) {
 	}
 	log.EnvironmentID = &entityID
 	db.DB.Create(&log)
-}
-
-type buildTiming struct {
-	Stage    string
-	Duration time.Duration
-}
-
-func recordBenchmark(id string, timings []buildTiming, totalDuration time.Duration, imageTag, repo string) {
-	condition := os.Getenv("BERTH_CACHE_MODE")
-	if condition == "" {
-		condition = "cold"
-	}
-
-	var imageSizeBytes int64
-	if inspect, err := dockerClient.InspectImage(imageTag); err == nil {
-		imageSizeBytes = inspect.Size
-	}
-
-	for _, t := range timings {
-		run := models.BenchmarkRun{
-			EnvironmentID:  id,
-			Repo:           repo,
-			Condition:      condition,
-			Stage:          t.Stage,
-			DurationMs:     t.Duration.Milliseconds(),
-			ImageSizeBytes: imageSizeBytes,
-		}
-		db.DB.Create(&run)
-	}
-
-	totalRun := models.BenchmarkRun{
-		EnvironmentID:  id,
-		Repo:           repo,
-		Condition:      condition,
-		Stage:          "total",
-		DurationMs:     totalDuration.Milliseconds(),
-		ImageSizeBytes: imageSizeBytes,
-	}
-	db.DB.Create(&totalRun)
 }
 
 func CloneOrFetch(ctx context.Context, dir, gitURL, branch, baseCommit, githubToken string) error {
@@ -140,19 +140,15 @@ func CleanupContainer(ctx context.Context, containerID string) error {
 // Helper to create tarball from a directory
 
 func CleanupWorkspace(envID string) error {
-	wd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-	workspaceDir := filepath.Join(wd, "workspaces", envID)
-	err = os.RemoveAll(workspaceDir)
+	workspaceDir := GetWorkspacePath(envID)
+	err := os.RemoveAll(workspaceDir)
 	if err != nil {
 		// Fallback to docker if permission denied
 		slog.Warn("os.RemoveAll failed, trying docker rm -rf", "dir", workspaceDir, "error", err)
 		
 		hostWorkspacesDir := os.Getenv("HOST_WORKSPACES_DIR")
 		if hostWorkspacesDir == "" {
-			hostWorkspacesDir = filepath.Join(wd, "workspaces")
+			hostWorkspacesDir = GetWorkspacesRootDir()
 		}
 		
 		opts := docker.CreateContainerOptions{
@@ -210,7 +206,11 @@ func WaitForAppReady(ctx context.Context, envID string, domain string) error {
 		case <-timeout:
 			return fmt.Errorf("timed out waiting for app %s to be reachable", envID)
 		case <-ticker.C:
-			req, err := http.NewRequestWithContext(ctx, "GET", "http://api-sandbox-traefik/", nil)
+			traefikURL := os.Getenv("TRAEFIK_URL")
+			if traefikURL == "" {
+				traefikURL = "http://api-sandbox-traefik"
+			}
+			req, err := http.NewRequestWithContext(ctx, "GET", strings.TrimRight(traefikURL, "/")+"/", nil)
 			if err != nil {
 				continue
 			}

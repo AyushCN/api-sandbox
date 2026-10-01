@@ -10,7 +10,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -742,14 +741,13 @@ func GetDockerLogs(c *gin.Context) {
 		containerRef = *env.ContainerID
 	}
 
-	cmd := exec.CommandContext(c.Request.Context(), "docker", "logs", "--tail", "500", containerRef)
-	output, err := cmd.CombinedOutput()
+	output, err := provider.GetContainerLogs(c.Request.Context(), containerRef, "500")
 	if err != nil {
-		outStr := string(output)
+		outStr := err.Error()
 
 		// Container doesn't exist — the env is still building or crashed between retries.
 		// Surface the crash/error logs from the DB so the dev can see what went wrong.
-		if strings.Contains(outStr, "No such container") || len(output) == 0 {
+		if strings.Contains(strings.ToLower(outStr), "no such container") || len(output) == 0 {
 			var dbLogs []models.Log
 			db.DB.Where("environment_id = ?", id).
 				Order("timestamp desc").
@@ -776,7 +774,7 @@ func GetDockerLogs(c *gin.Context) {
 		}
 	}
 
-	c.String(http.StatusOK, string(output))
+	c.String(http.StatusOK, output)
 }
 
 type MeResponse struct {

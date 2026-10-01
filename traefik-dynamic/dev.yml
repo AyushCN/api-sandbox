@@ -1,0 +1,28 @@
+# Dynamic configuration for local host development
+# Routes incoming traffic on localhost port 80 to host services
+http:
+  routers:
+    dev-backend:
+      rule: "(Host(`localhost`) || Host(`127.0.0.1`)) && PathPrefix(`/api`)"
+      entryPoints:
+        - "web"
+      service: "dev-backend"
+      priority: 100
+
+    dev-frontend:
+      rule: "Host(`localhost`) || Host(`127.0.0.1`)"
+      entryPoints:
+        - "web"
+      service: "dev-frontend"
+      priority: 10
+
+  services:
+    dev-backend:
+      loadBalancer:
+        servers:
+          - url: "http://host.docker.internal:8080"
+
+    dev-frontend:
+      loadBalancer:
+        servers:
+          - url: "http://host.docker.internal:3000"

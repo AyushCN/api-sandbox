@@ -104,6 +104,21 @@ type ReviewChangeRequestPayload struct {
 	Action string `json:"action" binding:"required"` // APPROVED, REJECTED, MERGED
 }
 
+// mergeOp records a canonical repo directory that has been successfully staged
+// (--no-commit merge) but not yet committed.
+type mergeOp struct {
+	RepoDir string
+	CRepo   models.WorkspaceRepository
+}
+
+// abortStagedMerges runs "git merge --abort" on every entry in ops.
+// Errors are logged but not returned – we are already in a failure path.
+func abortStagedMerges(ops []mergeOp) {
+	for _, op := range ops {
+		exec.Command("git", "-C", op.RepoDir, "merge", "--abort").Run() //nolint:errcheck
+	}
+}
+
 func ReviewChangeRequest(c *gin.Context) {
 	projectID := c.Param("projectId")
 	requestID := c.Param("requestId")
@@ -140,102 +155,14 @@ func ReviewChangeRequest(c *gin.Context) {
 	case "REJECT":
 		status = models.ChangeRequestStatusRejected
 	case "MERGE":
-		// Find Canonical Workspace
-		var canonicalWorkspace models.Workspace
-		if err := db.DB.Preload("Environment").Where("project_id = ? AND type = ?", projectID, models.WorkspaceTypeCanonical).First(&canonicalWorkspace).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Canonical workspace not found"})
+		newStatus, httpStatus, errMsg := performMerge(projectID, &cr)
+		if errMsg != "" {
+			cr.Status = newStatus
+			db.DB.Save(&cr)
+			c.JSON(httpStatus, gin.H{"error": errMsg})
 			return
 		}
-		
-		var sourceWorkspace models.Workspace
-		if err := db.DB.Preload("Environment").Where("id = ?", cr.WorkspaceID).First(&sourceWorkspace).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Source workspace not found"})
-			return
-		}
-
-		var sourceRepos []models.WorkspaceRepository
-		db.DB.Preload("ProjectRepository").Where("workspace_id = ?", sourceWorkspace.ID).Find(&sourceRepos)
-
-		var canonicalRepos []models.WorkspaceRepository
-		db.DB.Preload("ProjectRepository").Where("workspace_id = ?", canonicalWorkspace.ID).Find(&canonicalRepos)
-
-		if canonicalWorkspace.EnvironmentID == nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Canonical workspace has no environment"})
-			return
-		}
-		if sourceWorkspace.EnvironmentID == nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Source workspace has no environment"})
-			return
-		}
-
-
-		
-		type mergeOp struct {
-			RepoDir string
-			CRepo   models.WorkspaceRepository
-		}
-		var successfulMerges []mergeOp
-
-		for _, cRepo := range canonicalRepos {
-			var sRepo *models.WorkspaceRepository
-			for _, sr := range sourceRepos {
-				if sr.ProjectRepositoryID == cRepo.ProjectRepositoryID {
-					sRepo = &sr
-					break
-				}
-			}
-			
-			if sRepo != nil {
-				repoDir := provider.GetWorkspaceRepositoryPath(*canonicalWorkspace.EnvironmentID, len(canonicalRepos), cRepo.WorkingDirectory, cRepo.ProjectRepository.Name, cRepo.ID)
-				editorRepoDir := provider.GetWorkspaceRepositoryPath(*sourceWorkspace.EnvironmentID, len(sourceRepos), sRepo.WorkingDirectory, sRepo.ProjectRepository.Name, sRepo.ID)
-				
-				fetchCmd := exec.Command("git", "fetch", editorRepoDir, sRepo.Branch)
-				fetchCmd.Dir = repoDir
-				if err := fetchCmd.Run(); err != nil {
-					// Rollback any successful merges
-					for _, sm := range successfulMerges {
-						exec.Command("git", "-C", sm.RepoDir, "merge", "--abort").Run()
-					}
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch from source workspace"})
-					return
-				}
-				
-				mergeCmd := exec.Command("git", "merge", "FETCH_HEAD", "--no-commit", "--no-ff")
-				mergeCmd.Dir = repoDir
-				if err := mergeCmd.Run(); err != nil {
-					// Rollback this failed merge
-					exec.Command("git", "-C", repoDir, "merge", "--abort").Run()
-					// Rollback all previous successful merges
-					for _, sm := range successfulMerges {
-						exec.Command("git", "-C", sm.RepoDir, "merge", "--abort").Run()
-					}
-
-					status = models.ChangeRequestStatusConflicted
-					cr.Status = status
-					db.DB.Save(&cr)
-					c.JSON(http.StatusConflict, gin.H{"error": "Merge conflict detected in repository " + cRepo.ProjectRepository.Name})
-					return
-				}
-
-				successfulMerges = append(successfulMerges, mergeOp{RepoDir: repoDir, CRepo: cRepo})
-			}
-		}
-
-		// Phase 2: Commit all successful merges
-		for _, sm := range successfulMerges {
-			commitCmd := exec.Command("git", "commit", "-m", fmt.Sprintf("Merge change request %s", cr.ID))
-			commitCmd.Dir = sm.RepoDir
-			commitCmd.Run() // Assuming this succeeds since the merge was clean
-
-			hashCmd := exec.Command("git", "rev-parse", "HEAD")
-			hashCmd.Dir = sm.RepoDir
-			if hashOut, err := hashCmd.Output(); err == nil {
-				hashStr := strings.TrimSpace(string(hashOut))
-				db.DB.Model(&sm.CRepo).Update("current_commit", hashStr)
-			}
-		}
-
-		status = models.ChangeRequestStatusMerged
+		status = newStatus
 	default:
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid action. Must be APPROVE, REJECT, or MERGE"})
 		return
@@ -245,4 +172,141 @@ func ReviewChangeRequest(c *gin.Context) {
 	db.DB.Save(&cr)
 
 	c.JSON(http.StatusOK, cr)
+}
+
+// performMerge executes the two-pass atomic multi-repo merge.
+//
+// Pass 1: for every (canonical, source) repository pair, fetch the editor
+// branch into the canonical working tree and attempt "git merge --no-commit
+// --no-ff".  If any fetch or merge fails every staged merge is aborted and
+// the function returns immediately with an appropriate status.
+//
+// Pass 2: once every merge is clean, commit each repo in turn.  If a commit
+// fails the already-committed repos are left (their commits are real and
+// correct); the failed repo and the not-yet-committed repos are aborted/reset.
+// The CR is left in CONFLICTED status so the owner can retry.
+//
+// Returns (newStatus, httpStatusCode, errorMessage).  errorMessage is empty on
+// success.
+func performMerge(projectID string, cr *models.ChangeRequest) (models.ChangeRequestStatus, int, string) {
+	// ── Resolve workspaces ────────────────────────────────────────────────────
+	var canonicalWorkspace models.Workspace
+	if err := db.DB.Preload("Environment").Where("project_id = ? AND type = ?", projectID, models.WorkspaceTypeCanonical).First(&canonicalWorkspace).Error; err != nil {
+		return models.ChangeRequestStatusOpen, http.StatusInternalServerError, "Canonical workspace not found"
+	}
+
+	var sourceWorkspace models.Workspace
+	if err := db.DB.Preload("Environment").Where("id = ?", cr.WorkspaceID).First(&sourceWorkspace).Error; err != nil {
+		return models.ChangeRequestStatusOpen, http.StatusInternalServerError, "Source workspace not found"
+	}
+
+	if canonicalWorkspace.EnvironmentID == nil {
+		return models.ChangeRequestStatusOpen, http.StatusInternalServerError, "Canonical workspace has no environment"
+	}
+	if sourceWorkspace.EnvironmentID == nil {
+		return models.ChangeRequestStatusOpen, http.StatusInternalServerError, "Source workspace has no environment"
+	}
+
+	var sourceRepos []models.WorkspaceRepository
+	db.DB.Preload("ProjectRepository").Where("workspace_id = ?", sourceWorkspace.ID).Find(&sourceRepos)
+
+	var canonicalRepos []models.WorkspaceRepository
+	db.DB.Preload("ProjectRepository").Where("workspace_id = ?", canonicalWorkspace.ID).Find(&canonicalRepos)
+
+	// ── Pass 1: fetch + --no-commit merge ────────────────────────────────────
+	var staged []mergeOp
+
+	for _, cRepo := range canonicalRepos {
+		var sRepo *models.WorkspaceRepository
+		for i := range sourceRepos {
+			if sourceRepos[i].ProjectRepositoryID == cRepo.ProjectRepositoryID {
+				sRepo = &sourceRepos[i]
+				break
+			}
+		}
+		if sRepo == nil {
+			// No changes for this repo in the editor workspace – skip.
+			continue
+		}
+
+		repoDir := provider.GetWorkspaceRepositoryPath(
+			*canonicalWorkspace.EnvironmentID,
+			len(canonicalRepos),
+			cRepo.WorkingDirectory,
+			cRepo.ProjectRepository.Name,
+			cRepo.ID,
+		)
+		editorRepoDir := provider.GetWorkspaceRepositoryPath(
+			*sourceWorkspace.EnvironmentID,
+			len(sourceRepos),
+			sRepo.WorkingDirectory,
+			sRepo.ProjectRepository.Name,
+			sRepo.ID,
+		)
+
+		// Fetch the editor branch as a local ref in the canonical repo.
+		fetchCmd := exec.Command("git", "fetch", editorRepoDir, sRepo.Branch)
+		fetchCmd.Dir = repoDir
+		if out, err := fetchCmd.CombinedOutput(); err != nil {
+			abortStagedMerges(staged)
+			return models.ChangeRequestStatusOpen, http.StatusInternalServerError,
+				fmt.Sprintf("Failed to fetch from editor workspace for %s: %s", cRepo.ProjectRepository.Name, strings.TrimSpace(string(out)))
+		}
+
+		// Attempt a dry-run merge.  --no-commit prevents any permanent state.
+		mergeCmd := exec.Command("git", "merge", "FETCH_HEAD", "--no-commit", "--no-ff")
+		mergeCmd.Dir = repoDir
+		if out, err := mergeCmd.CombinedOutput(); err != nil {
+			// Abort the failing repo before aborting the others.
+			exec.Command("git", "-C", repoDir, "merge", "--abort").Run() //nolint:errcheck
+			abortStagedMerges(staged)
+			return models.ChangeRequestStatusConflicted, http.StatusConflict,
+				fmt.Sprintf("Merge conflict in %s: %s", cRepo.ProjectRepository.Name, strings.TrimSpace(string(out)))
+		}
+
+		staged = append(staged, mergeOp{RepoDir: repoDir, CRepo: cRepo})
+	}
+
+	if len(staged) == 0 {
+		// Nothing to merge (no matching repos between workspaces).
+		return models.ChangeRequestStatusMerged, 0, ""
+	}
+
+	// ── Pass 2: commit each staged merge ─────────────────────────────────────
+	var committed []mergeOp
+
+	for _, op := range staged {
+		commitMsg := fmt.Sprintf("Merge change request %s", cr.ID)
+		commitCmd := exec.Command("git", "commit", "-m", commitMsg)
+		commitCmd.Dir = op.RepoDir
+		if out, err := commitCmd.CombinedOutput(); err != nil {
+			// Abort this repo's staged merge.
+			exec.Command("git", "-C", op.RepoDir, "merge", "--abort").Run() //nolint:errcheck
+
+			// Abort remaining not-yet-committed staged merges.
+			for _, remaining := range staged[len(committed)+1:] {
+				exec.Command("git", "-C", remaining.RepoDir, "merge", "--abort").Run() //nolint:errcheck
+			}
+
+			// The already-committed repos cannot be reverted here without a
+			// full revert commit – leave them and surface the error clearly.
+			return models.ChangeRequestStatusConflicted, http.StatusInternalServerError,
+				fmt.Sprintf("Commit failed for %s (already committed: %d/%d repos): %s",
+					op.CRepo.ProjectRepository.Name, len(committed), len(staged),
+					strings.TrimSpace(string(out)))
+		}
+
+		// Record the new HEAD commit hash for the canonical repo.
+		hashCmd := exec.Command("git", "rev-parse", "HEAD")
+		hashCmd.Dir = op.RepoDir
+		if hashOut, err := hashCmd.Output(); err == nil {
+			hashStr := strings.TrimSpace(string(hashOut))
+			cRepoLocal := op.CRepo // copy to avoid loop variable capture
+			db.DB.Model(&cRepoLocal).Update("current_commit", hashStr)
+		}
+
+		committed = append(committed, op)
+	}
+
+	return models.ChangeRequestStatusMerged, 0, ""
 }

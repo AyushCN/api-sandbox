@@ -10,7 +10,7 @@ import (
 	"github.com/api-sandbox/backend/models"
 	"github.com/api-sandbox/backend/provider"
 	"github.com/hibiken/asynq"
-	"gorm.io/driver/sqlite"
+	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )

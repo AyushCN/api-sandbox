@@ -9,7 +9,7 @@ import (
 	"github.com/api-sandbox/backend/db"
 	"github.com/api-sandbox/backend/models"
 	"github.com/gin-gonic/gin"
-	"gorm.io/driver/sqlite"
+	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )

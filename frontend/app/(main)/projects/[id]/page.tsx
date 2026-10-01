@@ -2,6 +2,7 @@
 import React, { use, useState } from "react";
 import useSWR from "swr";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   Folder,
@@ -18,10 +19,12 @@ import {
   AlertCircle,
   CheckCircle2,
   CircleDot,
+  Plus,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { fetchWithAuth } from "@/lib/auth";
 import { motion } from "framer-motion";
+import { InviteCollaboratorModal } from "@/components/editor/InviteCollaboratorModal";
 
 const fetcher = (url: string) => fetchWithAuth(url);
 
@@ -139,11 +142,36 @@ function CRStatusBadge({ status }: { status: string }) {
 
 export default function ProjectDetailsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<Tab>("overview");
+  const [isOpening, setIsOpening] = useState(false);
+
+  const handleOpenWorkspace = async () => {
+    setIsOpening(true);
+    try {
+      const res = await fetch(`/api/projects/${id}/edit`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${localStorage.getItem("token")}`
+        }
+      });
+      const data = await res.json();
+      if (res.ok && data.environmentId) {
+        router.push(`/environments/${data.environmentId}`);
+      } else {
+        alert(data.error || "Environment not ready yet. Please try again in a few seconds.");
+      }
+    } catch (err: any) {
+      alert(err.message || "Failed to open workspace");
+    } finally {
+      setIsOpening(false);
+    }
+  };
 
   const { data: project, error: projectError, isLoading: projectLoading } = useSWR<Project>(`/api/projects/${id}`, fetcher);
-  const { data: members }      = useSWR<ProjectMember[]>(`/api/projects/${id}/members`, fetcher, { refreshInterval: 10000 });
-  const { data: repositories } = useSWR<ProjectRepository[]>(`/api/projects/${id}/repositories`, fetcher);
+  const { data: members, mutate: mutateMembers } = useSWR<ProjectMember[]>(`/api/projects/${id}/members`, fetcher, { refreshInterval: 10000 });
+  const { data: repositories, mutate: mutateRepositories } = useSWR<ProjectRepository[]>(`/api/projects/${id}/repositories`, fetcher);
   const { data: workspaces }   = useSWR<Workspace[]>(`/api/projects/${id}/workspaces`, fetcher, { refreshInterval: 5000 });
   const { data: changeRequests } = useSWR<ChangeRequest[]>(`/api/projects/${id}/change-requests`, fetcher, { refreshInterval: 5000 });
   const { data: environments } = useSWR<Environment[]>(`/api/environments?projectId=${id}`, fetcher, { refreshInterval: 3000 });
@@ -187,6 +215,14 @@ export default function ProjectDetailsPage({ params }: { params: Promise<{ id: s
             {project.description && <p className="text-sm text-on-surface-variant truncate">{project.description}</p>}
           </div>
         </div>
+        <button 
+          onClick={handleOpenWorkspace}
+          disabled={isOpening}
+          className="flex items-center gap-2 bg-primary-fixed text-on-primary-fixed px-5 py-2.5 rounded-xl font-bold text-sm hover:bg-primary-fixed/90 hover:shadow-[0_0_20px_rgba(0,240,255,0.3)] active:scale-95 transition-all disabled:opacity-50 shrink-0"
+        >
+          {isOpening ? <Loader2 className="w-4 h-4 animate-spin" /> : <Code className="w-4 h-4" />}
+          Open Workspace
+        </button>
       </div>
 
       {/* Tab Navigation */}
@@ -220,8 +256,8 @@ export default function ProjectDetailsPage({ params }: { params: Promise<{ id: s
       {/* Tab Content */}
       <motion.div key={activeTab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }}>
         {activeTab === "overview"        && <OverviewTab project={project} members={members} repositories={repositories} workspaces={workspaces} openCRs={openCRs} />}
-        {activeTab === "repositories"    && <RepositoriesTab repositories={repositories} />}
-        {activeTab === "members"         && <MembersTab members={members} />}
+        {activeTab === "repositories"    && <RepositoriesTab repositories={repositories} projectId={id} mutateRepositories={mutateRepositories} />}
+        {activeTab === "members"         && <MembersTab members={members} projectId={id} mutateMembers={mutateMembers} />}
         {activeTab === "workspaces"      && <WorkspacesTab workspaces={workspaces} projectId={id} />}
         {activeTab === "environments"    && <EnvironmentsTab environments={environments} />}
         {activeTab === "change-requests" && <ChangeRequestsTab changeRequests={changeRequests} />}
@@ -294,61 +330,174 @@ function OverviewTab({ project, members, repositories, workspaces, openCRs }: {
 
 // ── Repositories Tab ───────────────────────────────────────────────────────────
 
-function RepositoriesTab({ repositories }: { repositories?: ProjectRepository[] }) {
+function RepositoriesTab({ repositories, projectId, mutateRepositories }: { repositories?: ProjectRepository[], projectId: string, mutateRepositories: () => void }) {
+  const [isAddOpen, setIsAddOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [gitUrl, setGitUrl] = useState("");
+  const [defaultBranch, setDefaultBranch] = useState("main");
+  const [isAdding, setIsAdding] = useState(false);
+
+  const handleAdd = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name || !gitUrl) return;
+    setIsAdding(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/repositories`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${localStorage.getItem("token")}` },
+        body: JSON.stringify({ name, gitUrl, defaultBranch })
+      });
+      if (res.ok) {
+        setIsAddOpen(false);
+        setName("");
+        setGitUrl("");
+        setDefaultBranch("main");
+        mutateRepositories();
+      } else {
+        const errorData = await res.json();
+        alert(errorData.error || "Failed to add repository");
+      }
+    } finally {
+      setIsAdding(false);
+    }
+  };
+
   if (!Array.isArray(repositories)) return <LoadingPlaceholder />;
-  if (repositories.length === 0) return <EmptyState icon={Database} title="No repositories" description="Add a Git repository to this project to get started." />;
 
   return (
     <div className="space-y-3">
-      {repositories.map((repo: ProjectRepository, idx: number) => (
-        <motion.div key={repo.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.04 }}
-          className="bg-surface-container-lowest border border-outline-variant rounded-xl p-5 flex items-center gap-4"
+      <div className="flex justify-between items-center pb-2">
+        <h2 className="text-sm font-bold tracking-wide text-on-surface-variant uppercase">Project Repositories</h2>
+        <button
+          onClick={() => setIsAddOpen(true)}
+          className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary-fixed/10 text-primary-fixed hover:bg-primary-fixed/20 text-sm font-semibold transition-colors border border-primary-fixed/20"
         >
-          <div className="w-10 h-10 rounded-lg bg-primary-fixed/10 border border-primary-fixed/20 flex items-center justify-center shrink-0">
-            <GitBranch className="w-5 h-5 text-primary-fixed" />
+          <Plus className="w-4 h-4" /> Add Repository
+        </button>
+      </div>
+
+      {isAddOpen && (
+        <form onSubmit={handleAdd} className="bg-surface-container-lowest border border-outline-variant rounded-xl p-5 mb-4">
+          <div className="space-y-4">
+            <div>
+              <label className="text-xs font-bold text-on-surface-variant uppercase mb-1 block">Name</label>
+              <input type="text" required value={name} onChange={e => setName(e.target.value)} className="w-full bg-surface-container border border-outline-variant rounded-lg px-3 py-2 text-sm text-on-surface focus:outline-none focus:border-primary-fixed" placeholder="frontend-app" />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-on-surface-variant uppercase mb-1 block">Git URL</label>
+              <input type="text" required value={gitUrl} onChange={e => setGitUrl(e.target.value)} className="w-full bg-surface-container border border-outline-variant rounded-lg px-3 py-2 text-sm text-on-surface focus:outline-none focus:border-primary-fixed" placeholder="https://github.com/user/repo" />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-on-surface-variant uppercase mb-1 block">Default Branch</label>
+              <input type="text" value={defaultBranch} onChange={e => setDefaultBranch(e.target.value)} className="w-full bg-surface-container border border-outline-variant rounded-lg px-3 py-2 text-sm text-on-surface focus:outline-none focus:border-primary-fixed" placeholder="main" />
+            </div>
+            <div className="flex justify-end gap-3 pt-2">
+              <button type="button" onClick={() => setIsAddOpen(false)} className="px-4 py-2 text-sm font-semibold text-on-surface-variant hover:text-on-surface">Cancel</button>
+              <button type="submit" disabled={isAdding} className="px-4 py-2 text-sm font-semibold bg-primary-fixed text-on-primary-fixed rounded-lg hover:bg-primary-fixed/90 disabled:opacity-50 flex items-center gap-2">
+                {isAdding && <Loader2 className="w-4 h-4 animate-spin" />}
+                Add Repository
+              </button>
+            </div>
           </div>
-          <div className="flex-1 min-w-0">
-            <p className="font-semibold text-on-surface truncate">{repo.name || repo.gitUrl}</p>
-            <p className="text-xs font-mono text-on-surface-variant truncate">{repo.gitUrl}</p>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <span className="text-xs text-on-surface-variant font-mono bg-surface-container px-2 py-1 rounded-lg">
-              {repo.defaultBranch || "main"}
-            </span>
-          </div>
-        </motion.div>
-      ))}
+        </form>
+      )}
+
+      {repositories.length === 0 && !isAddOpen ? (
+        <EmptyState icon={Database} title="No repositories" description="Add a Git repository to this project to get started." />
+      ) : (
+        repositories.map((repo: ProjectRepository, idx: number) => (
+          <motion.div key={repo.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.04 }}
+            className="bg-surface-container-lowest border border-outline-variant rounded-xl p-5 flex items-center gap-4"
+          >
+            <div className="w-10 h-10 rounded-lg bg-primary-fixed/10 border border-primary-fixed/20 flex items-center justify-center shrink-0">
+              <GitBranch className="w-5 h-5 text-primary-fixed" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-on-surface truncate">{repo.name || repo.gitUrl}</p>
+              <p className="text-xs font-mono text-on-surface-variant truncate">{repo.gitUrl}</p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-xs text-on-surface-variant font-mono bg-surface-container px-2 py-1 rounded-lg">
+                {repo.defaultBranch || "main"}
+              </span>
+            </div>
+          </motion.div>
+        ))
+      )}
     </div>
   );
 }
 
 // ── Members Tab ────────────────────────────────────────────────────────────────
 
-function MembersTab({ members }: { members?: ProjectMember[] }) {
+function MembersTab({ members, projectId, mutateMembers }: { members?: ProjectMember[], projectId: string, mutateMembers: () => void }) {
+  const [isInviteOpen, setIsInviteOpen] = useState(false);
+  const [isInviting, setIsInviting] = useState(false);
+
+  const handleInvite = async (identifier: string, role: string) => {
+    setIsInviting(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/invite`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${localStorage.getItem("token")}` },
+        body: JSON.stringify({ identifier, role: role === "COLLABORATOR" ? "EDITOR" : role })
+      });
+      if (res.ok) {
+        setIsInviteOpen(false);
+        mutateMembers();
+      } else {
+        const errorData = await res.json();
+        alert(errorData.error || "Failed to invite user");
+      }
+    } finally {
+      setIsInviting(false);
+    }
+  };
+
   if (!Array.isArray(members)) return <LoadingPlaceholder />;
-  if (members.length === 0) return <EmptyState icon={Users} title="No members" description="Invite collaborators to this project." />;
 
   return (
     <div className="space-y-3">
-      {members.map((m: ProjectMember, idx: number) => (
-        <motion.div key={m.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.04 }}
-          className="bg-surface-container-lowest border border-outline-variant rounded-xl p-5 flex items-center gap-4"
+      <div className="flex justify-between items-center pb-2">
+        <h2 className="text-sm font-bold tracking-wide text-on-surface-variant uppercase">Project Members</h2>
+        <button
+          onClick={() => setIsInviteOpen(true)}
+          className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary-fixed/10 text-primary-fixed hover:bg-primary-fixed/20 text-sm font-semibold transition-colors border border-primary-fixed/20"
         >
-          <div className="w-10 h-10 rounded-full bg-primary-fixed/10 border border-primary-fixed/20 flex items-center justify-center shrink-0 text-primary-fixed font-bold text-sm">
-            {(m.user?.username || m.user?.email || "?")[0].toUpperCase()}
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="font-semibold text-on-surface">{m.user?.username || m.user?.email || m.userId}</p>
-            <p className="text-xs text-on-surface-variant">{m.user?.email}</p>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <RoleBadge role={m.role} />
-            {m.status === "PENDING" && (
-              <span className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full bg-yellow-400/10 text-yellow-400 border border-yellow-400/20 uppercase">Pending</span>
-            )}
-          </div>
-        </motion.div>
-      ))}
+          <Plus className="w-4 h-4" /> Add Member
+        </button>
+      </div>
+
+      {members.length === 0 ? (
+        <EmptyState icon={Users} title="No members" description="Invite collaborators to this project." />
+      ) : (
+        members.map((m: ProjectMember, idx: number) => (
+          <motion.div key={m.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.04 }}
+            className="bg-surface-container-lowest border border-outline-variant rounded-xl p-5 flex items-center gap-4"
+          >
+            <div className="w-10 h-10 rounded-full bg-primary-fixed/10 border border-primary-fixed/20 flex items-center justify-center shrink-0 text-primary-fixed font-bold text-sm">
+              {(m.user?.username || m.user?.email || "?")[0].toUpperCase()}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-on-surface">{m.user?.username || m.user?.email || m.userId}</p>
+              <p className="text-xs text-on-surface-variant">{m.user?.email}</p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <RoleBadge role={m.role} />
+              {m.status === "PENDING" && (
+                <span className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full bg-yellow-400/10 text-yellow-400 border border-yellow-400/20 uppercase">Pending</span>
+              )}
+            </div>
+          </motion.div>
+        ))
+      )}
+
+      <InviteCollaboratorModal
+        isOpen={isInviteOpen}
+        onClose={() => setIsInviteOpen(false)}
+        onInvite={handleInvite}
+        isInviting={isInviting}
+      />
     </div>
   );
 }

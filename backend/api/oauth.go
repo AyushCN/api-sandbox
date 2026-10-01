@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -25,7 +26,7 @@ func generateStateString() string {
 }
 
 func GithubLogin(c *gin.Context) {
-	clientID := os.Getenv("GITHUB_CLIENT_ID")
+	clientID := strings.TrimSpace(os.Getenv("GITHUB_CLIENT_ID"))
 	if clientID == "" {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "GITHUB_CLIENT_ID not configured"})
 		return
@@ -56,8 +57,8 @@ func GithubCallback(c *gin.Context) {
 		return
 	}
 
-	clientID := os.Getenv("GITHUB_CLIENT_ID")
-	clientSecret := os.Getenv("GITHUB_CLIENT_SECRET")
+	clientID := strings.TrimSpace(os.Getenv("GITHUB_CLIENT_ID"))
+	clientSecret := strings.TrimSpace(os.Getenv("GITHUB_CLIENT_SECRET"))
 	if clientID == "" || clientSecret == "" {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "GitHub credentials not configured"})
 		return
@@ -73,6 +74,7 @@ func GithubCallback(c *gin.Context) {
 	req, _ := http.NewRequest("POST", tokenURL, strings.NewReader(data.Encode()))
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("User-Agent", "API-Sandbox-App")
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
@@ -103,10 +105,20 @@ func GithubCallback(c *gin.Context) {
 	userReq, _ := http.NewRequest("GET", "https://api.github.com/user", nil)
 	userReq.Header.Set("Authorization", "Bearer "+accessToken)
 	userReq.Header.Set("Accept", "application/json")
+	userReq.Header.Set("User-Agent", "API-Sandbox-App")
 
 	userResp, err := client.Do(userReq)
 	if err != nil || userResp.StatusCode != 200 {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch GitHub user"})
+		var status int
+		var bodySnippet string
+		if userResp != nil {
+			status = userResp.StatusCode
+			body, _ := io.ReadAll(userResp.Body)
+			bodySnippet = string(body)
+			userResp.Body.Close()
+		}
+		slog.Error("Failed to fetch GitHub user", "status", status, "error", err, "body", bodySnippet)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch GitHub user", "status": status, "details": bodySnippet})
 		return
 	}
 	defer userResp.Body.Close()
@@ -129,6 +141,7 @@ func GithubCallback(c *gin.Context) {
 		emailReq, _ := http.NewRequest("GET", "https://api.github.com/user/emails", nil)
 		emailReq.Header.Set("Authorization", "Bearer "+accessToken)
 		emailReq.Header.Set("Accept", "application/json")
+		emailReq.Header.Set("User-Agent", "API-Sandbox-App")
 		emailResp, err := client.Do(emailReq)
 		if err == nil && emailResp.StatusCode == 200 {
 			defer emailResp.Body.Close()
@@ -157,6 +170,7 @@ func GithubCallback(c *gin.Context) {
 	ghIDStr := fmt.Sprintf("%d", ghUser.ID)
 	encryptedToken, err := Encrypt(accessToken)
 	if err != nil {
+		slog.Error("Failed to encrypt GitHub token", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to encrypt token"})
 		return
 	}

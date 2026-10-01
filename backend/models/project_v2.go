@@ -46,7 +46,7 @@ type ProjectMember struct {
 	ProjectID       string              `gorm:"type:text;not null;index" json:"projectId"`
 	Project         *Project            `json:"-"`
 	UserID          string              `gorm:"type:text;not null;index" json:"userId"`
-	User            *User               `json:"-"`
+	User            *User               `json:"user,omitempty"`
 	Role            ProjectMemberRole   `gorm:"type:text;not null" json:"role"`
 	Status          ProjectMemberStatus `gorm:"type:text;not null;default:'PENDING'" json:"status"`
 	InvitedByUserID *string             `gorm:"type:text" json:"invitedBy"`

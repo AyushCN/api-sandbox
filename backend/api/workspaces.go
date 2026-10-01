@@ -59,6 +59,30 @@ func EditProject(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Canonical workspace not found"})
 			return
 		}
+
+		if canonicalWorkspace.EnvironmentID == nil {
+			env := models.Environment{
+				UserID:    uid,
+				ProjectID: projectID,
+				Name:      "Canonical Workspace Environment",
+				Status:    models.StatusBuilding,
+			}
+			if err := db.DB.Create(&env).Error; err == nil {
+				db.DB.Create(&models.EnvironmentMember{
+					EnvironmentID: env.ID,
+					UserID:        uid,
+					Role:          models.EnvRoleAdmin,
+				})
+				canonicalWorkspace.EnvironmentID = &env.ID
+				canonicalWorkspace.Environment = &env
+				db.DB.Save(&canonicalWorkspace)
+
+				payload, _ := json.Marshal(map[string]string{"environmentId": env.ID})
+				task := asynq.NewTask(queue.TaskBuildEnvironment, payload)
+				queue.Client.Enqueue(task, asynq.MaxRetry(3))
+			}
+		}
+
 		c.JSON(http.StatusOK, canonicalWorkspace)
 		return
 	}

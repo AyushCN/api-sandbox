@@ -9,8 +9,8 @@ import (
 	"github.com/api-sandbox/backend/db"
 	"github.com/api-sandbox/backend/models"
 	"github.com/api-sandbox/backend/provider"
-	"github.com/hibiken/asynq"
 	"github.com/glebarez/sqlite"
+	"github.com/hibiken/asynq"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -82,7 +82,7 @@ func TestHandleBuildEnvironmentTask_SidecarError(t *testing.T) {
 	ProviderCloneOrFetch = func(ctx context.Context, targetDir, repoURL, branch, baseCommit, token string) error {
 		return nil
 	}
-	ProviderCheckContainerHealth = func(containerID string) (bool, string, error) {
+	ProviderCheckContainerHealth = func(context.Context, string) (bool, string, error) {
 		return true, "", nil
 	}
 	ProviderDetectDatabaseRequirements = func(workspaceDir string) (provider.DBType, error) {

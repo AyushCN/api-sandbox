@@ -36,7 +36,7 @@ go run scripts/measure_loop/main.go
 ```
 
 ### PostgreSQL Status Sync
-An Asynq task runs orphan reconciliation every five minutes. It compares labeled Docker containers with environment records, removes orphan runtimes, and records failure when a database `RUNNING` environment has no container or a `BUILDING` environment is stale. The reaper logs failures; check backend logs before manually removing containers.
+An Asynq task runs orphan reconciliation every minute. It compares labeled Docker containers with environment records, removes orphan runtimes, and records failure when a database `RUNNING` environment has no live container or a `BUILDING` environment has been stale for 60 minutes. The reaper logs failures; check backend logs before manually removing containers.
 
 You can manually inspect the state by checking the DB:
 ```sql

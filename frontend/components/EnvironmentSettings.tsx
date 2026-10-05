@@ -5,7 +5,7 @@ import { Loader2, Settings, Save } from "lucide-react"
 export default function EnvironmentSettings({ env, mutate, isViewerRole }: { env: Record<string, unknown>, mutate: () => void, isViewerRole: boolean }) {
   const [startCommand, setStartCommand] = useState((env.startCommand as string) || "")
   const [port, setPort] = useState((env.port as number)?.toString() || "")
-  const [healthCheckType, setHealthCheckType] = useState((env.healthCheckType as string) || "tcp")
+  const [healthCheckType, setHealthCheckType] = useState((env.healthCheckType as string) || "http")
   const [isSaving, setIsSaving] = useState(false)
 
   const handleSave = async () => {
@@ -83,10 +83,11 @@ export default function EnvironmentSettings({ env, mutate, isViewerRole }: { env
             disabled={isViewerRole}
             className="w-full px-3 py-2 bg-surface-container/50 border border-outline-variant rounded-lg focus:border-primary-fixed focus:ring-1 focus:ring-primary-fixed outline-none transition-all disabled:opacity-50"
           >
-            <option value="tcp">TCP/HTTP Port Check (Wait until port binds)</option>
+            <option value="http">HTTP application readiness (requires 2xx)</option>
+            <option value="tcp">TCP port connection</option>
             <option value="none">None (For workers or non-listening jobs)</option>
           </select>
-          <p className="text-xs text-on-surface-variant/70 mt-1">TCP ensures you don&apos;t get 502 Bad Gateway during boot. Disable this for background workers.</p>
+          <p className="text-xs text-on-surface-variant/70 mt-1">HTTP requires a 2xx preview response. TCP requires a successful connection to the runtime port. None checks only that the runtime process remains alive.</p>
         </div>
 
         {!isViewerRole && (

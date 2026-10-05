@@ -73,7 +73,7 @@ The environment is the container abstraction attached to a Workspace. Lifecycle 
 stateDiagram-v2
     [*] --> IDLE : Created
     IDLE --> BUILDING : Start requested
-    BUILDING --> RUNNING : Base image pulled, volume mounted, health passes
+    BUILDING --> RUNNING : App process alive and readiness policy passes
     BUILDING --> FAILED : Clone or health failed
     RUNNING --> STOPPED : User stop
     STOPPED --> BUILDING : Restart
@@ -84,9 +84,9 @@ stateDiagram-v2
     IDLE --> [*] : Deleted
 ```
 
-**"RUNNING" means:** the base image was pulled, code is bind-mounted to `/app`, a process watcher is running, and the current readiness poll did not receive HTTP 502. A 404 can therefore be accepted as ready; this does not prove the application is serving successfully. It does not mean the application is fully built or ready — only that provisioning and the current readiness condition completed.
+**"RUNNING" means:** the runtime container is alive and the configured readiness policy passed. For the legacy `tcp` value, that means the preview route returned 2xx. For `none`, only a live process is required. It does not guarantee continued availability: if PID 1 exits later, Docker stops the container and the one-minute reaper marks the environment failed.
 
-Every provisioning attempt creates a fresh runtime container. The warm pool pulls and records image references only; it does not hand a running container to an environment. The worker attaches the runtime to its organization bridge and assigns its environment-specific writable mounts.
+Every provisioning attempt creates a fresh runtime container. The warm pool pulls and records image references only; it does not hand a running container to an environment. The worker attaches the runtime to its user-scoped bridge and assigns its environment-specific writable mounts.
 
 ### Runtime mounts and limits
 
@@ -100,11 +100,15 @@ Every provisioning attempt creates a fresh runtime container. The warm pool pull
 
 The runtime does not mount the shared `${HOST_WORKSPACES_DIR}` root at `/workspaces`, and does not receive a Docker socket. The trusted backend separately mounts the workspace root at `/app/workspaces` to manage files.
 
-Runtime image defaults currently run as UID 0. The actual Docker configuration sets 512 MiB memory and memory+swap, one CPU using `CPUQuota=100000` and `CPUPeriod=100000`, and a 256 PID limit. It drops all Linux capabilities and enables `no-new-privileges`; it does not use privileged mode, host PID/network/IPC namespaces, or device mappings.
+Runtime image defaults currently run as UID 0. Application startup scripts install dependencies and then `exec` the configured start command under the container's PID 1 shell. There is no `sleep infinity` parent, detached app exec, or Docker restart policy. Thus an app process exit stops the runtime container. The actual Docker configuration sets 512 MiB memory and memory+swap, one CPU using `CPUQuota=100000` and `CPUPeriod=100000`, and a 256 PID limit. It drops all Linux capabilities and enables `no-new-privileges`; it does not use privileged mode, host PID/network/IPC namespaces, or device mappings. Non-root compatibility has not been established for arbitrary projects, especially install commands that need root.
 
 ### Docker networks
 
-Compose infrastructure services (backend, PostgreSQL, Redis, Traefik, frontend) share `traefik-net`. Runtime containers use an organization-specific bridge and are not attached to `traefik-net`. A runtime shares its organization network with its database sidecar and Traefik, but not with backend or shared Redis/PostgreSQL. Local Docker verification confirmed outbound HTTP works; bounded probes to host gateway port 80 and shared Redis failed. Internet egress remains enabled for Git/repository access and dependency downloads.
+Compose infrastructure services (backend, PostgreSQL, Redis, Traefik, frontend) share `traefik-net`. Runtime containers use `api-sandbox-net-<user-id>` and are not attached to `traefik-net`. All environments and database sidecars for the same user share that bridge; different users use different bridges. Traefik is attached to each user bridge for routing. Local Docker verification confirmed outbound HTTP works; bounded probes to host gateway port 80 and shared Redis failed. Internet egress remains enabled for Git/repository access and dependency downloads.
+
+### Startup and readiness
+
+`healthCheckType: "http"` is the default for web runtimes: the worker requests the preview root and requires a final 2xx response. Redirects are not followed; 3xx, 4xx, and 5xx responses do not qualify. `healthCheckType: "tcp"` checks a TCP connection to the runtime container's configured port. `healthCheckType: "none"` skips both probes but still requires the runtime container to remain running. The worker checks process liveness while waiting, with a 10-minute timeout per runtime candidate. A build task is bounded to 45 minutes.
 
 ## How the Dev Loop Works
 
@@ -112,7 +116,7 @@ Compose infrastructure services (backend, PostgreSQL, Redis, Traefik, frontend) 
 2. Go backend writes the file to the host path `/var/lib/api-sandbox/workspaces/<env-id>/`
 3. The sandbox container has this directory bind-mounted to `/app`
 4. The process watcher inside the container detects the change and restarts the application
-5. The backend polls Traefik with the environment's virtual host header until it receives a non-502 response
+5. The worker polls Traefik with the environment's virtual host header until it receives a 2xx response
 6. A `reload_ready` WebSocket event is broadcast to all connected clients
 
 Warm reload latency (Node.js): ~250ms. Cold starts are substantially longer.
@@ -122,7 +126,7 @@ Warm reload latency (Node.js): ~250ms. Cold starts are substantially longer.
 | Boundary | Mechanism | What it does not protect |
 |----------|-----------|--------------------------|
 | API auth | JWT cookie | Compromised API process |
-| Tenant network | Bridge per organization | Host if socket is abused; outbound egress is allowed |
+| Tenant network | Bridge per user | Same-user environments can communicate; host if socket is abused; outbound egress is allowed |
 | Container | CapDrop, no-new-privs, mem/PID limits | Kernel exploits, socket mount |
 | Path validation | Workspace root checks | Host FS via RCE in Go backend |
 
@@ -141,7 +145,7 @@ Traefik uses Docker provider discovery to read Compose labels and discover backe
 
 The Go API handlers and Asynq worker share the backend service, so they cannot have separate socket permissions in the current deployment. A socket mount with `:ro` is not an API authorization boundary. The Docker socket is not passed to tests/scripts as a container mount; the real-Docker test commands run from the developer/CI process that invokes the Docker CLI or Go client.
 
-**This is a deliberate design tradeoff for a single-host, trusted-user tool.** Do not use this as a multi-tenant public platform. Local inspection also found the runtime preview returned HTTP 404 while readiness accepted any status except 502; treat that as a separate preview/readiness defect, not evidence that runtime networking is healthy.
+**This is a deliberate design tradeoff for a single-host, trusted-user tool.** Do not use this as a multi-tenant public platform. Runtime preview must return 2xx to pass boot readiness. Preview routes are stored as individual Redis KV paths for Traefik's Redis provider; the prior hash-shaped Redis entries did not load and returned 404. The corrected route format passed the live Compose preview check.
 
 ## Editor Strategy
 

@@ -27,10 +27,10 @@ func MaintainWarmPool() {
 		for _, rt := range runtimes {
 			count, err := db.RedisClient.LLen(context.Background(), "warm-pool:"+rt).Result()
 			if err == nil && count < int64(targetSize) {
-				slog.Info("Creating warm container", "runtime", rt)
-				containerID, err := provider.CreateWarmContainer(context.Background(), rt)
+				slog.Info("Pre-pulling runtime image", "runtime", rt)
+				imageRef, err := provider.CreateWarmContainer(context.Background(), rt)
 				if err == nil {
-					db.RedisClient.RPush(context.Background(), "warm-pool:"+rt, containerID)
+					db.RedisClient.RPush(context.Background(), "warm-pool:"+rt, imageRef)
 				} else {
 					slog.Error("Failed to create warm container", "error", err)
 				}

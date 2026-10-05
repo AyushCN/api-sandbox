@@ -24,9 +24,20 @@ import (
 
 var dockerClient *docker.Client
 
+const dockerRequestTimeout = 10 * time.Minute
+
+func newDockerClient() (*docker.Client, error) {
+	client, err := docker.NewVersionedClientFromEnv("1.41")
+	if err != nil {
+		return nil, err
+	}
+	client.SetTimeout(dockerRequestTimeout)
+	return client, nil
+}
+
 func InitDocker() {
 	var err error
-	dockerClient, err = docker.NewVersionedClientFromEnv("1.41")
+	dockerClient, err = newDockerClient()
 	if err != nil {
 		slog.Warn("Failed to initialize docker client", "error", err)
 		if os.Getenv("MODE") == "worker" {
@@ -41,7 +52,7 @@ func getDockerClient() (*docker.Client, error) {
 		return dockerClient, nil
 	}
 	var err error
-	dockerClient, err = docker.NewVersionedClientFromEnv("1.41")
+	dockerClient, err = newDockerClient()
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize docker client: %w", err)
 	}
@@ -189,16 +200,45 @@ func CleanupContainer(ctx context.Context, containerID string) error {
 		}
 		return fmt.Errorf("inspect container %q before cleanup: %w", containerID, err)
 	}
-	stopErr := cli.StopContainer(containerID, 10)
+	stopErr := cli.StopContainerWithContext(containerID, 10, ctx)
 	removeErr := cli.RemoveContainer(docker.RemoveContainerOptions{
-		ID:    containerID,
-		Force: true,
+		ID:      containerID,
+		Force:   true,
+		Context: ctx,
 	})
+	if removeErr != nil && strings.Contains(removeErr.Error(), "removal of container") && strings.Contains(removeErr.Error(), "already in progress") {
+		removeErr = waitForContainerRemoval(ctx, cli, containerID, removeErr)
+	}
 	if removeErr != nil {
 		slog.Error("Docker container removal failed", "container", containerID, "stop_error", stopErr, "remove_error", removeErr)
 		return fmt.Errorf("remove container %q (stop error: %v): %w", containerID, stopErr, removeErr)
 	}
 	return nil
+}
+
+func waitForContainerRemoval(ctx context.Context, cli *docker.Client, containerID string, removeErr error) error {
+	waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		_, inspectErr := cli.InspectContainerWithContext(containerID, waitCtx)
+		if inspectErr != nil {
+			var missing *docker.NoSuchContainer
+			if errors.As(inspectErr, &missing) {
+				return nil
+			}
+			if waitCtx.Err() != nil {
+				return errors.Join(removeErr, waitCtx.Err())
+			}
+			return errors.Join(removeErr, fmt.Errorf("inspect container during removal: %w", inspectErr))
+		}
+		select {
+		case <-waitCtx.Done():
+			return errors.Join(removeErr, waitCtx.Err())
+		case <-ticker.C:
+		}
+	}
 }
 
 // Helper to create tarball from a directory
@@ -293,24 +333,26 @@ func GetContainerPort(containerID string) (int, error) {
 
 func WaitForAppReady(ctx context.Context, envID string, domain string) error {
 	host := fmt.Sprintf("%s.%s", envID, domain)
-	client := &http.Client{} // Removed 500ms timeout which aborted connections prematurely
+	client := &http.Client{
+		Timeout: 2 * time.Second,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 
-	timeout := time.After(30 * time.Second)
-	ticker := time.NewTicker(200 * time.Millisecond)
+	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-timeout:
-			return fmt.Errorf("timed out waiting for app %s to be reachable", envID)
 		case <-ticker.C:
 			traefikURL := os.Getenv("TRAEFIK_URL")
 			if traefikURL == "" {
 				traefikURL = "http://api-sandbox-traefik"
 			}
-			req, err := http.NewRequestWithContext(ctx, "GET", strings.TrimRight(traefikURL, "/")+"/", nil)
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(traefikURL, "/")+"/", nil)
 			if err != nil {
 				continue
 			}
@@ -322,25 +364,24 @@ func WaitForAppReady(ctx context.Context, envID string, domain string) error {
 				continue
 			}
 
-			// Must close immediately, not defer, to prevent connection leaks
 			statusCode := resp.StatusCode
 			resp.Body.Close()
 
 			slog.Info("WaitForAppReady HTTP response", "statusCode", statusCode)
 
-			if statusCode != http.StatusBadGateway {
+			if IsHTTPReadyStatus(statusCode) {
 				return nil
 			}
 		}
 	}
 }
 
-func StartSidecarDatabase(ctx context.Context, envID string, orgID string, dbType DBType) (string, error) {
+func StartSidecarDatabase(ctx context.Context, envID string, userID string, dbType DBType) (string, error) {
 	if dbType == DBTypeNone {
 		return "", nil
 	}
 
-	networkName, _, err := EnsureOrgNetwork(ctx, orgID)
+	networkName, _, err := EnsureUserNetwork(ctx, userID)
 	if err != nil {
 		return "", fmt.Errorf("failed to ensure network: %v", err)
 	}
@@ -390,9 +431,9 @@ func StartSidecarDatabase(ctx context.Context, envID string, orgID string, dbTyp
 
 	createLog(envID, fmt.Sprintf("Pulling %s database image (this may take a minute on first run)...", string(dbType)), models.LogLevelInfo)
 
-	pullOpts := docker.PullImageOptions{
-		Repository: image,
-	}
+	pullCtx, cancelPull := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancelPull()
+	pullOpts := docker.PullImageOptions{Repository: image, Context: pullCtx, InactivityTimeout: time.Minute}
 	if err := dockerClient.PullImage(pullOpts, docker.AuthConfiguration{}); err != nil {
 		return "", fmt.Errorf("pull database image %s: %w", image, err)
 	}
@@ -402,7 +443,8 @@ func StartSidecarDatabase(ctx context.Context, envID string, orgID string, dbTyp
 	pidsLimit := int64(256)
 
 	opts := docker.CreateContainerOptions{
-		Name: containerName,
+		Name:    containerName,
+		Context: ctx,
 		Config: &docker.Config{
 			Image: image,
 			Env:   env,
@@ -430,7 +472,7 @@ func StartSidecarDatabase(ctx context.Context, envID string, orgID string, dbTyp
 		return "", fmt.Errorf("failed to create db container: %v", err)
 	}
 
-	if err := dockerClient.StartContainer(container.ID, nil); err != nil {
+	if err := dockerClient.StartContainerWithContext(container.ID, nil, ctx); err != nil {
 		cleanupErr := CleanupContainer(ctx, container.ID)
 		return "", errors.Join(fmt.Errorf("failed to start db container: %w", err), cleanupErr)
 	}
@@ -472,6 +514,7 @@ func waitForDatabaseReady(ctx context.Context, containerID string, dbType DBType
 		case <-ticker.C:
 			execOpts := docker.CreateExecOptions{
 				Container:    containerID,
+				Context:      ctx,
 				AttachStdout: true,
 				AttachStderr: true,
 				Cmd:          cmd,
@@ -485,6 +528,7 @@ func waitForDatabaseReady(ctx context.Context, containerID string, dbType DBType
 			startOpts := docker.StartExecOptions{
 				OutputStream: &stdout,
 				ErrorStream:  &stderr,
+				Context:      ctx,
 			}
 			err = dockerClient.StartExec(exec.ID, startOpts)
 			if err != nil {
@@ -500,8 +544,8 @@ func waitForDatabaseReady(ctx context.Context, containerID string, dbType DBType
 	}
 }
 
-func EnsureOrgNetwork(ctx context.Context, orgID string) (string, string, error) {
-	networkName := fmt.Sprintf("api-sandbox-net-%s", orgID)
+func EnsureUserNetwork(ctx context.Context, userID string) (string, string, error) {
+	networkName := fmt.Sprintf("api-sandbox-net-%s", userID)
 	networks, err := dockerClient.ListNetworks()
 	if err != nil {
 		return "", "", fmt.Errorf("list Docker networks: %w", err)
@@ -524,16 +568,30 @@ func EnsureOrgNetwork(ctx context.Context, orgID string) (string, string, error)
 			EnableIPv6:     false,
 		})
 		if err != nil && err != docker.ErrNetworkAlreadyExists {
-			return "", "", fmt.Errorf("failed to create network %s: %v", networkName, err)
+			return "", "", fmt.Errorf("failed to create network %s: %w", networkName, err)
 		}
 		if net != nil {
 			networkID = net.ID
+		} else if err == docker.ErrNetworkAlreadyExists {
+			networks, err = dockerClient.ListNetworks()
+			if err != nil {
+				return "", "", fmt.Errorf("find concurrently created network %s: %w", networkName, err)
+			}
+			for _, existing := range networks {
+				if existing.Name == networkName {
+					networkID = existing.ID
+					break
+				}
+			}
 		}
 	}
+	if networkID == "" {
+		return "", "", fmt.Errorf("Docker network %s has no ID after lookup/create", networkName)
+	}
 
-	// Traefik is intentionally attached to each organization network for routing.
+	// Traefik is intentionally attached to each user's network for routing.
 	if err := connectContainerToNetwork(networkName, networkID, "api-sandbox-traefik"); err != nil {
-		return "", "", fmt.Errorf("connect Traefik to organization network %s: %w", networkName, err)
+		return "", "", fmt.Errorf("connect Traefik to user network %s: %w", networkName, err)
 	}
 
 	return networkName, networkID, nil
@@ -585,7 +643,7 @@ func ReapOrphanContainers(ctx context.Context) error {
 	}
 	mainContainers := make(map[string]docker.APIContainers)
 	var failures []error
-	buildingStaleAfter := time.Now().Add(-30 * time.Minute)
+	reconcileTime := time.Now()
 
 	for _, c := range containers {
 		for _, rawName := range c.Names {
@@ -608,19 +666,24 @@ func ReapOrphanContainers(ctx context.Context) error {
 				failures = append(failures, fmt.Errorf("load environment %s for container %s: %w", envID, name, lookupErr))
 				continue
 			}
-			orphan := lookupErr == nil && (env.ID == "" || (env.Status != models.StatusRunning && env.Status != models.StatusBuilding))
-			deadRuntime := isMain && lookupErr == nil && env.Status == models.StatusRunning && c.State != "running"
-			staleBuild := isMain && lookupErr == nil && env.Status == models.StatusBuilding && c.Created > 0 && time.Unix(c.Created, 0).Before(buildingStaleAfter)
+			orphan := lookupErr == nil && isOrphanEnvironment(env)
+			deadRuntime := isMain && lookupErr == nil && env.Status == models.StatusRunning && needsRuntimeFailure(env.Status, true, c.State, env.UpdatedAt, reconcileTime)
+			staleBuild := isMain && lookupErr == nil && env.Status == models.StatusBuilding && needsRuntimeFailure(env.Status, true, c.State, env.UpdatedAt, reconcileTime)
 			if orphan || deadRuntime || staleBuild {
 				slog.Info("Removing stale Docker container", "name", name, "environment_id", envID, "state", c.State, "orphan", orphan, "stale_build", staleBuild)
 				if removeErr := CleanupContainer(ctx, c.ID); removeErr != nil {
 					failures = append(failures, fmt.Errorf("remove stale container %s: %w", name, removeErr))
 				}
+				if isMain {
+					if routeErr := ClearRuntimeRoute(ctx, envID); routeErr != nil {
+						failures = append(failures, fmt.Errorf("clear stale Traefik route for %s: %w", envID, routeErr))
+					}
+				}
 			}
 			if deadRuntime || staleBuild {
 				message := fmt.Sprintf("Runtime container was %s; marked environment failed by Docker reconciliation.", c.State)
 				if staleBuild {
-					message = "Environment remained BUILDING for over 30 minutes; marked failed by Docker reconciliation."
+					message = "Environment remained BUILDING for over 60 minutes; marked failed by Docker reconciliation."
 				}
 				if dbErr := failReconciledEnvironment(envID, message); dbErr != nil {
 					failures = append(failures, dbErr)
@@ -642,17 +705,38 @@ func ReapOrphanContainers(ctx context.Context) error {
 		if _, exists := mainContainers[env.ID]; exists {
 			continue
 		}
-		if env.Status == models.StatusRunning {
+		if needsRuntimeFailure(env.Status, false, "", env.UpdatedAt, reconcileTime) && env.Status == models.StatusRunning {
 			if err := failReconciledEnvironment(env.ID, "Runtime container is missing; marked environment failed by Docker reconciliation."); err != nil {
 				failures = append(failures, err)
 			}
-		} else if env.Status == models.StatusBuilding && env.UpdatedAt.Before(buildingStaleAfter) {
-			if err := failReconciledEnvironment(env.ID, "Provisioning exceeded 30 minutes without a runtime container; marked environment failed by Docker reconciliation."); err != nil {
+			if err := ClearRuntimeRoute(ctx, env.ID); err != nil {
+				failures = append(failures, fmt.Errorf("clear missing-runtime Traefik route for %s: %w", env.ID, err))
+			}
+		} else if env.Status == models.StatusBuilding && needsRuntimeFailure(env.Status, false, "", env.UpdatedAt, reconcileTime) {
+			if err := failReconciledEnvironment(env.ID, "Provisioning exceeded 60 minutes without a runtime container; marked environment failed by Docker reconciliation."); err != nil {
 				failures = append(failures, err)
+			}
+			if err := ClearRuntimeRoute(ctx, env.ID); err != nil {
+				failures = append(failures, fmt.Errorf("clear stale-build Traefik route for %s: %w", env.ID, err))
 			}
 		}
 	}
 	return errors.Join(failures...)
+}
+
+func isOrphanEnvironment(env models.Environment) bool {
+	return env.ID == "" || (env.Status != models.StatusRunning && env.Status != models.StatusBuilding)
+}
+
+func needsRuntimeFailure(status models.EnvironmentStatus, containerFound bool, containerState string, updatedAt, now time.Time) bool {
+	switch status {
+	case models.StatusRunning:
+		return !containerFound || containerState != "running"
+	case models.StatusBuilding:
+		return now.Sub(updatedAt) > 60*time.Minute
+	default:
+		return false
+	}
 }
 
 func failReconciledEnvironment(envID, message string) error {

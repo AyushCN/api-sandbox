@@ -4,7 +4,7 @@ A single-host tool that clones a GitHub repo onto a Linux host, runs it in a Doc
 
 **What it is not:** a secure multi-tenant cloud, production hosting, or a platform with guaranteed latency under all conditions.
 
-**How isolation works:** Each environment gets a fresh Docker container, its own writable workspace mounted at `/app`, an organization-specific bridge network, resource limits, dropped capabilities, and `no-new-privileges`. This is best-effort isolation with a shared host kernel. The backend and worker share a read/write `/var/run/docker.sock`; Docker API access is effectively host-root authority. Traefik also mounts the socket read-only at the filesystem level, which does not restrict Docker API operations.
+**How isolation works:** Each environment gets a fresh Docker container, its own writable workspace mounted at `/app`, a user-scoped bridge network, resource limits, dropped capabilities, and `no-new-privileges`. This is best-effort isolation with a shared host kernel. Environments owned by the same user share a Docker bridge. The backend and worker share a read/write `/var/run/docker.sock`; Docker API access is effectively host-root authority. Traefik also mounts the socket read-only at the filesystem level, which does not restrict Docker API operations.
 
 Designed for trusted users on a dedicated single host. Do not expose to untrusted users or arbitrary public repos.
 
@@ -47,7 +47,7 @@ See [PROOF.md](PROOF.md) for raw numbers.
 
 | Concern | Reality |
 |---------|---------|
-| Isolation | Best-effort containers (cgroups, CapDrop, per-organization networks, per-environment workspace mounts) |
+| Isolation | Best-effort containers (cgroups, CapDrop, per-user networks, per-environment workspace mounts) |
 | Hostile multi-tenant | **Not supported** |
 | Control plane | **Docker socket = host root equivalent** |
 | Runtime user | Root by image default; verify image compatibility before changing |
@@ -101,8 +101,9 @@ curl -sS http://localhost/api/health
 - Runtime workspace: `${HOST_WORKSPACES_DIR}/<environment-id>` → `/app` (read/write). Runtime containers do not receive the shared backend `/app/workspaces` mount.
 - Runtime cache: `${HOST_WORKSPACES_DIR}/.cache/<environment-id>/{npm,pnpm,pip,go}`. Cache mounts are writable and scoped by environment.
 - Runtime limits: 512 MiB memory, 512 MiB memory+swap, one CPU via quota/period, and 256 PIDs. Capabilities are dropped and `no-new-privileges` is enabled; runtime images currently default to UID 0.
-- The Compose infrastructure network contains the backend, PostgreSQL, Redis, Traefik, and frontend. Runtime containers use an organization bridge instead. Runtime internet egress currently works and is needed for repository access and dependency downloads.
-- The normal project-creation endpoint currently has a schema/model mismatch for `owner_organization_id`; preview routing returned 404 in local end-to-end verification. See [Architecture](docs/ARCHITECTURE.md) for the scope of those observations.
+- The Compose infrastructure network contains the backend, PostgreSQL, Redis, Traefik, and frontend. Runtime containers use a user-scoped bridge instead; a user's environments share that bridge. Runtime internet egress currently works and is needed for repository access and dependency downloads.
+- `healthCheckType: "http"` (default) requires a 2xx preview response, `"tcp"` requires a successful TCP connection to the runtime port, and `"none"` checks only that the runtime process is alive. Readiness is bounded to 10 minutes per candidate; build tasks have a 45-minute deadline. App exits stop the container and are reconciled to `FAILED` within about one minute.
+- The normal project-creation endpoint has a schema/model mismatch for `owner_organization_id`. The runtime preview route now uses Traefik's Redis KV key layout and passed live 2xx readiness; normal project creation remains blocked by the schema mismatch. See [Docker Operations](docs/DOCKER.md).
 
 ## License
 

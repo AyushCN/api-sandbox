@@ -81,6 +81,11 @@ func TestDockerRuntimeContainerIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	dockerClient = cli
+	for _, name := range []string{"api-sandbox-env-integration-a", "api-sandbox-env-integration-b", "api-sandbox-env-integration-failed-start", "api-sandbox-env-integration-app-exit", "api-sandbox-env-integration-tcp"} {
+		if err := CleanupContainer(context.Background(), name); err != nil {
+			t.Fatalf("remove stale integration container %s: %v", name, err)
+		}
+	}
 	root := t.TempDir()
 	networkName := fmt.Sprintf("api-sandbox-test-%d", time.Now().UnixNano())
 	network, err := cli.CreateNetwork(docker.CreateNetworkOptions{Name: networkName, Driver: "bridge"})
@@ -107,7 +112,7 @@ func TestDockerRuntimeContainerIsolation(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(env.root, env.marker), []byte(env.contents), 0644); err != nil {
 			t.Fatal(err)
 		}
-		id, err := createRuntimeContainer(env.id, "alpine:3.20", networkName, env.root, filepath.Join(env.root, ".cache"), []string{"sleep", "infinity"})
+		id, err := createRuntimeContainer(context.Background(), env.id, "alpine:3.20", networkName, env.root, filepath.Join(env.root, ".cache"), "/app", nil, nil, []string{"sleep", "infinity"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -154,13 +159,66 @@ func TestDockerRuntimeContainerIsolation(t *testing.T) {
 	}
 
 	// A failing start occurs after Docker has created the container; the helper
-	// must remove that partially provisioned container.
+	// must leave worker-level readiness able to detect the exit and clean up.
 	failedID := "integration-failed-start"
-	if _, err := createRuntimeContainer(failedID, "alpine:3.20", networkName, envs[0].root, filepath.Join(envs[0].root, ".cache"), []string{"missing-runtime-command"}); err == nil {
-		t.Fatal("expected failed start")
+	failedContainerID, startErr := createRuntimeContainer(context.Background(), failedID, "alpine:3.20", networkName, envs[0].root, filepath.Join(envs[0].root, ".cache"), "/app", nil, []string{"/bin/sh"}, []string{"-c", "exit 23"})
+	if startErr == nil {
+		waitCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		exitCode, waitErr := cli.WaitContainerWithContext(failedContainerID, waitCtx)
+		cancel()
+		if waitErr != nil || exitCode != 23 {
+			t.Fatalf("failed application process was not observed: exit=%d err=%v", exitCode, waitErr)
+		}
+		if cleanupErr := CleanupContainer(context.Background(), failedContainerID); cleanupErr != nil {
+			t.Fatal(cleanupErr)
+		}
 	}
 	if _, err := cli.InspectContainer("api-sandbox-env-" + failedID); err == nil {
 		t.Fatal("partially provisioned container remains after failed start")
+	}
+
+	// The application command is PID 1: when it exits, the runtime container
+	// exits too, allowing reconciliation to observe the failure.
+	lifecycleID := "integration-app-exit"
+	startScript := filepath.Join(envs[0].root, "sandbox-start.sh")
+	if err := os.WriteFile(startScript, []byte("#!/bin/sh\nsleep 1\nexit 17\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	containerID, err := createRuntimeContainer(context.Background(), lifecycleID, "alpine:3.20", networkName, envs[0].root, filepath.Join(envs[0].root, ".cache"), "/app", nil, []string{"/bin/sh"}, []string{"/app/sandbox-start.sh"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = CleanupContainer(context.Background(), containerID) })
+	inspect, err := cli.InspectContainer(containerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inspect.Path != "/bin/sh" || len(inspect.Args) != 1 || inspect.Args[0] != "/app/sandbox-start.sh" {
+		t.Fatalf("unexpected PID 1 command: path=%q args=%v", inspect.Path, inspect.Args)
+	}
+	time.Sleep(1500 * time.Millisecond)
+	running, _, err := CheckContainerHealth(context.Background(), containerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if running {
+		t.Fatal("container remained running after its PID 1 application exited")
+	}
+
+	// TCP readiness checks the configured container port, while HTTP readiness
+	// is separately covered through the live Compose preview route.
+	tcpID := "integration-tcp"
+	tcpContainerID, err := createRuntimeContainer(context.Background(), tcpID, "alpine:3.20", networkName, envs[0].root, filepath.Join(envs[0].root, ".cache"), "/app", nil, []string{"busybox"}, []string{"nc", "-l", "-p", "3000"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = CleanupContainer(context.Background(), tcpContainerID) })
+	time.Sleep(250 * time.Millisecond)
+	if err := CheckContainerTCP(context.Background(), tcpContainerID, "3000"); err != nil {
+		t.Fatalf("open runtime TCP port was not ready: %v", err)
+	}
+	if err := CheckContainerTCP(context.Background(), tcpContainerID, "3001"); err == nil {
+		t.Fatal("closed runtime TCP port unexpectedly passed readiness")
 	}
 	for _, env := range envs {
 		if err := CleanupContainer(context.Background(), "api-sandbox-env-"+env.id); err != nil {

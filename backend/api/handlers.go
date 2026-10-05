@@ -538,8 +538,8 @@ func UpdateEnvironmentSettings(c *gin.Context) {
 	}
 
 	if req.HealthCheckType != nil {
-		if *req.HealthCheckType != "tcp" && *req.HealthCheckType != "none" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "HealthCheckType must be 'tcp' or 'none'"})
+		if *req.HealthCheckType != "http" && *req.HealthCheckType != "tcp" && *req.HealthCheckType != "none" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "HealthCheckType must be 'http', 'tcp', or 'none'"})
 			return
 		}
 		updates["health_check_type"] = req.HealthCheckType
@@ -627,6 +627,9 @@ func DeleteEnvironment(c *gin.Context) {
 	if err := provider.CleanupWorkspace(env.ID); err != nil {
 		cleanupErrs = append(cleanupErrs, err)
 	}
+	if err := provider.ClearRuntimeRoute(c.Request.Context(), env.ID); err != nil {
+		cleanupErrs = append(cleanupErrs, err)
+	}
 	if cleanupErr := errors.Join(cleanupErrs...); cleanupErr != nil {
 		slog.Error("Environment deletion cleanup failed", "environment_id", env.ID, "error", cleanupErr)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Environment cleanup is incomplete; retry deletion"})
@@ -682,11 +685,26 @@ func RestartEnvironment(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{"error": "Environment is already building"})
 		return
 	}
+	oldContainerID := env.ContainerID
+
+	// Move out of RUNNING before touching the old process so an application
+	// crash or partial cleanup cannot leave a falsely-running database row.
+	if err := db.DB.Model(&env).Updates(map[string]interface{}{
+		"status":       models.StatusBuilding,
+		"container_id": nil,
+		"public_url":   nil,
+	}).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update environment status"})
+		return
+	}
+	env.Status = models.StatusBuilding
+	env.ContainerID = nil
+	env.PublicURL = nil
 
 	// Do not enqueue a replacement while old Docker resources still exist.
 	var cleanupErrs []error
-	if env.ContainerID != nil && *env.ContainerID != "" {
-		if err := provider.CleanupContainer(c.Request.Context(), *env.ContainerID); err != nil {
+	if oldContainerID != nil && *oldContainerID != "" {
+		if err := provider.CleanupContainer(c.Request.Context(), *oldContainerID); err != nil {
 			cleanupErrs = append(cleanupErrs, err)
 		}
 	}
@@ -696,22 +714,20 @@ func RestartEnvironment(c *gin.Context) {
 	if err := provider.CleanupContainer(c.Request.Context(), fmt.Sprintf("api-sandbox-db-%s", env.ID)); err != nil {
 		cleanupErrs = append(cleanupErrs, err)
 	}
+	if err := provider.ClearRuntimeRoute(c.Request.Context(), env.ID); err != nil {
+		cleanupErrs = append(cleanupErrs, err)
+	}
 	if cleanupErr := errors.Join(cleanupErrs...); cleanupErr != nil {
 		slog.Error("Environment restart cleanup failed", "environment_id", env.ID, "error", cleanupErr)
+		if err := db.DB.Model(&env).Where("status = ?", models.StatusBuilding).Update("status", models.StatusFailed).Error; err != nil {
+			slog.Error("Failed to mark restart as FAILED after cleanup error", "environment_id", env.ID, "error", err)
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Environment cleanup is incomplete; retry restart"})
 		return
 	}
 
 	// Delete old logs
 	db.DB.Where("environment_id = ?", env.ID).Delete(&models.Log{})
-
-	// Update status back to building
-	env.Status = models.StatusBuilding
-	env.ContainerID = nil
-	if err := db.DB.Save(&env).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update environment status"})
-		return
-	}
 
 	db.DB.Create(&models.AuditLog{
 		UserID:    fmt.Sprintf("%v", userID),

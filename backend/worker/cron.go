@@ -56,6 +56,9 @@ func HandleCleanupContainersTask(ctx context.Context, t *asynq.Task) error {
 		if err := provider.CleanupWorkspace(env.ID); err != nil {
 			cleanupErrs = append(cleanupErrs, err)
 		}
+		if err := provider.ClearRuntimeRoute(ctx, env.ID); err != nil {
+			cleanupErrs = append(cleanupErrs, err)
+		}
 		if cleanupErr := errors.Join(cleanupErrs...); cleanupErr != nil {
 			slog.Error("Idle environment cleanup incomplete; leaving status unchanged for retry", "env_id", env.ID, "error", cleanupErr)
 			return cleanupErr

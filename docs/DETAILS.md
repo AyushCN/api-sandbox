@@ -23,7 +23,7 @@ Because of this, the Go JSON serializer defaults to exactly capitalizing the str
 
 Because environments are Docker containers, a process or database failure can leave orphaned containers consuming host resources.
 
-To mitigate this, the backend schedules an Asynq reconciliation task every five minutes:
+To mitigate this, the backend schedules an Asynq reconciliation task every minute:
 1. It lists Docker containers with the application labels.
 2. It cross-references runtime container names/IDs with environment records in PostgreSQL.
 3. It removes orphan containers, records failure for a `RUNNING` environment whose container is missing, and marks stale `BUILDING` records failed.
@@ -35,10 +35,10 @@ This provides periodic reconciliation; it does not guarantee immediate recovery 
 Sidecar databases (PostgreSQL, MySQL, MongoDB, Redis) are generated dynamically based on the repository's needs.
 1. The backend provisions the primary application container.
 2. It detects required database types from the repository.
-3. It starts a secondary database container on the environment's organization-specific bridge network (`api-sandbox-net-<organization-id>`).
+3. It starts a secondary database container on the user's bridge network (`api-sandbox-net-<user-id>`), shared with that user's other environments.
 4. The database credentials are injected into the primary sandbox via environment variables (e.g., `DATABASE_URL=postgres://user:pass@<db-alias>:5432/db`).
 
-Runtime containers are freshly created per environment. The warm pool downloads images and stores image references; it does not reuse running containers. Runtime workspace and package-cache mounts are scoped to the environment. The runtime has no Docker socket and is isolated from Compose's shared `traefik-net`, though outbound internet access is currently available.
+Runtime containers are freshly created per environment. The warm pool downloads images and stores image references; it does not reuse running containers. Runtime workspace and package-cache mounts are scoped to the environment. The runtime has no Docker socket and is isolated from Compose's shared `traefik-net`, though outbound internet access is currently available. Environments owned by the same user share a user-scoped bridge and can reach one another's network endpoints. Readiness defaults to HTTP 2xx for web apps; TCP-connect and process-only policies are available for TCP services and workers.
 
 ## Docker Socket Authority
 

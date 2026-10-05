@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/api-sandbox/backend/db"
 	"github.com/api-sandbox/backend/models"
@@ -55,30 +57,35 @@ func CreateWarmContainer(ctx context.Context, runtimeType string) (string, error
 	// Docker mounts are immutable after container creation. Warm the image only;
 	// a per-environment container is always created later with that environment's
 	// workspace mount and fresh writable cache paths.
-	if err := dockerClient.PullImage(docker.PullImageOptions{Repository: image}, docker.AuthConfiguration{}); err != nil {
+	pullCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+	if err := dockerClient.PullImage(docker.PullImageOptions{Repository: image, Context: pullCtx, InactivityTimeout: time.Minute}, docker.AuthConfiguration{}); err != nil {
 		return "", err
 	}
 	return image, nil
 }
 
-func createRuntimeContainer(envID, image, networkName, hostWorkspaceDir, cacheDir string, command []string) (string, error) {
+func createRuntimeContainer(ctx context.Context, envID, image, networkName, hostWorkspaceDir, cacheDir, workingDir string, envVars, entrypoint, command []string) (string, error) {
 	pidsLimit := int64(256)
 	opts := docker.CreateContainerOptions{
-		Name: fmt.Sprintf("api-sandbox-env-%s", envID),
+		Name:    fmt.Sprintf("api-sandbox-env-%s", envID),
+		Context: ctx,
 		Config: &docker.Config{
-			Image: image,
-			Cmd:   command,
+			Entrypoint: entrypoint,
+			Image:      image,
+			Cmd:        command,
+			Env:        envVars,
+			WorkingDir: workingDir,
 		},
 		HostConfig: &docker.HostConfig{
-			Memory:        512 * 1024 * 1024,
-			MemorySwap:    512 * 1024 * 1024,
-			CPUQuota:      100000,
-			CPUPeriod:     100000,
-			CPUShares:     1024,
-			PidsLimit:     &pidsLimit,
-			RestartPolicy: docker.RestartOnFailure(3),
-			SecurityOpt:   []string{"no-new-privileges:true"},
-			CapDrop:       []string{"ALL"},
+			Memory:      512 * 1024 * 1024,
+			MemorySwap:  512 * 1024 * 1024,
+			CPUQuota:    100000,
+			CPUPeriod:   100000,
+			CPUShares:   1024,
+			PidsLimit:   &pidsLimit,
+			SecurityOpt: []string{"no-new-privileges:true"},
+			CapDrop:     []string{"ALL"},
 			Binds: []string{
 				fmt.Sprintf("%s:/app", hostWorkspaceDir),
 				fmt.Sprintf("%s/npm:/root/.npm", cacheDir),
@@ -95,20 +102,32 @@ func createRuntimeContainer(envID, image, networkName, hostWorkspaceDir, cacheDi
 	if err != nil {
 		return "", fmt.Errorf("create environment container: %w", err)
 	}
-	if err := dockerClient.StartContainer(container.ID, nil); err != nil {
-		cleanupErr := CleanupContainer(context.Background(), container.ID)
+	if err := dockerClient.StartContainerWithContext(container.ID, nil, ctx); err != nil {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		cleanupErr := CleanupContainer(cleanupCtx, container.ID)
 		return "", errors.Join(fmt.Errorf("start environment container: %w", err), cleanupErr)
+	}
+	inspect, err := dockerClient.InspectContainerWithContext(container.ID, ctx)
+	if err != nil || !inspect.State.Running {
+		if err == nil {
+			err = fmt.Errorf("runtime process exited immediately with status %d", inspect.State.ExitCode)
+		}
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		cleanupErr := CleanupContainer(cleanupCtx, container.ID)
+		return "", errors.Join(fmt.Errorf("runtime did not remain running after start: %w", err), cleanupErr)
 	}
 	return container.ID, nil
 }
 
-func ProvisionDevSandbox(ctx context.Context, envID string, config DevRuntimeConfig, orgID string, dbURL string) (string, int, error) {
+func ProvisionDevSandbox(ctx context.Context, envID string, config DevRuntimeConfig, userID string, dbURL string) (resultContainerID string, resultPort int, retErr error) {
 	createLog(envID, fmt.Sprintf("Provisioning Dev Sandbox (Image: %s)...", config.BaseImage), models.LogLevelInfo)
 	if err := CleanupContainer(ctx, fmt.Sprintf("api-sandbox-env-%s", envID)); err != nil {
 		return "", 0, fmt.Errorf("remove previous environment container: %w", err)
 	}
 
-	networkName, networkID, err := EnsureOrgNetwork(ctx, orgID)
+	networkName, networkID, err := EnsureUserNetwork(ctx, userID)
 	if err != nil {
 		createLog(envID, err.Error(), models.LogLevelError)
 		return "", 0, err
@@ -128,6 +147,7 @@ func ProvisionDevSandbox(ctx context.Context, envID string, config DevRuntimeCon
 	if assignedPort == 0 {
 		assignedPort = 8080 // fallback
 	}
+	config.ExposedPort = exposedPort
 
 	// Consume a pre-pulled image marker. Warm containers cannot be reused safely:
 	// their mounts are immutable and their writable state would cross tenants.
@@ -137,13 +157,18 @@ func ProvisionDevSandbox(ctx context.Context, envID string, config DevRuntimeCon
 		if provisioned {
 			return
 		}
+		cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancelCleanup()
 		if containerID != "" {
-			_ = CleanupContainer(context.Background(), containerID)
+			if err := CleanupContainer(cleanupCtx, containerID); err != nil {
+				slog.Error("Failed to clean partially provisioned runtime", "environment_id", envID, "container_id", containerID, "error", err)
+				retErr = errors.Join(retErr, fmt.Errorf("cleanup partially provisioned runtime: %w", err))
+			}
 		}
-		_ = db.RedisClient.Del(context.Background(),
-			fmt.Sprintf("traefik/http/routers/env-%s", envID),
-			fmt.Sprintf("traefik/http/services/env-%s/loadbalancer/servers/0", envID),
-		).Err()
+		if err := ClearRuntimeRoute(cleanupCtx, envID); err != nil {
+			slog.Error("Failed to clear partial Traefik route", "environment_id", envID, "error", err)
+			retErr = errors.Join(retErr, fmt.Errorf("clear partial Traefik route: %w", err))
+		}
 	}()
 	if config.RuntimeType == "node" || config.RuntimeType == "python" || config.RuntimeType == "go" {
 		if warmImage, err := db.RedisClient.LPop(ctx, "warm-pool:"+config.RuntimeType).Result(); err == nil && warmImage == config.BaseImage {
@@ -153,8 +178,12 @@ func ProvisionDevSandbox(ctx context.Context, envID string, config DevRuntimeCon
 
 	if containerID == "" {
 		// Cold start
+		pullCtx, cancelPull := context.WithTimeout(ctx, 10*time.Minute)
+		defer cancelPull()
 		if err := dockerClient.PullImage(docker.PullImageOptions{
-			Repository: config.BaseImage,
+			Repository:        config.BaseImage,
+			Context:           pullCtx,
+			InactivityTimeout: time.Minute,
 		}, docker.AuthConfiguration{}); err != nil {
 			return "", 0, fmt.Errorf("pull runtime image %s: %w", config.BaseImage, err)
 		}
@@ -180,8 +209,23 @@ func ProvisionDevSandbox(ctx context.Context, envID string, config DevRuntimeCon
 		}
 
 		hostWorkspaceDir := filepath.Join(hostWorkspacesDir, envID)
-
-		containerID, err = createRuntimeContainer(envID, config.BaseImage, networkName, hostWorkspaceDir, cacheSourceDir, []string{"sleep", "infinity"})
+		workingDir, err := NormalizeRuntimeWorkDir(config.WorkDir, envID)
+		if err != nil {
+			return "", 0, err
+		}
+		scriptPath := config.StartScriptPath
+		if scriptPath == "" {
+			scriptPath = "/app/sandbox-start.sh"
+		}
+		entrypoint := []string{"/bin/sh"}
+		command := []string{scriptPath}
+		if (config.RuntimeType == "docker" || config.RuntimeType == "devcontainer") && strings.TrimSpace(config.StartCmd) == "" {
+			// Preserve the image's ENTRYPOINT/CMD for explicit container contracts.
+			entrypoint = nil
+			command = nil
+		}
+		envVars := runtimeEnvironment(config, dbURL)
+		containerID, err = createRuntimeContainer(ctx, envID, config.BaseImage, networkName, hostWorkspaceDir, cacheSourceDir, workingDir, envVars, entrypoint, command)
 		if err != nil {
 			return "", 0, err
 		}
@@ -189,7 +233,7 @@ func ProvisionDevSandbox(ctx context.Context, envID string, config DevRuntimeCon
 	}
 
 	if err := connectContainerToNetwork(networkName, networkID, containerID); err != nil {
-		return "", 0, fmt.Errorf("connect runtime container to organization network: %w", err)
+		return "", 0, fmt.Errorf("connect runtime container to user network: %w", err)
 	}
 
 	containerInfo, err := dockerClient.InspectContainer(containerID)
@@ -205,73 +249,71 @@ func ProvisionDevSandbox(ctx context.Context, envID string, config DevRuntimeCon
 
 	// Write Traefik configuration to Redis
 	rdb := db.RedisClient
-	prefix := fmt.Sprintf("traefik/http/routers/env-%s", envID)
-
-	routerFields := map[string]string{
-		"rule":    fmt.Sprintf("Host(`%s.%s`)", envID, domain),
-		"service": fmt.Sprintf("env-%s", envID),
-	}
-	if domain != "localhost" {
-		routerFields["entrypoints"] = "websecure"
-		routerFields["tls.certresolver"] = "myresolver"
-	} else {
-		routerFields["entrypoints"] = "web"
-	}
+	routeConfig := traefikRuntimeConfig(envID, domain, ip, exposedPort)
 	pipe := rdb.Pipeline()
-	pipe.HSet(ctx, prefix, routerFields)
-	pipe.HSet(ctx, fmt.Sprintf("traefik/http/services/env-%s/loadbalancer/servers/0", envID), "url", fmt.Sprintf("http://%s:%s", ip, exposedPort))
+	for key, value := range routeConfig {
+		pipe.Set(ctx, key, value, 0)
+	}
 	if _, err := pipe.Exec(ctx); err != nil {
 		return "", 0, fmt.Errorf("write Traefik configuration: %w", err)
 	}
 
-	// Execute sandbox-start.sh
-	envVars := []string{
-		fmt.Sprintf("PORT=%s", exposedPort),
-		"HOST=0.0.0.0",
-	}
-	if dbURL != "" {
-		envVars = append(envVars, fmt.Sprintf("DATABASE_URL=%s", dbURL), fmt.Sprintf("MONGO_URI=%s", dbURL))
-		if u, err := url.Parse(dbURL); err == nil {
-			envVars = append(envVars, fmt.Sprintf("DB_HOST=%s", u.Hostname()))
-			envVars = append(envVars, fmt.Sprintf("DB_PORT=%s", u.Port()))
-			envVars = append(envVars, fmt.Sprintf("DB_USER=%s", u.User.Username()))
-			if pwd, ok := u.User.Password(); ok {
-				envVars = append(envVars, fmt.Sprintf("DB_PASSWORD=%s", pwd))
-			}
-			envVars = append(envVars, fmt.Sprintf("DB_NAME=%s", strings.TrimPrefix(u.Path, "/")))
-		}
-	}
-
-	workingDir := "/app" + strings.TrimPrefix(config.WorkDir, "/app")
-	if config.RuntimeType == "" || config.RuntimeType == "docker" || config.RuntimeType == "devcontainer" {
-		workingDir = config.WorkDir
-	}
-	if strings.HasPrefix(workingDir, "/workspaces/") {
-		workingDir = "/app" + strings.TrimPrefix(workingDir, fmt.Sprintf("/workspaces/%s", envID))
-	}
-
-	execOpts := docker.CreateExecOptions{
-		Container:    containerID,
-		Cmd:          []string{"/bin/sh", "sandbox-start.sh"},
-		WorkingDir:   workingDir,
-		Env:          envVars,
-		AttachStdout: true,
-		AttachStderr: true,
-	}
-
-	exec, err := dockerClient.CreateExec(execOpts)
-	if err != nil {
-		return "", 0, fmt.Errorf("failed to create exec: %v", err)
-	}
-
-	err = dockerClient.StartExec(exec.ID, docker.StartExecOptions{
-		Detach: true,
-	})
-	if err != nil {
-		return "", 0, fmt.Errorf("failed to start exec: %v", err)
-	}
-
-	createLog(envID, fmt.Sprintf("Dev Sandbox started successfully on port %d.", assignedPort), models.LogLevelInfo)
+	createLog(envID, fmt.Sprintf("Runtime container started as the application process on port %d.", assignedPort), models.LogLevelInfo)
 	provisioned = true
 	return containerID, assignedPort, nil
+}
+
+func traefikRuntimeConfig(envID, domain, ip, port string) map[string]string {
+	routerPrefix := fmt.Sprintf("traefik/http/routers/env-%s", envID)
+	config := map[string]string{
+		routerPrefix + "/rule":          fmt.Sprintf("Host(`%s.%s`)", envID, domain),
+		routerPrefix + "/service":       "env-" + envID,
+		routerPrefix + "/entrypoints/0": "web",
+		"traefik/http/services/env-" + envID + "/loadbalancer/servers/0/url": fmt.Sprintf("http://%s:%s", ip, port),
+	}
+	if domain != "localhost" {
+		config[routerPrefix+"/entrypoints/0"] = "websecure"
+		config[routerPrefix+"/tls/certresolver"] = "myresolver"
+	}
+	return config
+}
+
+func traefikRuntimeConfigKeys(envID string) []string {
+	routerPrefix := fmt.Sprintf("traefik/http/routers/env-%s", envID)
+	servicePrefix := fmt.Sprintf("traefik/http/services/env-%s", envID)
+	return []string{
+		routerPrefix,
+		routerPrefix + "/rule",
+		routerPrefix + "/service",
+		routerPrefix + "/entrypoints/0",
+		routerPrefix + "/tls/certresolver",
+		servicePrefix + "/loadbalancer/servers/0",
+		servicePrefix + "/loadbalancer/servers/0/url",
+	}
+}
+
+func ClearRuntimeRoute(ctx context.Context, envID string) error {
+	if db.RedisClient == nil {
+		return nil
+	}
+	return db.RedisClient.Del(ctx, traefikRuntimeConfigKeys(envID)...).Err()
+}
+
+func runtimeEnvironment(config DevRuntimeConfig, dbURL string) []string {
+	envVars := []string{fmt.Sprintf("PORT=%s", config.ExposedPort), "HOST=0.0.0.0"}
+	if dbURL == "" {
+		return envVars
+	}
+	envVars = append(envVars, "DATABASE_URL="+dbURL, "MONGO_URI="+dbURL)
+	if u, err := url.Parse(dbURL); err == nil {
+		envVars = append(envVars, "DB_HOST="+u.Hostname(), "DB_PORT="+u.Port())
+		if u.User != nil {
+			envVars = append(envVars, "DB_USER="+u.User.Username())
+			if pwd, ok := u.User.Password(); ok {
+				envVars = append(envVars, "DB_PASSWORD="+pwd)
+			}
+		}
+		envVars = append(envVars, "DB_NAME="+strings.TrimPrefix(u.Path, "/"))
+	}
+	return envVars
 }

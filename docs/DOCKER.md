@@ -39,13 +39,13 @@ Docker host configuration for production runtime containers:
 | Capabilities | `CapDrop: ALL` |
 | Security option | `no-new-privileges:true` |
 | Privileged, host PID/network/IPC, devices | Disabled / unset / none |
-| Network attachment | Organization-specific user bridge |
+| Network attachment | User-scoped bridge (`api-sandbox-net-<user-id>`) |
 
 The direct Docker shell integration script uses `NanoCpus=1000000000` for its one-CPU fixture. Production container creation expresses the same CPU allowance using quota/period, so `NanoCpus` is zero in inspect output for production containers; inspect `CpuQuota` and `CpuPeriod` there.
 
 ## Network behavior
 
-Compose infrastructure services share `traefik-net`: backend/worker, PostgreSQL, Redis, Traefik, and frontend. Each runtime container attaches to an organization bridge with its optional database sidecar and Traefik. It is not attached to `traefik-net` and has no shared Redis/PostgreSQL service route. Local real-container probes confirmed shared Redis DNS/connectivity and host-gateway port 80 were unreachable, while outbound HTTP succeeded. Internet egress supports GitHub/repository operations, package installation, dependency downloads, and projects that call external APIs; it remains enabled.
+Compose infrastructure services share `traefik-net`: backend/worker, PostgreSQL, Redis, Traefik, and frontend. Each runtime container attaches to a user-scoped bridge with its optional database sidecar and Traefik. Environments belonging to the same user share that bridge and can reach each other's network endpoints. Runtime is not attached to `traefik-net` and has no shared Redis/PostgreSQL service route. Local real-container probes confirmed shared Redis DNS/connectivity and host-gateway port 80 were unreachable, while outbound HTTP succeeded. Internet egress supports GitHub/repository operations, package installation, dependency downloads, and projects that call external APIs; it remains enabled.
 
 The local verification did not establish connectivity to every arbitrary backend/host port or every external API. Network claims should be scoped to the specific tested addresses and ports.
 
@@ -53,7 +53,9 @@ The local verification did not establish connectivity to every arbitrary backend
 
 The image pool pulls runtime images and stores image references in Redis. Provisioning may consume a matching reference, but always creates a fresh runtime container with new environment mounts. Startup drains old `api-sandbox-warm-*` containers and clears old Redis warm-container IDs. Environment deletion removes the runtime and sidecar containers, workspace, and scoped cache; cleanup errors are returned/logged instead of reporting successful deletion.
 
-An Asynq task reconciles Docker state every five minutes. It removes containers whose environment is absent or no longer active; marks a `RUNNING` record failed when its runtime is missing or stopped; and marks `BUILDING` records failed after 30 minutes if no runtime exists or provisioning remains stale. Reconciliation errors are returned and logged. Docker removal-failure injection and every database/Docker race have not been exercised live.
+An Asynq task reconciles Docker state every minute. It removes containers whose environment is absent or terminal; marks a `RUNNING` environment failed when its runtime is missing or stopped; and marks `BUILDING` records failed after 60 minutes without a successful build. Staleness is based on database `UpdatedAt`, refreshed when a worker claims a build, rather than container creation time. Reconciliation errors are returned and logged. Docker removal-failure injection and every database/Docker race have not been exercised live.
+
+`healthCheckType: "http"` (the web-runtime default) requires a 2xx preview response; redirects are not followed and 3xx/4xx/5xx are not ready. `"tcp"` requires a successful connection to the runtime container's configured port. `"none"` skips both probes but still requires a live runtime process. Startup readiness is bounded to 10 minutes per candidate, the overall build task to 45 minutes, and image pulls to 10 minutes. A process exit stops PID 1 and Docker marks the container exited; the one-minute reaper transitions a `RUNNING` record to `FAILED`.
 
 GitHub credential rewrites are supplied via process-scoped Git config, not written to `.git/config`. Existing stale token rewrites are removed before Git operations.
 
@@ -72,9 +74,9 @@ Run the Docker CLI isolation fixture from the repository root:
 bash backend/scripts/test-docker-workspace-isolation.sh
 ```
 
-The integration test creates two real containers through the production container helper, inspects their mounts, resource/security settings and network attachments, checks cross-environment file visibility, verifies the Docker socket is absent, and forces a missing-command start failure to verify partial-container cleanup. The shell fixture independently checks workspace isolation, actual UID, capabilities, namespaces, devices, memory/swap, CPU, PIDs, and stop/remove cleanup.
+The integration test creates two real containers through the production container helper, inspects their mounts, resource/security settings and network attachments, checks cross-environment file visibility, verifies the Docker socket is absent, and verifies that a script running as PID 1 exits the container and that failed startup resources are removed. Unit tests cover HTTP 200 readiness, rejection of 404/403/500 and redirects, transport failure, process exit, and the `none` policy. The shell fixture independently checks workspace isolation, actual UID, capabilities, namespaces, devices, memory/swap, CPU, PIDs, and stop/remove cleanup.
 
-The full local Compose route exercised API environment creation, PostgreSQL state, Redis/Asynq, the worker, Docker image/container provisioning, runtime app execution, and API deletion cleanup. The ordinary project-creation API could not be used because it omits the database-required `owner_organization_id`; temporary test-only records were created to reach the Docker flow. That means the normal project-creation path did not pass this end-to-end check. Preview through Traefik returned 404, and the current readiness check treats any status other than 502 as ready; this is tracked as a separate API/preview issue, not a Docker isolation pass.
+The final Compose run exercised environment creation through the API, PostgreSQL, Redis/Asynq, the worker, Docker provisioning, a Node application running as the container's main process, 2xx readiness through Traefik, environment/log/file/Git-status reads, restart to a distinct runtime container, and API deletion cleanup. Temporary user/project records were required because normal project creation still fails: its API/model path omits the database-required `owner_organization_id`. The initial live run exposed that preview routes were stored as Redis hashes, which Traefik's KV provider did not load; provisioning now writes individual Redis keys in the documented layout. The corrected preview returned 200 with the fixture body. All temporary records, containers, workspace files, Git config, and the test user's bridge network were removed.
 
 ## Local inspection commands
 

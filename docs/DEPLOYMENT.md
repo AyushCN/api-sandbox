@@ -59,7 +59,7 @@ REDIS_URL=redis://redis:6379
 
 The system leverages a unified `docker-compose.yml` file that orchestrates the core infrastructure: Traefik, PostgreSQL, Redis, the Go Backend API, and the Next.js Frontend.
 
-These infrastructure services share `traefik-net`. Runtime containers are created separately on organization-specific bridge networks; they are not joined to the shared Compose network. Organization bridges permit outbound access, which supports Git operations and dependency downloads. Runtime images currently default to root and have Docker-enforced memory, CPU, PID, and capability restrictions; see [Architecture](ARCHITECTURE.md) for exact settings and mounts.
+These infrastructure services share `traefik-net`. Runtime containers are created separately on `api-sandbox-net-<user-id>` bridges; environments and sidecars belonging to the same user share a bridge, and runtime containers are not joined to the Compose network. User bridges permit outbound access, which supports Git operations and dependency downloads. Runtime images currently default to root and have Docker-enforced memory, CPU, PID, and capability restrictions; see [Architecture](ARCHITECTURE.md) for exact settings and mounts.
 
 ```bash
 # Build and deploy detached

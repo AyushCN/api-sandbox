@@ -3,20 +3,23 @@ package provider
 import (
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
+	"strings"
 
 	"github.com/api-sandbox/backend/models"
 	"github.com/pelletier/go-toml/v2"
 )
 
 type DevRuntimeConfig struct {
-	BaseImage   string
-	InstallCmd  string
-	StartCmd    string
-	WatchHint   string
-	WorkDir     string
-	ExposedPort string
-	RuntimeType string
+	BaseImage       string
+	InstallCmd      string
+	StartCmd        string
+	WatchHint       string
+	WorkDir         string
+	ExposedPort     string
+	RuntimeType     string
+	StartScriptPath string
 }
 
 func ResolveRuntimes(env *models.Environment, repoPath string, subDir string) ([]DevRuntimeConfig, error) {
@@ -112,25 +115,45 @@ func DetectDevRuntimes(repoPath string, subDir string) ([]DevRuntimeConfig, erro
 // Old detect* functions replaced by plugins
 
 func GenerateSandboxStartScript(config DevRuntimeConfig) string {
-	script := `#!/bin/sh
-set -e
+	workDir := config.WorkDir
+	if workDir == "" {
+		workDir = "/app"
+	}
+	var script strings.Builder
+	script.WriteString("#!/bin/sh\nset -eu\n")
+	script.WriteString("cd " + shellQuote(workDir) + "\n")
+	if strings.TrimSpace(config.InstallCmd) != "" {
+		script.WriteString("echo 'Installing dependencies...'\n")
+		script.WriteString("/bin/sh -c " + shellQuote(config.InstallCmd) + "\n")
+	}
+	if strings.TrimSpace(config.StartCmd) == "" {
+		script.WriteString("echo 'No application start command configured' >&2\nexit 127\n")
+		return script.String()
+	}
+	script.WriteString("echo 'Starting application...'\n")
+	script.WriteString("exec /bin/sh -c " + shellQuote(config.StartCmd) + "\n")
+	return script.String()
+}
 
-# Change to the application directory
-cd ` + config.WorkDir + `
+func NormalizeRuntimeWorkDir(workDir, envID string) (string, error) {
+	workDir = strings.TrimSpace(workDir)
+	if workDir == "" {
+		return "/app", nil
+	}
+	legacyRoot := "/workspaces/" + envID
+	if workDir == legacyRoot || strings.HasPrefix(workDir, legacyRoot+"/") {
+		workDir = "/app" + strings.TrimPrefix(workDir, legacyRoot)
+	}
+	if !strings.HasPrefix(workDir, "/") {
+		workDir = path.Join("/app", workDir)
+	}
+	clean := path.Clean(workDir)
+	if clean != "/app" && !strings.HasPrefix(clean, "/app/") {
+		return "", fmt.Errorf("runtime working directory %q must be inside /app", workDir)
+	}
+	return clean, nil
+}
 
-echo "========================================="
-echo "🛠️  Setting up Dev Sandbox Runtime"
-echo "========================================="
-echo "Working Directory: ` + config.WorkDir + `"
-
-export HOST=0.0.0.0
-export PORT=` + config.ExposedPort + `
-
-echo "📦 Installing dependencies..."
-` + config.InstallCmd + `
-
-echo "🚀 Starting application..."
-` + config.StartCmd + `
-`
-	return script
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }

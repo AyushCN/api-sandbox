@@ -47,20 +47,19 @@ func (u *User) BeforeCreate(tx *gorm.DB) (err error) {
 	return
 }
 
-
 type Project struct {
-	ID                  string                `gorm:"type:text;primaryKey" json:"id"`
-	Name                string                `gorm:"type:text;not null" json:"name"`
-	Description         string                `gorm:"type:text" json:"description"`
-	CreatedByUserID     string                `gorm:"type:text;not null" json:"createdBy"`
-	CreatedByUser       User                  `json:"-"`
-	Members             []ProjectMember       `json:"members,omitempty"`
-	Repositories        []ProjectRepository   `json:"repositories,omitempty"`
-	Workspaces          []Workspace           `json:"workspaces,omitempty"`
-	Environments        []Environment         `json:"environments,omitempty"`
-	IsPublic            bool                  `gorm:"default:false" json:"isPublic"`
-	CreatedAt           time.Time             `gorm:"default:current_timestamp" json:"createdAt"`
-	UpdatedAt           time.Time             `gorm:"default:current_timestamp" json:"updatedAt"`
+	ID              string              `gorm:"type:text;primaryKey" json:"id"`
+	Name            string              `gorm:"type:text;not null" json:"name"`
+	Description     string              `gorm:"type:text" json:"description"`
+	CreatedByUserID string              `gorm:"type:text;not null" json:"createdBy"`
+	CreatedByUser   User                `json:"-"`
+	Members         []ProjectMember     `json:"members,omitempty"`
+	Repositories    []ProjectRepository `json:"repositories,omitempty"`
+	Workspaces      []Workspace         `json:"workspaces,omitempty"`
+	Environments    []Environment       `json:"environments,omitempty"`
+	IsPublic        bool                `gorm:"default:false" json:"isPublic"`
+	CreatedAt       time.Time           `gorm:"default:current_timestamp" json:"createdAt"`
+	UpdatedAt       time.Time           `gorm:"default:current_timestamp" json:"updatedAt"`
 }
 
 func (p *Project) BeforeCreate(tx *gorm.DB) (err error) {
@@ -69,8 +68,6 @@ func (p *Project) BeforeCreate(tx *gorm.DB) (err error) {
 	}
 	return
 }
-
-
 
 type Environment struct {
 	ID                string            `gorm:"type:text;primaryKey" json:"id"`
@@ -87,7 +84,7 @@ type Environment struct {
 	ContainerID       *string           `gorm:"type:text" json:"containerId"`
 	Port              *int              `gorm:"type:integer" json:"port"`
 	StartCommand      *string           `gorm:"type:text" json:"startCommand"`
-	HealthCheckType   *string           `gorm:"type:text;default:'tcp'" json:"healthCheckType"` // 'tcp' or 'none'
+	HealthCheckType   *string           `gorm:"type:text;default:'http'" json:"healthCheckType"`
 	CreatedAt         time.Time         `gorm:"default:current_timestamp" json:"createdAt"`
 	UpdatedAt         time.Time         `gorm:"default:current_timestamp" json:"updatedAt"`
 	ExpiresAt         *time.Time        `gorm:"type:timestamp" json:"expiresAt"`

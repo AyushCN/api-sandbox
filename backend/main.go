@@ -147,7 +147,7 @@ func startScheduler() *asynq.Scheduler {
 		slog.Error("Failed to register cleanup cron", "error", err)
 		os.Exit(1)
 	}
-	if _, err := scheduler.Register("@every 5m", asynq.NewTask(queue.TaskReapOrphans, nil)); err != nil {
+	if _, err := scheduler.Register("@every 1m", asynq.NewTask(queue.TaskReapOrphans, nil)); err != nil {
 		slog.Error("Failed to register orphan reaper cron", "error", err)
 		os.Exit(1)
 	}

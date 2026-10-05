@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,7 +24,7 @@ var (
 	ProviderCloneOrFetch               func(ctx context.Context, dir, gitURL, branch, baseCommit, githubToken string) error = provider.CloneOrFetch
 	ProviderDetectDatabaseRequirements                                                                                      = provider.DetectDatabaseRequirements
 	ProviderStartSidecarDatabase                                                                                            = provider.StartSidecarDatabase
-	ProviderCheckContainerHealth                                                                                            = provider.CheckContainerHealth
+	ProviderCheckContainerHealth       func(context.Context, string) (bool, string, error)                                  = provider.CheckContainerHealth
 )
 
 func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
@@ -55,6 +54,20 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 	if err := db.DB.First(&env, "id = ?", envID).Error; err != nil {
 		return fmt.Errorf("environment not found: %w", err)
 	}
+	if env.Status != models.StatusBuilding {
+		return fmt.Errorf("environment %s is %s, not BUILDING: %w", envID, env.Status, asynq.SkipRetry)
+	}
+	claim := db.DB.Model(&models.Environment{}).Where("id = ? AND status = ?", env.ID, models.StatusBuilding).Update("updated_at", time.Now())
+	if claim.Error != nil {
+		return fmt.Errorf("refresh BUILDING lease for environment %s: %w", env.ID, claim.Error)
+	}
+	if claim.RowsAffected == 0 {
+		return fmt.Errorf("environment %s left BUILDING before worker claim: %w", env.ID, asynq.SkipRetry)
+	}
+
+	buildCtx, cancelBuild := context.WithTimeout(ctx, 45*time.Minute)
+	defer cancelBuild()
+	ctx = buildCtx
 
 	var user models.User
 	if err := db.DB.First(&user, "id = ?", env.UserID).Error; err != nil {
@@ -80,13 +93,24 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 		}
 	}
 	buildSucceeded := false
+	finalAttempt := retryCount >= maxRetry
 	defer func() {
 		if buildSucceeded {
 			return
 		}
+		cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancelCleanup()
 		for _, name := range []string{fmt.Sprintf("api-sandbox-env-%s", env.ID), fmt.Sprintf("api-sandbox-db-%s", env.ID)} {
-			if err := ProviderCleanupContainer(context.Background(), name); err != nil {
+			if err := ProviderCleanupContainer(cleanupCtx, name); err != nil {
 				slog.Error("Failed to remove Docker resource after build failure", "environment_id", env.ID, "container", name, "error", err)
+			}
+		}
+		if err := provider.ClearRuntimeRoute(cleanupCtx, env.ID); err != nil {
+			slog.Error("Failed to clear Traefik route after build failure", "environment_id", env.ID, "error", err)
+		}
+		if finalAttempt {
+			if err := db.DB.Model(&models.Environment{}).Where("id = ? AND status = ?", env.ID, models.StatusBuilding).Update("status", models.StatusFailed).Error; err != nil {
+				slog.Error("Failed to mark exhausted build as FAILED", "environment_id", env.ID, "error", err)
 			}
 		}
 	}()
@@ -115,7 +139,6 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 			err := ProviderCloneOrFetch(ctx, cloneDir, wRepo.ProjectRepository.GitURL, wRepo.Branch, wRepo.BaseCommit, githubToken)
 			if err != nil {
 				slog.Error("Clone failed", "env_id", envID, "repo", wRepo.ProjectRepository.GitURL, "error", err)
-				db.DB.Model(&env).Update("status", models.StatusFailed)
 				db.DB.Create(&models.Log{
 					EnvironmentID: &env.ID,
 					Message:       fmt.Sprintf("Git clone failed for %s: %v", wRepo.ProjectRepository.GitURL, err),
@@ -146,7 +169,6 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 		err := ProviderCloneOrFetch(ctx, workspaceDir, env.GitURL, env.GithubBranch, "", githubToken)
 		if err != nil {
 			slog.Error("Clone failed", "env_id", envID, "error", err)
-			db.DB.Model(&env).Update("status", models.StatusFailed)
 			db.DB.Create(&models.Log{
 				EnvironmentID: &env.ID,
 				Message:       fmt.Sprintf("Git clone failed: %v", err),
@@ -193,9 +215,9 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 				Level:         models.LogLevelInfo,
 			})
 
-			netID := env.UserID
+			userNetworkID := env.UserID
 
-			url, err := provider.StartSidecarDatabase(ctx, env.ID, netID, dbType)
+			url, err := provider.StartSidecarDatabase(ctx, env.ID, userNetworkID, dbType)
 			if err != nil {
 				slog.Error("Failed to start sidecar db", "env_id", envID, "error", err)
 				db.DB.Create(&models.Log{
@@ -203,7 +225,6 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 					Message:       fmt.Sprintf("Failed to provision database: %v", err),
 					Level:         models.LogLevelError,
 				})
-				db.DB.Model(&env).Update("status", models.StatusFailed)
 				return err
 			} else {
 				dbURL = url
@@ -218,7 +239,6 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 	configs, err := provider.ResolveRuntimes(&env, primaryDir, "")
 	if err != nil {
 		slog.Error("Failed to detect Dev Runtime", "env_id", envID, "error", err)
-		db.DB.Model(&env).Update("status", models.StatusFailed)
 		db.DB.Create(&models.Log{
 			EnvironmentID: &env.ID,
 			Message:       fmt.Sprintf("Runtime detection failed: %v", err),
@@ -227,7 +247,7 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 		return err
 	}
 
-	netID := env.UserID
+	userNetworkID := env.UserID
 
 	domain := os.Getenv("DOMAIN")
 	if domain == "" {
@@ -237,7 +257,6 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 	var finalContainerID string
 	var finalPort int
 	var finalCrashLogs string
-	var isRunning bool
 	var checkErr error
 
 	maxAttempts := 3
@@ -249,6 +268,13 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 
 	for i := 0; i < maxAttempts; i++ {
 		devConfig = configs[i]
+		workingDir, workDirErr := provider.NormalizeRuntimeWorkDir(devConfig.WorkDir, env.ID)
+		if workDirErr != nil {
+			checkErr = workDirErr
+			finalCrashLogs = workDirErr.Error()
+			continue
+		}
+		devConfig.WorkDir = workingDir
 
 		db.DB.Create(&models.Log{
 			EnvironmentID: &env.ID,
@@ -260,66 +286,48 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 		// Write the start script into the primary repo directory, which is the
 		// directory the container will mount as its working directory.
 		scriptPath := filepath.Join(primaryDir, "sandbox-start.sh")
-		_ = os.WriteFile(scriptPath, []byte(scriptContent), 0755)
+		if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
+			checkErr = fmt.Errorf("write runtime start script: %w", err)
+			finalCrashLogs = checkErr.Error()
+			continue
+		}
+		relScriptPath, err := filepath.Rel(workspaceDir, scriptPath)
+		if err != nil || relScriptPath == ".." || strings.HasPrefix(relScriptPath, ".."+string(filepath.Separator)) {
+			checkErr = fmt.Errorf("runtime start script is outside the environment workspace")
+			finalCrashLogs = checkErr.Error()
+			continue
+		}
+		devConfig.StartScriptPath = "/app/" + filepath.ToSlash(relScriptPath)
 
-		containerID, port, provErr := provider.ProvisionDevSandbox(ctx, env.ID, devConfig, netID, dbURL)
+		containerID, port, provErr := provider.ProvisionDevSandbox(ctx, env.ID, devConfig, userNetworkID, dbURL)
 		if provErr != nil {
 			slog.Error("Dev Sandbox start failed", "env_id", envID, "error", provErr)
 			continue
 		}
 
-		bootTimeout := 120 * time.Second
-		pollInterval := 5 * time.Second
-		deadline := time.Now().Add(bootTimeout)
-		isRunning = false
-		finalCrashLogs = ""
-
-		healthType := "tcp"
+		healthType := "http"
 		if env.HealthCheckType != nil {
 			healthType = *env.HealthCheckType
 		}
 
-		if env.StartCommand != nil && *env.StartCommand != "" && (env.Port == nil || *env.Port == 0) {
-			healthType = "none"
-		}
+		readinessCtx, cancelReadiness := context.WithTimeout(ctx, runtimeStartupTimeout)
+		finalCrashLogs, checkErr = waitForRuntimeReadiness(
+			readinessCtx,
+			healthType,
+			func(checkCtx context.Context) (bool, string, error) {
+				return ProviderCheckContainerHealth(checkCtx, containerID)
+			},
+			func(probeCtx context.Context) (int, error) {
+				return probeRuntimeHTTP(probeCtx, envID, domain)
+			},
+			func(probeCtx context.Context) error {
+				return provider.CheckContainerTCP(probeCtx, containerID, devConfig.ExposedPort)
+			},
+			runtimeReadinessPoll,
+		)
+		cancelReadiness()
 
-		healthy := false
-		if healthType == "none" {
-			healthy = true
-		}
-
-		for time.Now().Before(deadline) {
-			isRunning, finalCrashLogs, checkErr = ProviderCheckContainerHealth(containerID)
-			if checkErr != nil || !isRunning {
-				break
-			}
-
-			if healthType == "none" {
-				healthy = true
-				break
-			}
-
-			traefikURL := os.Getenv("TRAEFIK_URL")
-			if traefikURL == "" {
-				traefikURL = "http://api-sandbox-traefik"
-			}
-			req, _ := http.NewRequest("GET", traefikURL, nil)
-			req.Host = fmt.Sprintf("%s.%s", envID, domain)
-			client := &http.Client{Timeout: 2 * time.Second}
-			resp, httpErr := client.Do(req)
-
-			if httpErr == nil {
-				if resp.StatusCode != http.StatusBadGateway {
-					resp.Body.Close()
-					healthy = true
-					break // success!
-				}
-				resp.Body.Close()
-			}
-			time.Sleep(pollInterval)
-		}
-
-		if isRunning && healthy {
+		if checkErr == nil {
 			finalContainerID = containerID
 			finalPort = port
 			break
@@ -329,22 +337,26 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 		if cleanupErr := ProviderCleanupContainer(ctx, containerID); cleanupErr != nil {
 			slog.Error("Failed to remove unhealthy runtime container", "environment_id", env.ID, "container_id", containerID, "error", cleanupErr)
 		}
+		if routeErr := provider.ClearRuntimeRoute(ctx, env.ID); routeErr != nil {
+			slog.Error("Failed to clear unhealthy runtime route", "environment_id", env.ID, "error", routeErr)
+		}
 	}
 
 	if finalContainerID == "" {
 		slog.Error("Dev Sandbox failed to start after fallbacks", "env_id", envID)
-		db.DB.Model(&env).Update("status", models.StatusFailed)
 
 		msg := "Couldn't auto-detect how to run this repo. Please manually configure the runtime and entry command."
 		if finalCrashLogs != "" {
 			msg = fmt.Sprintf("Last attempt crashed:\n%s\nCouldn't auto-detect how to run this repo.", finalCrashLogs)
 		}
 
-		db.DB.Create(&models.Log{
+		if err := db.DB.Create(&models.Log{
 			EnvironmentID: &env.ID,
 			Message:       msg,
 			Level:         models.LogLevelError,
-		})
+		}).Error; err != nil {
+			return fmt.Errorf("write failed runtime log: %w", err)
+		}
 		return fmt.Errorf("container crashed or failed healthcheck on boot")
 	}
 
@@ -355,14 +367,23 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 	}
 
 	publicURL := fmt.Sprintf("%s://%s.%s", protocol, env.ID, domain)
-	if err := db.DB.Model(&env).Updates(map[string]interface{}{
+	updateResult := db.DB.Model(&models.Environment{}).Where("id = ? AND status = ?", env.ID, models.StatusBuilding).Updates(map[string]interface{}{
 		"status":       models.StatusRunning,
 		"container_id": finalContainerID,
 		"port":         finalPort,
 		"public_url":   publicURL,
-	}).Error; err != nil {
-		cleanupErr := ProviderCleanupContainer(context.Background(), finalContainerID)
+	})
+	if err := updateResult.Error; err != nil {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		cleanupErr := ProviderCleanupContainer(cleanupCtx, finalContainerID)
 		return errors.Join(fmt.Errorf("persist running environment state: %w", err), cleanupErr)
+	}
+	if updateResult.RowsAffected == 0 {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		cleanupErr := ProviderCleanupContainer(cleanupCtx, finalContainerID)
+		return errors.Join(fmt.Errorf("environment %s left BUILDING before runtime became ready: %w", env.ID, asynq.SkipRetry), cleanupErr)
 	}
 	buildSucceeded = true
 

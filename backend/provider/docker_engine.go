@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -18,6 +19,7 @@ import (
 	"github.com/api-sandbox/backend/db"
 	"github.com/api-sandbox/backend/models"
 	docker "github.com/fsouza/go-dockerclient"
+	"gorm.io/gorm"
 )
 
 var dockerClient *docker.Client
@@ -79,96 +81,194 @@ func createLog(entityID string, message string, level models.LogLevel) {
 	db.DB.Create(&log)
 }
 
-func CloneOrFetch(ctx context.Context, dir, gitURL, branch, baseCommit, githubToken string) error {
-	// Securely inject token via insteadOf if provided
-	configToken := func() {
-		if githubToken != "" {
-			// Ensure it uses x-access-token
-			exec.CommandContext(ctx, "git", "-C", dir, "config", "--local", "url.https://x-access-token:"+githubToken+"@github.com/.insteadOf", "https://github.com/").Run()
+func clearPersistedGitHubTokenRewrite(dir string) error {
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
+		return nil
+	}
+	cmd := exec.Command("git", "-C", dir, "config", "--local", "--null", "--name-only", "--list")
+	keys, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("inspect local Git config: %w", err)
+	}
+	for _, key := range strings.Split(string(keys), "\x00") {
+		lowerKey := strings.ToLower(key)
+		if !strings.HasPrefix(lowerKey, "url.https://x-access-token:") || !strings.Contains(lowerKey, "@github.com/.insteadof") {
+			continue
 		}
+		if err := exec.Command("git", "-C", dir, "config", "--local", "--unset-all", key).Run(); err != nil {
+			return fmt.Errorf("remove persisted GitHub credential rewrite")
+		}
+	}
+	return nil
+}
+
+func CloneOrFetch(ctx context.Context, dir, gitURL, branch, baseCommit, githubToken string) error {
+	// Keep the credential in process-scoped Git configuration. Unlike --local,
+	// this cannot leave a token in .git/config when any operation fails.
+	git := func(gitCtx context.Context, args ...string) error {
+		cmd := exec.CommandContext(gitCtx, "git", append([]string{"-C", dir}, args...)...)
+		if githubToken != "" {
+			env := make([]string, 0, len(os.Environ())+3)
+			for _, entry := range os.Environ() {
+				key, _, _ := strings.Cut(entry, "=")
+				if key == "GIT_CONFIG_COUNT" || key == "GIT_CONFIG_PARAMETERS" || strings.HasPrefix(key, "GIT_CONFIG_KEY_") || strings.HasPrefix(key, "GIT_CONFIG_VALUE_") {
+					continue
+				}
+				env = append(env, entry)
+			}
+			cmd.Env = append(env,
+				"GIT_CONFIG_COUNT=1",
+				"GIT_CONFIG_KEY_0=url.https://x-access-token:"+githubToken+"@github.com/.insteadOf",
+				"GIT_CONFIG_VALUE_0=https://github.com/",
+			)
+		}
+		return cmd.Run()
+	}
+	if err := clearPersistedGitHubTokenRewrite(dir); err != nil {
+		return err
 	}
 
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
-		configToken()
 		// Just fetch everything we might need
-		exec.CommandContext(ctx, "git", "-C", dir, "fetch", "--all").Run()
-		
+		if err := git(ctx, "fetch", "--all"); err != nil {
+			return fmt.Errorf("git fetch failed: %w", err)
+		}
+
 		targetRef := branch
 		if baseCommit != "" {
 			targetRef = baseCommit
 		}
-		
-		return exec.CommandContext(ctx, "git", "-C", dir, "checkout", "-B", branch, targetRef).Run()
+
+		if err := git(ctx, "checkout", "-B", branch, targetRef); err != nil {
+			return fmt.Errorf("git checkout failed: %w", err)
+		}
+		return nil
 	}
 
 	// For a fresh clone
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
-	if err := exec.CommandContext(ctx, "git", "-C", dir, "init").Run(); err != nil {
+	if err := git(ctx, "init"); err != nil {
 		return err
 	}
-	configToken()
-	if err := exec.CommandContext(ctx, "git", "-C", dir, "remote", "add", "origin", gitURL).Run(); err != nil {
+	if err := git(ctx, "remote", "add", "origin", gitURL); err != nil {
 		return err
 	}
 
-	exec.CommandContext(ctx, "git", "-C", dir, "fetch", "--all").Run()
+	if err := git(ctx, "fetch", "--all"); err != nil {
+		return fmt.Errorf("git fetch failed: %w", err)
+	}
 
 	targetRef := "FETCH_HEAD"
 	if baseCommit != "" {
 		targetRef = baseCommit
 	} else {
 		// Try to fetch specific branch if no base commit is provided
-		if err := exec.CommandContext(ctx, "git", "-C", dir, "fetch", "--depth", "1", "origin", branch).Run(); err == nil {
+		if err := git(ctx, "fetch", "--depth", "1", "origin", branch); err == nil {
 			targetRef = "origin/" + branch
 		}
 	}
 
-	return exec.CommandContext(ctx, "git", "-C", dir, "checkout", "-B", branch, targetRef).Run()
+	if err := git(ctx, "checkout", "-B", branch, targetRef); err != nil {
+		return fmt.Errorf("git checkout failed: %w", err)
+	}
+	return nil
 }
 
 // ProvisionDevSandbox has been moved to warmpool.go
 func CleanupContainer(ctx context.Context, containerID string) error {
-	_ = dockerClient.StopContainer(containerID, 10)
-	return dockerClient.RemoveContainer(docker.RemoveContainerOptions{
+	cli, err := getDockerClient()
+	if err != nil {
+		return err
+	}
+	if _, err := cli.InspectContainerWithContext(containerID, ctx); err != nil {
+		var missing *docker.NoSuchContainer
+		if errors.As(err, &missing) {
+			return nil
+		}
+		return fmt.Errorf("inspect container %q before cleanup: %w", containerID, err)
+	}
+	stopErr := cli.StopContainer(containerID, 10)
+	removeErr := cli.RemoveContainer(docker.RemoveContainerOptions{
 		ID:    containerID,
 		Force: true,
 	})
+	if removeErr != nil {
+		slog.Error("Docker container removal failed", "container", containerID, "stop_error", stopErr, "remove_error", removeErr)
+		return fmt.Errorf("remove container %q (stop error: %v): %w", containerID, stopErr, removeErr)
+	}
+	return nil
 }
 
 // Helper to create tarball from a directory
 
 func CleanupWorkspace(envID string) error {
 	workspaceDir := GetWorkspacePath(envID)
-	err := os.RemoveAll(workspaceDir)
-	if err != nil {
+	workspaceErr := os.RemoveAll(workspaceDir)
+	if workspaceErr != nil {
 		// Fallback to docker if permission denied
-		slog.Warn("os.RemoveAll failed, trying docker rm -rf", "dir", workspaceDir, "error", err)
-		
-		hostWorkspacesDir := os.Getenv("HOST_WORKSPACES_DIR")
-		if hostWorkspacesDir == "" {
-			hostWorkspacesDir = GetWorkspacesRootDir()
-		}
-		
-		opts := docker.CreateContainerOptions{
-			Config: &docker.Config{
-				Image: "alpine",
-				Cmd:   []string{"rm", "-rf", fmt.Sprintf("/workspaces/%s", envID)},
-			},
-			HostConfig: &docker.HostConfig{
-				Binds: []string{
-					fmt.Sprintf("%s:/workspaces", hostWorkspacesDir),
-				},
-				AutoRemove: true,
-			},
-		}
-		container, cErr := dockerClient.CreateContainer(opts)
-		if cErr == nil {
-			_ = dockerClient.StartContainer(container.ID, nil)
+		slog.Warn("Workspace removal failed; trying scoped Docker cleanup", "dir", workspaceDir, "error", workspaceErr)
+
+		if cli, clientErr := getDockerClient(); clientErr == nil {
+			hostRoot := os.Getenv("HOST_WORKSPACES_DIR")
+			if hostRoot == "" {
+				hostRoot = GetWorkspacesRootDir()
+			}
+			hostWorkspaceDir := filepath.Join(hostRoot, envID)
+			if err := os.MkdirAll(workspaceDir, 0755); err != nil {
+				workspaceErr = errors.Join(workspaceErr, fmt.Errorf("create cleanup mount source: %w", err))
+			} else if err := cli.PullImage(docker.PullImageOptions{Repository: "alpine:3.20"}, docker.AuthConfiguration{}); err != nil {
+				workspaceErr = errors.Join(workspaceErr, fmt.Errorf("pull cleanup image: %w", err))
+			} else {
+				opts := docker.CreateContainerOptions{
+					Config: &docker.Config{
+						Image: "alpine:3.20",
+						Cmd:   []string{"sh", "-c", "find /workspace -mindepth 1 -delete"},
+					},
+					HostConfig: &docker.HostConfig{
+						NetworkMode: "none",
+						Binds: []string{
+							fmt.Sprintf("%s:/workspace", hostWorkspaceDir),
+						},
+						AutoRemove: true,
+					},
+				}
+				container, cErr := cli.CreateContainer(opts)
+				if cErr != nil {
+					workspaceErr = errors.Join(workspaceErr, fmt.Errorf("create cleanup container: %w", cErr))
+				} else if startErr := cli.StartContainer(container.ID, nil); startErr != nil {
+					workspaceErr = errors.Join(workspaceErr, fmt.Errorf("start cleanup container: %w", startErr))
+					_ = CleanupContainer(context.Background(), container.ID)
+				} else {
+					code, waitErr := cli.WaitContainerWithContext(container.ID, context.Background())
+					if waitErr != nil {
+						workspaceErr = errors.Join(workspaceErr, fmt.Errorf("wait for cleanup container: %w", waitErr))
+					} else if code != 0 {
+						workspaceErr = errors.Join(workspaceErr, fmt.Errorf("cleanup container exited with status %d", code))
+					} else if removeErr := os.RemoveAll(hostWorkspaceDir); removeErr != nil {
+						workspaceErr = errors.Join(workspaceErr, fmt.Errorf("remove workspace after scoped cleanup: %w", removeErr))
+					}
+					if cleanupErr := CleanupContainer(context.Background(), container.ID); cleanupErr != nil {
+						workspaceErr = errors.Join(workspaceErr, fmt.Errorf("remove cleanup container: %w", cleanupErr))
+					}
+				}
+			}
+		} else {
+			workspaceErr = errors.Join(workspaceErr, clientErr)
 		}
 	}
-	return nil
+	cacheRoot := os.Getenv("HOST_CACHE_DIR")
+	if cacheRoot == "" {
+		cacheRoot = filepath.Join(GetWorkspacesRootDir(), ".cache")
+	}
+	if cacheErr := os.RemoveAll(filepath.Join(cacheRoot, envID)); cacheErr != nil {
+		workspaceErr = errors.Join(workspaceErr, fmt.Errorf("remove environment cache: %w", cacheErr))
+	}
+	if workspaceErr != nil {
+		slog.Error("Environment workspace cleanup incomplete", "environment_id", envID, "error", workspaceErr)
+	}
+	return workspaceErr
 }
 
 func RestartContainer(ctx context.Context, containerID string) error {
@@ -246,14 +346,18 @@ func StartSidecarDatabase(ctx context.Context, envID string, orgID string, dbTyp
 	}
 
 	containerName := fmt.Sprintf("api-sandbox-db-%s", envID)
-	_ = CleanupContainer(ctx, containerName)
+	if err := CleanupContainer(ctx, containerName); err != nil {
+		return "", fmt.Errorf("remove previous database sidecar %s: %w", containerName, err)
+	}
 
 	var image, dbURL string
 	var env []string
 
 	// Generate a secure random password for sidecar
 	passwordBytes := make([]byte, 8)
-	rand.Read(passwordBytes)
+	if _, err := rand.Read(passwordBytes); err != nil {
+		return "", fmt.Errorf("generate database sidecar password: %w", err)
+	}
 	securePassword := hex.EncodeToString(passwordBytes)
 
 	switch dbType {
@@ -289,7 +393,9 @@ func StartSidecarDatabase(ctx context.Context, envID string, orgID string, dbTyp
 	pullOpts := docker.PullImageOptions{
 		Repository: image,
 	}
-	_ = dockerClient.PullImage(pullOpts, docker.AuthConfiguration{})
+	if err := dockerClient.PullImage(pullOpts, docker.AuthConfiguration{}); err != nil {
+		return "", fmt.Errorf("pull database image %s: %w", image, err)
+	}
 
 	createLog(envID, fmt.Sprintf("Starting sidecar database container (%s)...", containerName), models.LogLevelInfo)
 
@@ -325,14 +431,16 @@ func StartSidecarDatabase(ctx context.Context, envID string, orgID string, dbTyp
 	}
 
 	if err := dockerClient.StartContainer(container.ID, nil); err != nil {
-		return "", fmt.Errorf("failed to start db container: %v", err)
+		cleanupErr := CleanupContainer(ctx, container.ID)
+		return "", errors.Join(fmt.Errorf("failed to start db container: %w", err), cleanupErr)
 	}
 
 	createLog(envID, "Waiting for database to initialize and accept connections...", models.LogLevelInfo)
 
 	err = waitForDatabaseReady(ctx, container.ID, dbType, envID, securePassword)
 	if err != nil {
-		return "", fmt.Errorf("database readiness check failed: %v", err)
+		cleanupErr := CleanupContainer(ctx, container.ID)
+		return "", errors.Join(fmt.Errorf("database readiness check failed: %w", err), cleanupErr)
 	}
 
 	return dbURL, nil
@@ -395,15 +503,16 @@ func waitForDatabaseReady(ctx context.Context, containerID string, dbType DBType
 func EnsureOrgNetwork(ctx context.Context, orgID string) (string, string, error) {
 	networkName := fmt.Sprintf("api-sandbox-net-%s", orgID)
 	networks, err := dockerClient.ListNetworks()
+	if err != nil {
+		return "", "", fmt.Errorf("list Docker networks: %w", err)
+	}
 	var networkFound bool
 	var networkID string
-	if err == nil {
-		for _, net := range networks {
-			if net.Name == networkName {
-				networkFound = true
-				networkID = net.ID
-				break
-			}
+	for _, net := range networks {
+		if net.Name == networkName {
+			networkFound = true
+			networkID = net.ID
+			break
 		}
 	}
 
@@ -422,12 +531,23 @@ func EnsureOrgNetwork(ctx context.Context, orgID string) (string, string, error)
 		}
 	}
 
-	// Ensure Traefik is connected to this network so it can route traffic to the sandbox
-	_ = dockerClient.ConnectNetwork(networkID, docker.NetworkConnectionOptions{
-		Container: "api-sandbox-traefik",
-	})
+	// Traefik is intentionally attached to each organization network for routing.
+	if err := connectContainerToNetwork(networkName, networkID, "api-sandbox-traefik"); err != nil {
+		return "", "", fmt.Errorf("connect Traefik to organization network %s: %w", networkName, err)
+	}
 
 	return networkName, networkID, nil
+}
+
+func connectContainerToNetwork(networkName, networkID, containerName string) error {
+	info, err := dockerClient.InspectContainer(containerName)
+	if err != nil {
+		return err
+	}
+	if _, connected := info.NetworkSettings.Networks[networkName]; connected {
+		return nil
+	}
+	return dockerClient.ConnectNetwork(networkID, docker.NetworkConnectionOptions{Container: containerName})
 }
 
 // TouchFileInContainer creates an empty file or updates the timestamp of a file
@@ -455,47 +575,96 @@ func TouchFileInContainer(ctx context.Context, envID string, filePath string) er
 }
 
 func ReapOrphanContainers(ctx context.Context) error {
-	containers, err := dockerClient.ListContainers(docker.ListContainersOptions{All: true})
+	cli, err := getDockerClient()
 	if err != nil {
 		return err
 	}
+	containers, err := cli.ListContainers(docker.ListContainersOptions{All: true})
+	if err != nil {
+		return err
+	}
+	mainContainers := make(map[string]docker.APIContainers)
+	var failures []error
+	buildingStaleAfter := time.Now().Add(-30 * time.Minute)
 
 	for _, c := range containers {
-		name := ""
-		if len(c.Names) > 0 {
-			name = strings.TrimPrefix(c.Names[0], "/")
-		}
+		for _, rawName := range c.Names {
+			name := strings.TrimPrefix(rawName, "/")
+			isMain := strings.HasPrefix(name, "api-sandbox-env-")
+			isDB := strings.HasPrefix(name, "api-sandbox-db-")
+			if !isMain && !isDB {
+				continue
+			}
+			envID := strings.TrimPrefix(strings.TrimPrefix(name, "api-sandbox-env-"), "api-sandbox-db-")
+			if isMain {
+				mainContainers[envID] = c
+			}
 
-		var envID string
-		isEnv := strings.HasPrefix(name, "api-sandbox-env-")
-		isDB := strings.HasPrefix(name, "api-sandbox-db-")
-
-		if isEnv {
-			envID = strings.TrimPrefix(name, "api-sandbox-env-")
-		} else if isDB {
-			envID = strings.TrimPrefix(name, "api-sandbox-db-")
-		} else {
-			continue
-		}
-
-		var env models.Environment
-		err := db.DB.Where("id = ?", envID).First(&env).Error
-
-		// We reap if it's not in the DB, OR if the DB says it's STOPPED/FAILED
-		shouldReap := false
-		if err != nil {
-			shouldReap = true
-		} else if env.Status != models.StatusRunning && env.Status != models.StatusBuilding {
-			shouldReap = true
-		}
-
-		if shouldReap {
-			slog.Info("Reaper: Removing orphan container", "name", name, "env_id", envID)
-			_ = CleanupContainer(ctx, name)
-			if isEnv {
-				_ = CleanupWorkspace(envID)
+			var env models.Environment
+			lookupErr := db.DB.Where("id = ?", envID).First(&env).Error
+			if errors.Is(lookupErr, gorm.ErrRecordNotFound) {
+				lookupErr = nil
+			} else if lookupErr != nil {
+				failures = append(failures, fmt.Errorf("load environment %s for container %s: %w", envID, name, lookupErr))
+				continue
+			}
+			orphan := lookupErr == nil && (env.ID == "" || (env.Status != models.StatusRunning && env.Status != models.StatusBuilding))
+			deadRuntime := isMain && lookupErr == nil && env.Status == models.StatusRunning && c.State != "running"
+			staleBuild := isMain && lookupErr == nil && env.Status == models.StatusBuilding && c.Created > 0 && time.Unix(c.Created, 0).Before(buildingStaleAfter)
+			if orphan || deadRuntime || staleBuild {
+				slog.Info("Removing stale Docker container", "name", name, "environment_id", envID, "state", c.State, "orphan", orphan, "stale_build", staleBuild)
+				if removeErr := CleanupContainer(ctx, c.ID); removeErr != nil {
+					failures = append(failures, fmt.Errorf("remove stale container %s: %w", name, removeErr))
+				}
+			}
+			if deadRuntime || staleBuild {
+				message := fmt.Sprintf("Runtime container was %s; marked environment failed by Docker reconciliation.", c.State)
+				if staleBuild {
+					message = "Environment remained BUILDING for over 30 minutes; marked failed by Docker reconciliation."
+				}
+				if dbErr := failReconciledEnvironment(envID, message); dbErr != nil {
+					failures = append(failures, dbErr)
+				}
+			}
+			if orphan && isMain {
+				if cleanupErr := CleanupWorkspace(envID); cleanupErr != nil {
+					failures = append(failures, fmt.Errorf("cleanup orphan workspace %s: %w", envID, cleanupErr))
+				}
 			}
 		}
 	}
+
+	var activeEnvs []models.Environment
+	if err := db.DB.Where("status IN ?", []models.EnvironmentStatus{models.StatusRunning, models.StatusBuilding}).Find(&activeEnvs).Error; err != nil {
+		return errors.Join(append(failures, fmt.Errorf("list active environments for Docker reconciliation: %w", err))...)
+	}
+	for _, env := range activeEnvs {
+		if _, exists := mainContainers[env.ID]; exists {
+			continue
+		}
+		if env.Status == models.StatusRunning {
+			if err := failReconciledEnvironment(env.ID, "Runtime container is missing; marked environment failed by Docker reconciliation."); err != nil {
+				failures = append(failures, err)
+			}
+		} else if env.Status == models.StatusBuilding && env.UpdatedAt.Before(buildingStaleAfter) {
+			if err := failReconciledEnvironment(env.ID, "Provisioning exceeded 30 minutes without a runtime container; marked environment failed by Docker reconciliation."); err != nil {
+				failures = append(failures, err)
+			}
+		}
+	}
+	return errors.Join(failures...)
+}
+
+func failReconciledEnvironment(envID, message string) error {
+	updates := map[string]interface{}{"status": models.StatusFailed, "container_id": nil, "public_url": nil}
+	if err := db.DB.Model(&models.Environment{}).Where("id = ? AND status IN ?", envID, []models.EnvironmentStatus{models.StatusRunning, models.StatusBuilding}).Updates(updates).Error; err != nil {
+		return fmt.Errorf("mark environment %s failed after Docker reconciliation: %w", envID, err)
+	}
+	level := models.LogLevelError
+	log := models.Log{EnvironmentID: &envID, Message: message, Level: level}
+	if err := db.DB.Create(&log).Error; err != nil {
+		return fmt.Errorf("write Docker reconciliation log for environment %s: %w", envID, err)
+	}
+	slog.Error(message, "environment_id", envID)
 	return nil
 }

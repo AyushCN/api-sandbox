@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"net"
 	"net/http"
@@ -69,10 +70,10 @@ func SetupRoutes(router *gin.Engine) {
 				projectDetail.POST("/invite", AuthorizeProjectMemberAccess(models.ProjectMemberRoleOwner), InviteToProject)
 				projectDetail.DELETE("/collaborators/:userId", RemoveCollaborator)
 				projectDetail.PUT("/collaborators/:userId/role", AuthorizeProjectMemberAccess(models.ProjectMemberRoleOwner), UpdateMemberRole)
-				
+
 				// Editing
 				projectDetail.POST("/edit", AuthorizeProjectMemberAccess(models.ProjectMemberRoleEditor), EditProject)
-				
+
 				// Repositories
 				projectDetail.GET("/repositories", GetProjectRepositories)
 				projectDetail.POST("/repositories", AuthorizeProjectMemberAccess(models.ProjectMemberRoleOwner), AddProjectRepository)
@@ -82,7 +83,7 @@ func SetupRoutes(router *gin.Engine) {
 				projectDetail.GET("/workspaces", GetProjectWorkspaces)
 				projectDetail.GET("/workspaces/:workspaceId", GetWorkspace)
 				projectDetail.POST("/workspaces/:workspaceId/start", StartWorkspace)
-				
+
 				// Change Requests
 				projectDetail.GET("/change-requests", GetChangeRequests)
 				projectDetail.POST("/change-requests", CreateChangeRequest)
@@ -609,15 +610,28 @@ func DeleteEnvironment(c *gin.Context) {
 		return
 	}
 
-	// Try to stop and remove docker container if it exists
+	// Stop runtime resources and clear the workspace before deleting the row so
+	// any failure remains retryable and visible to the caller.
+	var cleanupErrs []error
 	if env.ContainerID != nil && *env.ContainerID != "" {
-		_ = provider.CleanupContainer(c.Request.Context(), *env.ContainerID)
+		if err := provider.CleanupContainer(c.Request.Context(), *env.ContainerID); err != nil {
+			cleanupErrs = append(cleanupErrs, err)
+		}
 	}
-	// Also attempt to cleanup by predictable name, in case it was created but ContainerID wasn't saved
-	_ = provider.CleanupContainer(c.Request.Context(), fmt.Sprintf("api-sandbox-env-%s", env.ID))
-
-	// Cleanup database sidecar if it exists
-	_ = provider.CleanupContainer(c.Request.Context(), fmt.Sprintf("api-sandbox-db-%s", env.ID))
+	if err := provider.CleanupContainer(c.Request.Context(), fmt.Sprintf("api-sandbox-env-%s", env.ID)); err != nil {
+		cleanupErrs = append(cleanupErrs, err)
+	}
+	if err := provider.CleanupContainer(c.Request.Context(), fmt.Sprintf("api-sandbox-db-%s", env.ID)); err != nil {
+		cleanupErrs = append(cleanupErrs, err)
+	}
+	if err := provider.CleanupWorkspace(env.ID); err != nil {
+		cleanupErrs = append(cleanupErrs, err)
+	}
+	if cleanupErr := errors.Join(cleanupErrs...); cleanupErr != nil {
+		slog.Error("Environment deletion cleanup failed", "environment_id", env.ID, "error", cleanupErr)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Environment cleanup is incomplete; retry deletion"})
+		return
+	}
 
 	// Delete associated data first to satisfy foreign key constraints
 	db.DB.Where("environment_id = ?", env.ID).Delete(&models.Log{})
@@ -633,9 +647,6 @@ func DeleteEnvironment(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete environment"})
 		return
 	}
-
-	// Cleanup workspace folder on host AFTER deleting DB record to prevent watcher race condition
-	_ = provider.CleanupWorkspace(env.ID)
 
 	db.DB.Create(&models.AuditLog{
 		UserID:    fmt.Sprintf("%v", userID),
@@ -672,15 +683,24 @@ func RestartEnvironment(c *gin.Context) {
 		return
 	}
 
-	// Try to stop and remove old docker container if it exists
+	// Do not enqueue a replacement while old Docker resources still exist.
+	var cleanupErrs []error
 	if env.ContainerID != nil && *env.ContainerID != "" {
-		_ = provider.CleanupContainer(c.Request.Context(), *env.ContainerID)
+		if err := provider.CleanupContainer(c.Request.Context(), *env.ContainerID); err != nil {
+			cleanupErrs = append(cleanupErrs, err)
+		}
 	}
-	// Also attempt to cleanup by predictable name, in case it was created but ContainerID wasn't saved
-	_ = provider.CleanupContainer(c.Request.Context(), fmt.Sprintf("api-sandbox-env-%s", env.ID))
-
-	// Cleanup database sidecar if it exists
-	_ = provider.CleanupContainer(c.Request.Context(), fmt.Sprintf("api-sandbox-db-%s", env.ID))
+	if err := provider.CleanupContainer(c.Request.Context(), fmt.Sprintf("api-sandbox-env-%s", env.ID)); err != nil {
+		cleanupErrs = append(cleanupErrs, err)
+	}
+	if err := provider.CleanupContainer(c.Request.Context(), fmt.Sprintf("api-sandbox-db-%s", env.ID)); err != nil {
+		cleanupErrs = append(cleanupErrs, err)
+	}
+	if cleanupErr := errors.Join(cleanupErrs...); cleanupErr != nil {
+		slog.Error("Environment restart cleanup failed", "environment_id", env.ID, "error", cleanupErr)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Environment cleanup is incomplete; retry restart"})
+		return
+	}
 
 	// Delete old logs
 	db.DB.Where("environment_id = ?", env.ID).Delete(&models.Log{})
@@ -810,8 +830,6 @@ func GetMe(c *gin.Context) {
 	// Get env count
 	var envCount int64
 	db.DB.Model(&models.Environment{}).Where("user_id = ?", userID).Count(&envCount)
-
-
 
 	c.JSON(http.StatusOK, MeResponse{
 		ID:               user.ID,
@@ -964,8 +982,8 @@ func ForkEnvironment(c *gin.Context) {
 	forkedName := fmt.Sprintf("%s (Fork)", originalEnv.Name)
 
 	newEnv := models.Environment{
-		UserID:            uid,
-		ProjectID:         originalEnv.ProjectID,
+		UserID:    uid,
+		ProjectID: originalEnv.ProjectID,
 
 		Name:              forkedName,
 		GitURL:            originalEnv.GitURL,

@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -12,8 +13,31 @@ import (
 	"github.com/api-sandbox/backend/db"
 	"github.com/api-sandbox/backend/models"
 	docker "github.com/fsouza/go-dockerclient"
-	"github.com/google/uuid"
 )
+
+// ResetWarmPool drains pre-migration warm containers and Redis IDs. Those
+// containers may still have the former shared /workspaces bind; new pool
+// entries are image references and are never reusable containers.
+func ResetWarmPool(ctx context.Context) error {
+	containers, err := dockerClient.ListContainers(docker.ListContainersOptions{All: true})
+	if err != nil {
+		return fmt.Errorf("list legacy warm containers: %w", err)
+	}
+	for _, container := range containers {
+		for _, name := range container.Names {
+			if strings.HasPrefix(strings.TrimPrefix(name, "/"), "api-sandbox-warm-") {
+				if err := CleanupContainer(ctx, container.ID); err != nil {
+					return fmt.Errorf("remove legacy warm container: %w", err)
+				}
+				break
+			}
+		}
+	}
+	if err := db.RedisClient.Del(ctx, "warm-pool:node", "warm-pool:python", "warm-pool:go").Err(); err != nil {
+		return fmt.Errorf("clear legacy warm pool entries: %w", err)
+	}
+	return nil
+}
 
 func CreateWarmContainer(ctx context.Context, runtimeType string) (string, error) {
 	var image string
@@ -28,32 +52,22 @@ func CreateWarmContainer(ctx context.Context, runtimeType string) (string, error
 		return "", fmt.Errorf("unsupported warm pool runtime: %s", runtimeType)
 	}
 
-	_ = dockerClient.PullImage(docker.PullImageOptions{
-		Repository: image,
-	}, docker.AuthConfiguration{})
-
-	id := uuid.New().String()
-	name := fmt.Sprintf("api-sandbox-warm-%s-%s", runtimeType, id)
-
-	hostWorkspacesDir := os.Getenv("HOST_WORKSPACES_DIR")
-	if hostWorkspacesDir == "" {
-		wd, _ := os.Getwd()
-		hostWorkspacesDir = filepath.Join(wd, "workspaces")
+	// Docker mounts are immutable after container creation. Warm the image only;
+	// a per-environment container is always created later with that environment's
+	// workspace mount and fresh writable cache paths.
+	if err := dockerClient.PullImage(docker.PullImageOptions{Repository: image}, docker.AuthConfiguration{}); err != nil {
+		return "", err
 	}
+	return image, nil
+}
 
-	cacheDir := os.Getenv("HOST_CACHE_DIR")
-	if cacheDir == "" {
-		wd, _ := os.Getwd()
-		cacheDir = filepath.Join(wd, "cache")
-	}
-	os.MkdirAll(cacheDir, 0755)
-
+func createRuntimeContainer(envID, image, networkName, hostWorkspaceDir, cacheDir string, command []string) (string, error) {
 	pidsLimit := int64(256)
 	opts := docker.CreateContainerOptions{
-		Name: name,
+		Name: fmt.Sprintf("api-sandbox-env-%s", envID),
 		Config: &docker.Config{
 			Image: image,
-			Cmd:   []string{"sleep", "infinity"},
+			Cmd:   command,
 		},
 		HostConfig: &docker.HostConfig{
 			Memory:        512 * 1024 * 1024,
@@ -66,41 +80,38 @@ func CreateWarmContainer(ctx context.Context, runtimeType string) (string, error
 			SecurityOpt:   []string{"no-new-privileges:true"},
 			CapDrop:       []string{"ALL"},
 			Binds: []string{
-				fmt.Sprintf("%s:/workspaces", hostWorkspacesDir),
+				fmt.Sprintf("%s:/app", hostWorkspaceDir),
 				fmt.Sprintf("%s/npm:/root/.npm", cacheDir),
 				fmt.Sprintf("%s/pnpm:/root/.local/share/pnpm/store", cacheDir),
 				fmt.Sprintf("%s/pip:/root/.cache/pip", cacheDir),
 				fmt.Sprintf("%s/go:/go/pkg/mod", cacheDir),
 			},
 		},
+		NetworkingConfig: &docker.NetworkingConfig{
+			EndpointsConfig: map[string]*docker.EndpointConfig{networkName: {}},
+		},
 	}
-
 	container, err := dockerClient.CreateContainer(opts)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("create environment container: %w", err)
 	}
-
 	if err := dockerClient.StartContainer(container.ID, nil); err != nil {
-		return "", err
+		cleanupErr := CleanupContainer(context.Background(), container.ID)
+		return "", errors.Join(fmt.Errorf("start environment container: %w", err), cleanupErr)
 	}
-
 	return container.ID, nil
 }
 
 func ProvisionDevSandbox(ctx context.Context, envID string, config DevRuntimeConfig, orgID string, dbURL string) (string, int, error) {
 	createLog(envID, fmt.Sprintf("Provisioning Dev Sandbox (Image: %s)...", config.BaseImage), models.LogLevelInfo)
-	_ = CleanupContainer(ctx, fmt.Sprintf("api-sandbox-env-%s", envID))
+	if err := CleanupContainer(ctx, fmt.Sprintf("api-sandbox-env-%s", envID)); err != nil {
+		return "", 0, fmt.Errorf("remove previous environment container: %w", err)
+	}
 
 	networkName, networkID, err := EnsureOrgNetwork(ctx, orgID)
 	if err != nil {
 		createLog(envID, err.Error(), models.LogLevelError)
 		return "", 0, err
-	}
-
-	if networkID != "" {
-		_ = dockerClient.ConnectNetwork(networkID, docker.NetworkConnectionOptions{
-			Container: "api-sandbox-traefik",
-		})
 	}
 
 	domain := os.Getenv("DOMAIN")
@@ -118,26 +129,35 @@ func ProvisionDevSandbox(ctx context.Context, envID string, config DevRuntimeCon
 		assignedPort = 8080 // fallback
 	}
 
-	// Try to pop warm container
+	// Consume a pre-pulled image marker. Warm containers cannot be reused safely:
+	// their mounts are immutable and their writable state would cross tenants.
 	var containerID string
+	provisioned := false
+	defer func() {
+		if provisioned {
+			return
+		}
+		if containerID != "" {
+			_ = CleanupContainer(context.Background(), containerID)
+		}
+		_ = db.RedisClient.Del(context.Background(),
+			fmt.Sprintf("traefik/http/routers/env-%s", envID),
+			fmt.Sprintf("traefik/http/services/env-%s/loadbalancer/servers/0", envID),
+		).Err()
+	}()
 	if config.RuntimeType == "node" || config.RuntimeType == "python" || config.RuntimeType == "go" {
-		warmID, err := db.RedisClient.LPop(ctx, "warm-pool:"+config.RuntimeType).Result()
-		if err == nil && warmID != "" {
-			// Rename container to be picked up by reaper properly
-			_ = dockerClient.RenameContainer(docker.RenameContainerOptions{
-				ID:   warmID,
-				Name: fmt.Sprintf("api-sandbox-env-%s", envID),
-			})
-			containerID = warmID
-			createLog(envID, "Reused pre-started warm container", models.LogLevelInfo)
+		if warmImage, err := db.RedisClient.LPop(ctx, "warm-pool:"+config.RuntimeType).Result(); err == nil && warmImage == config.BaseImage {
+			createLog(envID, "Using pre-pulled runtime image", models.LogLevelInfo)
 		}
 	}
 
 	if containerID == "" {
 		// Cold start
-		_ = dockerClient.PullImage(docker.PullImageOptions{
+		if err := dockerClient.PullImage(docker.PullImageOptions{
 			Repository: config.BaseImage,
-		}, docker.AuthConfiguration{})
+		}, docker.AuthConfiguration{}); err != nil {
+			return "", 0, fmt.Errorf("pull runtime image %s: %w", config.BaseImage, err)
+		}
 
 		wd, _ := os.Getwd()
 		hostWorkspacesDir := os.Getenv("HOST_WORKSPACES_DIR")
@@ -145,77 +165,64 @@ func ProvisionDevSandbox(ctx context.Context, envID string, config DevRuntimeCon
 			hostWorkspacesDir = filepath.Join(wd, "workspaces")
 		}
 
-		cacheDir := os.Getenv("HOST_CACHE_DIR")
-		if cacheDir == "" {
-			cacheDir = filepath.Join(wd, "cache")
+		cacheHostRoot := os.Getenv("HOST_CACHE_DIR")
+		cacheVisibleRoot := cacheHostRoot
+		if cacheHostRoot == "" {
+			// Docker interprets bind sources on the daemon host, not in this
+			// backend container. Cache files remain reachable through the already
+			// mounted workspace root, while Docker receives the host-side source.
+			cacheHostRoot = filepath.Join(hostWorkspacesDir, ".cache")
+			cacheVisibleRoot = filepath.Join(GetWorkspacesRootDir(), ".cache")
 		}
-		os.MkdirAll(cacheDir, 0755)
+		cacheSourceDir := filepath.Join(cacheHostRoot, envID)
+		if err := os.MkdirAll(filepath.Join(cacheVisibleRoot, envID), 0755); err != nil {
+			return "", 0, fmt.Errorf("failed to create isolated cache directory: %w", err)
+		}
 
 		hostWorkspaceDir := filepath.Join(hostWorkspacesDir, envID)
 
-		pidsLimit := int64(256)
-		opts := docker.CreateContainerOptions{
-			Name: fmt.Sprintf("api-sandbox-env-%s", envID),
-			Config: &docker.Config{
-				Image: config.BaseImage,
-				Cmd:   []string{"sleep", "infinity"},
-			},
-			HostConfig: &docker.HostConfig{
-				Memory:        512 * 1024 * 1024,
-				MemorySwap:    512 * 1024 * 1024,
-				CPUQuota:      100000,
-				CPUPeriod:     100000,
-				CPUShares:     1024,
-				PidsLimit:     &pidsLimit,
-				RestartPolicy: docker.RestartOnFailure(3),
-				SecurityOpt:   []string{"no-new-privileges:true"},
-				CapDrop:       []string{"ALL"},
-				Binds: []string{
-					fmt.Sprintf("%s:/workspaces", hostWorkspacesDir),
-					fmt.Sprintf("%s:/app", hostWorkspaceDir),
-					fmt.Sprintf("%s/npm:/root/.npm", cacheDir),
-					fmt.Sprintf("%s/pnpm:/root/.local/share/pnpm/store", cacheDir),
-					fmt.Sprintf("%s/pip:/root/.cache/pip", cacheDir),
-					fmt.Sprintf("%s/go:/go/pkg/mod", cacheDir),
-				},
-			},
-		}
-
-		container, err := dockerClient.CreateContainer(opts)
+		containerID, err = createRuntimeContainer(envID, config.BaseImage, networkName, hostWorkspaceDir, cacheSourceDir, []string{"sleep", "infinity"})
 		if err != nil {
-			return "", 0, fmt.Errorf("failed to create container: %v", err)
+			return "", 0, err
 		}
-		if err := dockerClient.StartContainer(container.ID, nil); err != nil {
-			return "", 0, fmt.Errorf("failed to start container: %v", err)
-		}
-		containerID = container.ID
 		createLog(envID, "Created cold start container", models.LogLevelInfo)
 	}
 
-	_ = dockerClient.ConnectNetwork(networkID, docker.NetworkConnectionOptions{
-		Container: containerID,
-	})
+	if err := connectContainerToNetwork(networkName, networkID, containerID); err != nil {
+		return "", 0, fmt.Errorf("connect runtime container to organization network: %w", err)
+	}
 
 	containerInfo, err := dockerClient.InspectContainer(containerID)
 	if err != nil {
 		return "", 0, fmt.Errorf("failed to inspect container: %v", err)
 	}
 
-	ip := containerInfo.NetworkSettings.Networks[networkName].IPAddress
+	endpoint, connected := containerInfo.NetworkSettings.Networks[networkName]
+	if !connected || endpoint.IPAddress == "" {
+		return "", 0, fmt.Errorf("runtime container %s has no IP on network %s", containerID, networkName)
+	}
+	ip := endpoint.IPAddress
 
 	// Write Traefik configuration to Redis
 	rdb := db.RedisClient
 	prefix := fmt.Sprintf("traefik/http/routers/env-%s", envID)
 
-	rdb.HSet(ctx, prefix, "rule", fmt.Sprintf("Host(`%s.%s`)", envID, domain))
-	rdb.HSet(ctx, prefix, "service", fmt.Sprintf("env-%s", envID))
-	if domain != "localhost" {
-		rdb.HSet(ctx, prefix, "entrypoints", "websecure")
-		rdb.HSet(ctx, prefix, "tls.certresolver", "myresolver")
-	} else {
-		rdb.HSet(ctx, prefix, "entrypoints", "web")
+	routerFields := map[string]string{
+		"rule":    fmt.Sprintf("Host(`%s.%s`)", envID, domain),
+		"service": fmt.Sprintf("env-%s", envID),
 	}
-	rdb.HSet(ctx, fmt.Sprintf("traefik/http/services/env-%s/loadbalancer/servers/0", envID), "url", fmt.Sprintf("http://%s:%s", ip, exposedPort))
+	if domain != "localhost" {
+		routerFields["entrypoints"] = "websecure"
+		routerFields["tls.certresolver"] = "myresolver"
+	} else {
+		routerFields["entrypoints"] = "web"
+	}
+	pipe := rdb.Pipeline()
+	pipe.HSet(ctx, prefix, routerFields)
+	pipe.HSet(ctx, fmt.Sprintf("traefik/http/services/env-%s/loadbalancer/servers/0", envID), "url", fmt.Sprintf("http://%s:%s", ip, exposedPort))
+	if _, err := pipe.Exec(ctx); err != nil {
+		return "", 0, fmt.Errorf("write Traefik configuration: %w", err)
+	}
 
 	// Execute sandbox-start.sh
 	envVars := []string{
@@ -235,12 +242,10 @@ func ProvisionDevSandbox(ctx context.Context, envID string, config DevRuntimeCon
 		}
 	}
 
-	workingDir := fmt.Sprintf("/workspaces/%s%s", envID, strings.TrimPrefix(config.WorkDir, "/app"))
+	workingDir := "/app" + strings.TrimPrefix(config.WorkDir, "/app")
 	if config.RuntimeType == "" || config.RuntimeType == "docker" || config.RuntimeType == "devcontainer" {
 		workingDir = config.WorkDir
 	}
-	// Fix: If the workspace is mounted at /app in the container, workingDir should be /app
-	// The workspace is mounted at /app via the bind mount: fmt.Sprintf("%s:/app", hostWorkspaceDir)
 	if strings.HasPrefix(workingDir, "/workspaces/") {
 		workingDir = "/app" + strings.TrimPrefix(workingDir, fmt.Sprintf("/workspaces/%s", envID))
 	}
@@ -267,5 +272,6 @@ func ProvisionDevSandbox(ctx context.Context, envID string, config DevRuntimeCon
 	}
 
 	createLog(envID, fmt.Sprintf("Dev Sandbox started successfully on port %d.", assignedPort), models.LogLevelInfo)
+	provisioned = true
 	return containerID, assignedPort, nil
 }

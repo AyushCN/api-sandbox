@@ -1,6 +1,6 @@
 # Deployment Guide
 
-The API Sandbox platform orchestrates an entire ecosystem of user-defined containers. Because the primary backend system mounts `/var/run/docker.sock` to accomplish this, **the platform must be deployed to a single, dedicated, secure host**. 
+The API Sandbox platform orchestrates user-defined Docker containers. The backend and worker share read/write access to `/var/run/docker.sock`, which grants effectively host-root Docker authority. Traefik also mounts the socket read-only for Docker provider discovery; `:ro` does not restrict Docker API operations. **Deploy only to a dedicated, secure host for trusted users.**
 
 ## Prerequisites
 
@@ -18,7 +18,7 @@ The system requires specific host paths to exist for workspace bind-mounting.
 sudo mkdir -p /var/lib/api-sandbox/workspaces
 sudo chown -R $USER:$USER /var/lib/api-sandbox/workspaces
 ```
-*Note: If you are running Docker Rootless, adjust ownership to match your remapped IDs.*
+The backend bind-mounts this root at `/app/workspaces`. Each runtime gets only its own `<environment-id>` directory at `/app`; package caches live under `.cache/<environment-id>/`. Do not mount the shared root into runtime containers.
 
 ## 2. Environment Configuration
 
@@ -49,11 +49,17 @@ GITHUB_CLIENT_SECRET=your_oauth_client_secret
 
 # Infrastructure
 HOST_WORKSPACES_DIR=/var/lib/api-sandbox/workspaces
+# For Compose, Redis must be addressed by its service name, not localhost:
+REDIS_URL=redis://redis:6379
 ```
+
+`localhost` inside the backend container is the backend itself. `redis://localhost:6379` is suitable only when running the backend directly on a host with Redis bound locally.
 
 ## 3. Starting the Stack
 
 The system leverages a unified `docker-compose.yml` file that orchestrates the core infrastructure: Traefik, PostgreSQL, Redis, the Go Backend API, and the Next.js Frontend.
+
+These infrastructure services share `traefik-net`. Runtime containers are created separately on organization-specific bridge networks; they are not joined to the shared Compose network. Organization bridges permit outbound access, which supports Git operations and dependency downloads. Runtime images currently default to root and have Docker-enforced memory, CPU, PID, and capability restrictions; see [Architecture](ARCHITECTURE.md) for exact settings and mounts.
 
 ```bash
 # Build and deploy detached
@@ -62,7 +68,7 @@ docker compose up -d --build
 
 ### Verifying the Deployment
 
-Run `docker compose ps` to verify all five core services are running smoothly. 
+Run `docker compose ps` to verify the five core services are running and healthy where health checks are configured.
 
 ```bash
 $ docker compose ps

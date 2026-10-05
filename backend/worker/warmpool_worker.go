@@ -13,8 +13,17 @@ import (
 func MaintainWarmPool() {
 	runtimes := []string{"node", "python", "go"}
 	targetSize := 2
+	poolReady := false
 
 	for {
+		if !poolReady {
+			if err := provider.ResetWarmPool(context.Background()); err != nil {
+				slog.Error("Failed to migrate legacy warm pool", "error", err)
+				time.Sleep(10 * time.Second)
+				continue
+			}
+			poolReady = true
+		}
 		for _, rt := range runtimes {
 			count, err := db.RedisClient.LLen(context.Background(), "warm-pool:"+rt).Result()
 			if err == nil && count < int64(targetSize) {

@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -32,26 +33,41 @@ func HandleCleanupContainersTask(ctx context.Context, t *asynq.Task) error {
 
 	for _, env := range envs {
 		slog.Info("Cron: Cleaning up expired environment", "env_id", env.ID)
+		var cleanupErrs []error
 
 		// 1. Stop main container
 		if env.ContainerID != nil && *env.ContainerID != "" {
-			_ = provider.CleanupContainer(ctx, *env.ContainerID)
+			if err := provider.CleanupContainer(ctx, *env.ContainerID); err != nil {
+				cleanupErrs = append(cleanupErrs, err)
+			}
 		} else {
 			// Fallback cleanup by name
-			_ = provider.CleanupContainer(ctx, fmt.Sprintf("api-sandbox-env-%s", env.ID))
+			if err := provider.CleanupContainer(ctx, fmt.Sprintf("api-sandbox-env-%s", env.ID)); err != nil {
+				cleanupErrs = append(cleanupErrs, err)
+			}
 		}
 
 		// 2. Stop DB sidecar
-		_ = provider.CleanupContainer(ctx, fmt.Sprintf("api-sandbox-db-%s", env.ID))
+		if err := provider.CleanupContainer(ctx, fmt.Sprintf("api-sandbox-db-%s", env.ID)); err != nil {
+			cleanupErrs = append(cleanupErrs, err)
+		}
 
 		// 3. Cleanup Workspace on disk
-		_ = provider.CleanupWorkspace(env.ID)
+		if err := provider.CleanupWorkspace(env.ID); err != nil {
+			cleanupErrs = append(cleanupErrs, err)
+		}
+		if cleanupErr := errors.Join(cleanupErrs...); cleanupErr != nil {
+			slog.Error("Idle environment cleanup incomplete; leaving status unchanged for retry", "env_id", env.ID, "error", cleanupErr)
+			return cleanupErr
+		}
 
 		// 4. Update status
-		db.DB.Model(&env).Updates(map[string]interface{}{
+		if err := db.DB.Model(&env).Updates(map[string]interface{}{
 			"status":     models.StatusStopped,
 			"public_url": nil,
-		})
+		}).Error; err != nil {
+			return fmt.Errorf("mark environment %s stopped after cleanup: %w", env.ID, err)
+		}
 
 		db.DB.Create(&models.Log{
 			EnvironmentID: &env.ID,

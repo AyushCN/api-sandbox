@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -20,11 +21,11 @@ import (
 )
 
 var (
-	ProviderCleanupContainer           = provider.CleanupContainer
+	ProviderCleanupContainer                                                                                                = provider.CleanupContainer
 	ProviderCloneOrFetch               func(ctx context.Context, dir, gitURL, branch, baseCommit, githubToken string) error = provider.CloneOrFetch
-	ProviderDetectDatabaseRequirements = provider.DetectDatabaseRequirements
-	ProviderStartSidecarDatabase       = provider.StartSidecarDatabase
-	ProviderCheckContainerHealth       = provider.CheckContainerHealth
+	ProviderDetectDatabaseRequirements                                                                                      = provider.DetectDatabaseRequirements
+	ProviderStartSidecarDatabase                                                                                            = provider.StartSidecarDatabase
+	ProviderCheckContainerHealth                                                                                            = provider.CheckContainerHealth
 )
 
 func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
@@ -74,8 +75,21 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 	// Idempotency: cleanup existing container if retrying
 	if env.ContainerID != nil && *env.ContainerID != "" {
 		slog.Info("Cleaning up existing container", "container_id", *env.ContainerID)
-		_ = provider.CleanupContainer(ctx, *env.ContainerID)
+		if err := provider.CleanupContainer(ctx, *env.ContainerID); err != nil {
+			return fmt.Errorf("remove previous environment container: %w", err)
+		}
 	}
+	buildSucceeded := false
+	defer func() {
+		if buildSucceeded {
+			return
+		}
+		for _, name := range []string{fmt.Sprintf("api-sandbox-env-%s", env.ID), fmt.Sprintf("api-sandbox-db-%s", env.ID)} {
+			if err := ProviderCleanupContainer(context.Background(), name); err != nil {
+				slog.Error("Failed to remove Docker resource after build failure", "environment_id", env.ID, "container", name, "error", err)
+			}
+		}
+	}()
 
 	workspaceDir := provider.GetWorkspacePath(env.ID)
 
@@ -312,7 +326,9 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 		}
 
 		// Clean up failed container before attempting next fallback
-		_ = ProviderCleanupContainer(ctx, containerID)
+		if cleanupErr := ProviderCleanupContainer(ctx, containerID); cleanupErr != nil {
+			slog.Error("Failed to remove unhealthy runtime container", "environment_id", env.ID, "container_id", containerID, "error", cleanupErr)
+		}
 	}
 
 	if finalContainerID == "" {
@@ -339,12 +355,16 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 	}
 
 	publicURL := fmt.Sprintf("%s://%s.%s", protocol, env.ID, domain)
-	db.DB.Model(&env).Updates(map[string]interface{}{
+	if err := db.DB.Model(&env).Updates(map[string]interface{}{
 		"status":       models.StatusRunning,
 		"container_id": finalContainerID,
 		"port":         finalPort,
 		"public_url":   publicURL,
-	})
+	}).Error; err != nil {
+		cleanupErr := ProviderCleanupContainer(context.Background(), finalContainerID)
+		return errors.Join(fmt.Errorf("persist running environment state: %w", err), cleanupErr)
+	}
+	buildSucceeded = true
 
 	slog.Info("Environment is now RUNNING", "env_id", env.ID, "port", finalPort)
 	return nil

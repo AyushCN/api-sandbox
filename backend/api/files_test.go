@@ -2,15 +2,16 @@ package api
 
 import (
 	"bytes"
-	"github.com/api-sandbox/backend/db"
-	"github.com/api-sandbox/backend/models"
-	"github.com/gin-gonic/gin"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/api-sandbox/backend/db"
+	"github.com/api-sandbox/backend/models"
+	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 func setupTestDBForFiles(t *testing.T) {
@@ -25,7 +26,7 @@ func setupTestDBForFiles(t *testing.T) {
 	err = db.DB.AutoMigrate(
 		&models.User{},
 		&models.Project{},
-		&models.ProjectCollaborator{},
+		&models.ProjectMember{},
 		&models.Environment{},
 		&models.Log{},
 		&models.Metric{},
@@ -41,10 +42,11 @@ func createTestEnvironmentForFiles(t *testing.T) (*models.Environment, *models.U
 
 	project := models.Project{Name: "Project Files", CreatedByUserID: user.ID}
 	db.DB.Create(&project)
-	db.DB.Create(&models.ProjectCollaborator{
+	db.DB.Create(&models.ProjectMember{
 		ProjectID: project.ID,
 		UserID:    user.ID,
-		Role:      models.ProjectRoleOwner,
+		Role:      models.ProjectMemberRoleOwner,
+		Status:    models.ProjectMemberStatusAccepted,
 	})
 
 	env := models.Environment{

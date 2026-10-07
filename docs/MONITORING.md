@@ -5,18 +5,18 @@ Because the API Sandbox orchestrates dynamic containers on a single host, standa
 ## Accessing Logs
 
 ### 1. Go Backend (Orchestrator)
-The backend manages the database, the Docker socket, and the WebSocket hub. It uses structured `slog` JSON logging.
+The backend and Asynq worker share the backend service, which manages the database, Docker socket, and WebSocket hub. It uses structured `slog` JSON logging.
 ```bash
 docker logs -f api-sandbox-backend
 ```
-Look out for `"level":"WARN"` entries related to `"touch-on-save failed"`, which indicate a sandbox container has crashed or `Air` / `nodemon` has died.
+Look for cleanup/provisioning failures and container inspect/start/stop errors. A `touch-on-save failed` warning can indicate the runtime container or its watcher is unavailable.
 
 ### 2. Traefik Proxy (Routing)
 Traefik handles all ingress for both the API and the user sandboxes.
 ```bash
 docker logs -f api-sandbox-traefik
 ```
-You can view the live Traefik dashboard by exposing port 8080 (if enabled in `docker-compose.yml`) to visualize the dynamic routers being created and destroyed as sandboxes spin up and down.
+Traefik uses both Docker provider discovery for Compose labels and Redis provider configuration for environment preview routes. Its Docker socket mount is filesystem read-only only; the Docker API itself is not read-only. The dashboard is disabled unless `TRAEFIK_DASHBOARD=true`.
 
 ### 3. Ephemeral Sandboxes (User Environments)
 User sandboxes are prefixed with `api-sandbox-env-`.
@@ -36,11 +36,18 @@ go run scripts/measure_loop/main.go
 ```
 
 ### PostgreSQL Status Sync
-The orchestrator maintains a tight loop syncing Docker socket states with the `environments` table in PostgreSQL. If an environment is listed as `RUNNING` in the database but `docker ps` shows it is absent, the backend Orphan Reaper will attempt to reconcile the state. 
+An Asynq task runs orphan reconciliation every minute. It compares labeled Docker containers with environment records, removes orphan runtimes, and records failure when a database `RUNNING` environment has no live container or a `BUILDING` environment has been stale for 60 minutes. The reaper logs failures; check backend logs before manually removing containers.
 
 You can manually inspect the state by checking the DB:
 ```sql
 SELECT id, status, port FROM environments;
+```
+
+Inspect mounts and network attachments for a runtime container with:
+
+```bash
+docker inspect api-sandbox-env-<environment-id> --format '{{json .Mounts}}'
+docker inspect api-sandbox-env-<environment-id> --format '{{json .NetworkSettings.Networks}}'
 ```
 
 ## Known Bottlenecks

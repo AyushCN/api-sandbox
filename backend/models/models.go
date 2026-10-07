@@ -47,57 +47,19 @@ func (u *User) BeforeCreate(tx *gorm.DB) (err error) {
 	return
 }
 
-type OrganizationRole string
-
-const (
-	RoleAdmin  OrganizationRole = "ADMIN"
-	RoleMember OrganizationRole = "MEMBER"
-)
-
-type Organization struct {
-	ID        string    `gorm:"type:text;primaryKey" json:"id"`
-	Name      string    `gorm:"type:text;not null" json:"name"`
-	CreatedAt time.Time `gorm:"default:current_timestamp" json:"createdAt"`
-	UpdatedAt time.Time `gorm:"default:current_timestamp" json:"updatedAt"`
-}
-
-func (o *Organization) BeforeCreate(tx *gorm.DB) (err error) {
-	if o.ID == "" {
-		o.ID = uuid.NewString()
-	}
-	return
-}
-
-type OrganizationMember struct {
-	ID             string           `gorm:"type:text;primaryKey" json:"id"`
-	OrganizationID string           `gorm:"type:text;not null;index" json:"organizationId"`
-	Organization   Organization     `json:"-"`
-	UserID         string           `gorm:"type:text;not null;index" json:"userId"`
-	User           User             `json:"-"`
-	Role           OrganizationRole `gorm:"type:text;default:MEMBER;not null" json:"role"`
-	CreatedAt      time.Time        `gorm:"default:current_timestamp" json:"createdAt"`
-}
-
-func (m *OrganizationMember) BeforeCreate(tx *gorm.DB) (err error) {
-	if m.ID == "" {
-		m.ID = uuid.NewString()
-	}
-	return
-}
-
 type Project struct {
-	ID                  string                `gorm:"type:text;primaryKey" json:"id"`
-	Name                string                `gorm:"type:text;not null" json:"name"`
-	Description         string                `gorm:"type:text" json:"description"`
-	CreatedByUserID     string                `gorm:"type:text;not null" json:"createdBy"`
-	CreatedByUser       User                  `json:"-"`
-	OwnerOrganizationID string                `gorm:"type:text;not null;index" json:"ownerOrganizationId"`
-	OwnerOrganization   Organization          `json:"-"`
-	Collaborators       []ProjectCollaborator `json:"collaborators,omitempty"`
-	Environments        []Environment         `json:"environments,omitempty"`
-	IsPublic            bool                  `gorm:"default:false" json:"isPublic"`
-	CreatedAt           time.Time             `gorm:"default:current_timestamp" json:"createdAt"`
-	UpdatedAt           time.Time             `gorm:"default:current_timestamp" json:"updatedAt"`
+	ID              string              `gorm:"type:text;primaryKey" json:"id"`
+	Name            string              `gorm:"type:text;not null" json:"name"`
+	Description     string              `gorm:"type:text" json:"description"`
+	CreatedByUserID string              `gorm:"type:text;not null" json:"createdBy"`
+	CreatedByUser   User                `json:"-"`
+	Members         []ProjectMember     `json:"members,omitempty"`
+	Repositories    []ProjectRepository `json:"repositories,omitempty"`
+	Workspaces      []Workspace         `json:"workspaces,omitempty"`
+	Environments    []Environment       `json:"environments,omitempty"`
+	IsPublic        bool                `gorm:"default:false" json:"isPublic"`
+	CreatedAt       time.Time           `gorm:"default:current_timestamp" json:"createdAt"`
+	UpdatedAt       time.Time           `gorm:"default:current_timestamp" json:"updatedAt"`
 }
 
 func (p *Project) BeforeCreate(tx *gorm.DB) (err error) {
@@ -107,53 +69,26 @@ func (p *Project) BeforeCreate(tx *gorm.DB) (err error) {
 	return
 }
 
-type ProjectRole string
-
-const (
-	ProjectRoleOwner        ProjectRole = "OWNER"
-	ProjectRoleAdmin        ProjectRole = "ADMIN"
-	ProjectRoleCollaborator ProjectRole = "COLLABORATOR"
-	ProjectRoleViewer       ProjectRole = "VIEWER"
-)
-
-type ProjectCollaborator struct {
-	ID              string      `gorm:"type:text;primaryKey" json:"id"`
-	ProjectID       string      `gorm:"type:text;not null;index" json:"projectId"`
-	Project         Project     `json:"project"`
-	UserID          string      `gorm:"type:text;not null;index" json:"userId"`
-	User            User        `json:"user"`
-	UserOrg         string      `gorm:"type:text;index" json:"userOrganization"` // For reference
-	Role            ProjectRole `gorm:"type:text;default:'COLLABORATOR';not null" json:"role"`
-	InvitedByUserID string      `gorm:"type:text" json:"invitedBy"`
-	InvitedAt       time.Time   `gorm:"default:current_timestamp" json:"invitedAt"`
-	AcceptedAt      *time.Time  `json:"acceptedAt"` // NULL until user accepts invite
-}
-
-func (pc *ProjectCollaborator) BeforeCreate(tx *gorm.DB) (err error) {
-	if pc.ID == "" {
-		pc.ID = uuid.NewString()
-	}
-	return
-}
-
 type Environment struct {
 	ID                string            `gorm:"type:text;primaryKey" json:"id"`
 	ProjectID         string            `gorm:"type:text;index" json:"projectId"`
 	Project           *Project          `json:"-"`
-	OrganizationID    string            `gorm:"type:text;index" json:"organizationId"` // Legacy reference
-	Organization      *Organization     `json:"-"`
 	UserID            string            `gorm:"type:text;not null" json:"userId"` // Creator
 	User              User              `json:"-"`
 	Name              string            `gorm:"type:text;not null" json:"name"`
-	GitURL            string            `gorm:"type:text;not null" json:"gitUrl"`
-	GithubBranch      string            `gorm:"type:text;default:main;not null" json:"githubBranch"`
+	GitURL            string            `gorm:"type:text" json:"gitUrl,omitempty"`
+	GithubBranch      string            `gorm:"type:text" json:"githubBranch,omitempty"`
 	Status            EnvironmentStatus `gorm:"type:text;default:IDLE;not null" json:"status"`
 	PublicURL         *string           `gorm:"type:text" json:"publicUrl"`
 	UserProvidedDBURL *string           `gorm:"type:text" json:"userProvidedDbUrl"`
 	ContainerID       *string           `gorm:"type:text" json:"containerId"`
 	Port              *int              `gorm:"type:integer" json:"port"`
 	StartCommand      *string           `gorm:"type:text" json:"startCommand"`
-	HealthCheckType   *string           `gorm:"type:text;default:'tcp'" json:"healthCheckType"` // 'tcp' or 'none'
+	RootDirectory    *string           `gorm:"type:text" json:"rootDirectory"`
+	DockerfilePath   *string           `gorm:"type:text" json:"dockerfilePath"`
+	PreDeployCommand *string           `gorm:"type:text" json:"preDeployCommand"`
+	RuntimeType       *string           `gorm:"type:text" json:"runtimeType"`
+	HealthCheckType   *string           `gorm:"type:text;default:'http'" json:"healthCheckType"`
 	CreatedAt         time.Time         `gorm:"default:current_timestamp" json:"createdAt"`
 	UpdatedAt         time.Time         `gorm:"default:current_timestamp" json:"updatedAt"`
 	ExpiresAt         *time.Time        `gorm:"type:timestamp" json:"expiresAt"`
@@ -165,8 +100,48 @@ type Environment struct {
 	ModifiedByUserID      *string    `gorm:"type:text" json:"modifiedByUserId"`
 	CommitHash            *string    `gorm:"type:text" json:"commitHash"`
 
-	Logs    []Log    `gorm:"constraint:OnDelete:CASCADE;" json:"logs,omitempty"`
-	Metrics []Metric `gorm:"constraint:OnDelete:CASCADE;" json:"metrics,omitempty"`
+	EnvVars    []EnvironmentVariable  `gorm:"constraint:OnDelete:CASCADE;" json:"envVars,omitempty"`
+	Logs       []Log                  `gorm:"constraint:OnDelete:CASCADE;" json:"logs,omitempty"`
+	Metrics    []Metric               `gorm:"constraint:OnDelete:CASCADE;" json:"metrics,omitempty"`
+	Containers []EnvironmentContainer `gorm:"constraint:OnDelete:CASCADE;" json:"containers,omitempty"`
+}
+
+type EnvironmentVariable struct {
+	ID            string       `gorm:"type:text;primaryKey" json:"id"`
+	EnvironmentID string       `gorm:"type:text;not null;index" json:"environmentId"`
+	Environment   *Environment `json:"-"`
+	Key           string       `gorm:"type:text;not null" json:"key"`
+	Value         string       `gorm:"type:text;not null" json:"value"`
+	CreatedAt     time.Time    `gorm:"default:current_timestamp" json:"createdAt"`
+	UpdatedAt     time.Time    `gorm:"default:current_timestamp" json:"updatedAt"`
+}
+
+func (ev *EnvironmentVariable) BeforeCreate(tx *gorm.DB) (err error) {
+	if ev.ID == "" {
+		ev.ID = uuid.NewString()
+	}
+	return
+}
+
+type EnvironmentContainer struct {
+	ID            string       `gorm:"type:text;primaryKey" json:"id"`
+	EnvironmentID string       `gorm:"type:text;not null;index" json:"environmentId"`
+	Environment   *Environment `json:"-"`
+	ContainerID   string       `gorm:"type:text;not null" json:"containerId"`
+	Name          string       `gorm:"type:text;not null" json:"name"`
+	Type          string       `gorm:"type:text;not null" json:"type"` // e.g. "runtime", "database", "redis"
+	Port          *int         `gorm:"type:integer" json:"port"`
+	PublicURL     *string      `gorm:"type:text" json:"publicUrl"`
+	StartCommand  *string      `gorm:"type:text" json:"startCommand"`
+	CreatedAt     time.Time    `gorm:"default:current_timestamp" json:"createdAt"`
+	UpdatedAt     time.Time    `gorm:"default:current_timestamp" json:"updatedAt"`
+}
+
+func (ec *EnvironmentContainer) BeforeCreate(tx *gorm.DB) (err error) {
+	if ec.ID == "" {
+		ec.ID = uuid.NewString()
+	}
+	return
 }
 
 func (e *Environment) BeforeCreate(tx *gorm.DB) (err error) {

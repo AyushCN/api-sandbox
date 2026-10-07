@@ -3,6 +3,7 @@ package provider
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -29,7 +30,7 @@ func TestDetectDevRuntime(t *testing.T) {
 			},
 			expectedBase: "node:20-alpine",
 			expectedInst: "npm install",
-			expectedStrt: "npx nodemon index.js",
+			expectedStrt: "npm run start",
 		},
 		{
 			name: "Node.js Next.js with yarn",
@@ -58,8 +59,8 @@ func TestDetectDevRuntime(t *testing.T) {
 				"main.py":          "",
 			},
 			expectedBase: "python:3.11-slim",
-			expectedInst: "pip install -r requirements.txt && pip install uvicorn[standard]",
-			expectedStrt: "uvicorn main:app --host 0.0.0.0 --reload --reload-dir .",
+			expectedInst: "pip install -r requirements.txt && pip install uvicorn[standard] fastapi",
+			expectedStrt: "uvicorn main:app --host 0.0.0.0 --reload",
 		},
 		{
 			name: "Python Django",
@@ -68,7 +69,7 @@ func TestDetectDevRuntime(t *testing.T) {
 				"manage.py":        "",
 			},
 			expectedBase: "python:3.11-slim",
-			expectedInst: "pip install -r requirements.txt && pip install uvicorn[standard]",
+			expectedInst: "pip install -r requirements.txt && pip install django",
 			expectedStrt: "python manage.py runserver 0.0.0.0:8000",
 		},
 		{
@@ -77,8 +78,8 @@ func TestDetectDevRuntime(t *testing.T) {
 				"go.mod": "module example.com/m\n\ngo 1.22\n",
 			},
 			expectedBase: "golang:alpine",
-			expectedInst: "go mod download && go install github.com/air-verse/air@v1.52.3",
-			expectedStrt: "if [ ! -f .air.toml ]; then air init && sed -i 's/poll = false/poll = true/g' .air.toml; fi && air || go run .",
+			expectedInst: "go mod download",
+			expectedStrt: "go run .",
 		},
 
 		{
@@ -112,10 +113,14 @@ start_cmd = "npm run custom"
 				}
 			}
 
-			config, err := DetectDevRuntime(repoDir, "")
+			configs, err := DetectDevRuntimes(repoDir, "")
 			if err != nil {
 				t.Fatalf("Expected no error, got: %v", err)
 			}
+			if len(configs) == 0 {
+				t.Fatalf("Expected at least one config, got none")
+			}
+			config := configs[0]
 
 			if config.BaseImage != tc.expectedBase {
 				t.Errorf("Expected BaseImage %q, got %q", tc.expectedBase, config.BaseImage)
@@ -127,5 +132,47 @@ start_cmd = "npm run custom"
 				t.Errorf("Expected StartCmd %q, got %q", tc.expectedStrt, config.StartCmd)
 			}
 		})
+	}
+}
+
+func TestGenerateSandboxStartScriptRunsInstallThenExecsApplication(t *testing.T) {
+	script := GenerateSandboxStartScript(DevRuntimeConfig{
+		WorkDir:    "/app/project's source",
+		InstallCmd: "npm install && echo ready",
+		StartCmd:   "npm run dev",
+	})
+	installAt := strings.Index(script, "/bin/sh -c 'npm install && echo ready'")
+	startAt := strings.Index(script, "exec /bin/sh -c 'npm run dev'")
+	if installAt < 0 || startAt < 0 || installAt >= startAt {
+		t.Fatalf("script must finish dependency installation before execing the app:\n%s", script)
+	}
+	if !strings.Contains(script, `cd '/app/project'\''s source'`) {
+		t.Fatalf("working directory was not safely quoted:\n%s", script)
+	}
+}
+
+func TestNormalizeRuntimeWorkDirStaysInsideApp(t *testing.T) {
+	for _, tc := range []struct {
+		input string
+		want  string
+		bad   bool
+	}{
+		{input: "", want: "/app"},
+		{input: "src", want: "/app/src"},
+		{input: "/app/web", want: "/app/web"},
+		{input: "/workspaces/env-1/repo", want: "/app/repo"},
+		{input: "../../etc", bad: true},
+		{input: "/etc", bad: true},
+	} {
+		got, err := NormalizeRuntimeWorkDir(tc.input, "env-1")
+		if tc.bad {
+			if err == nil {
+				t.Errorf("NormalizeRuntimeWorkDir(%q) unexpectedly succeeded with %q", tc.input, got)
+			}
+			continue
+		}
+		if err != nil || got != tc.want {
+			t.Errorf("NormalizeRuntimeWorkDir(%q) = %q, %v; want %q", tc.input, got, err, tc.want)
+		}
 	}
 }

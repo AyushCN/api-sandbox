@@ -1,9 +1,9 @@
 package provider
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -12,51 +12,145 @@ import (
 )
 
 type DevRuntimeConfig struct {
-	BaseImage   string
-	InstallCmd  string
-	StartCmd    string
-	WatchHint   string
-	WorkDir     string
-	ExposedPort string
+	BaseImage       string
+	InstallCmd      string
+	PreDeployCmd    string
+	StartCmd        string
+	WatchHint       string
+	WorkDir         string
+	ExposedPort     string
+	RuntimeType     string
+	StartScriptPath string
+	DockerfilePath  string
+	EnvVars         map[string]string
+	PrimaryDir      string
 }
 
-func ResolveRuntime(env *models.Environment, repoPath string, subDir string) (DevRuntimeConfig, error) {
-	config, err := DetectDevRuntime(repoPath, subDir)
+func ResolveRuntimes(env *models.Environment, repoPath string, subDir string) ([]DevRuntimeConfig, error) {
+	// 1. If manual configuration is provided, bypass detection entirely
+	if env.RuntimeType != nil && *env.RuntimeType != "" && env.StartCommand != nil && *env.StartCommand != "" {
+		baseImage := "node:20-bookworm" // default
+		if *env.RuntimeType == "python" {
+			baseImage = "python:3.10-bookworm"
+		} else if *env.RuntimeType == "go" {
+			baseImage = "golang:1.21-bookworm"
+		} else if *env.RuntimeType == "docker" {
+			baseImage = "docker-build"
+		}
 
-	// Apply DB overrides
-	if env.StartCommand != nil && *env.StartCommand != "" {
-		config.StartCmd = *env.StartCommand
-		err = nil // Clear heuristic errors if explicit command given
-	}
-	if env.Port != nil && *env.Port > 0 {
-		config.ExposedPort = fmt.Sprintf("%d", *env.Port)
+		port := "8080"
+		if env.Port != nil && *env.Port > 0 {
+			port = fmt.Sprintf("%d", *env.Port)
+		}
+		
+		startCmd := ""
+		if env.StartCommand != nil {
+			startCmd = *env.StartCommand
+		}
+
+		envVarsMap := make(map[string]string)
+		for _, v := range env.EnvVars {
+			envVarsMap[v.Key] = v.Value
+		}
+
+		preDeployCmd := ""
+		if env.PreDeployCommand != nil {
+			preDeployCmd = *env.PreDeployCommand
+		}
+
+		dockerfilePath := ""
+		if env.DockerfilePath != nil {
+			dockerfilePath = *env.DockerfilePath
+		}
+
+		return []DevRuntimeConfig{
+			{
+				BaseImage:   baseImage,
+				WorkDir:     "/app/" + subDir,
+				StartCmd:    startCmd,
+				PreDeployCmd: preDeployCmd,
+				ExposedPort: port,
+				RuntimeType: *env.RuntimeType,
+				DockerfilePath: dockerfilePath,
+				EnvVars:     envVarsMap,
+			},
+		}, nil
 	}
 
-	return config, err
+	configs, err := DetectDevRuntimes(repoPath, subDir)
+
+	// Apply DB overrides for all candidates (if only partial config given)
+	for i := range configs {
+		if env.StartCommand != nil && *env.StartCommand != "" {
+			configs[i].StartCmd = *env.StartCommand
+			err = nil // Clear heuristic errors if explicit command given
+		}
+		if env.Port != nil && *env.Port > 0 {
+			configs[i].ExposedPort = fmt.Sprintf("%d", *env.Port)
+		}
+
+		if len(env.EnvVars) > 0 {
+			if configs[i].EnvVars == nil {
+				configs[i].EnvVars = make(map[string]string)
+			}
+			for _, v := range env.EnvVars {
+				configs[i].EnvVars[v.Key] = v.Value
+			}
+		}
+
+		if env.PreDeployCommand != nil && *env.PreDeployCommand != "" {
+			configs[i].PreDeployCmd = *env.PreDeployCommand
+		}
+		if env.DockerfilePath != nil && *env.DockerfilePath != "" {
+			configs[i].DockerfilePath = *env.DockerfilePath
+		}
+	}
+
+	return configs, err
 }
 
-func DetectDevRuntime(repoPath string, subDir string) (DevRuntimeConfig, error) {
+func DetectDevRuntimes(repoPath string, subDir string) ([]DevRuntimeConfig, error) {
 	appDir := filepath.Join(repoPath, subDir)
-	var config DevRuntimeConfig
-	var err error
+	var configs []DevRuntimeConfig
 
-	// Node.js detection
-	packageJsonPath := filepath.Join(appDir, "package.json")
-	if _, errStat := os.Stat(packageJsonPath); errStat == nil {
-		config, err = detectNodeRuntime(appDir, subDir)
-	} else if _, errStat := os.Stat(filepath.Join(appDir, "requirements.txt")); errStat == nil {
-		config, err = detectPythonRuntime(appDir, subDir)
-	} else if _, errStat := os.Stat(filepath.Join(appDir, "pyproject.toml")); errStat == nil {
-		config, err = detectPythonRuntime(appDir, subDir)
-	} else if _, errStat := os.Stat(filepath.Join(appDir, "Pipfile")); errStat == nil {
-		config, err = detectPythonRuntime(appDir, subDir)
-	} else if _, errStat := os.Stat(filepath.Join(appDir, "go.mod")); errStat == nil {
-		config, err = detectGoRuntime(appDir, subDir)
-	} else {
-		err = fmt.Errorf("no supported language detected")
+	// 1. Exact contract
+	if res, err := ExactContractDetector(appDir, subDir); err == nil {
+		return []DevRuntimeConfig{res.Config}, nil
 	}
 
-	// Read sandbox.toml for overrides
+	// 2. Unsupported detector explicitly fails
+	if _, err := UnsupportedDetector(appDir, subDir); err != nil && err.Error() != "unknown" {
+		return nil, err
+	}
+
+	// 3. Fallbacks
+	detectors := []Detector{
+		StaticHTMLDetector,
+		NodeDetector,
+		PythonDetector,
+		GoDetector,
+	}
+
+	var fallbackErr error
+	for _, d := range detectors {
+		res, err := d(appDir, subDir)
+		if err == nil {
+			configs = append(configs, res.Config)
+		} else if err.Error() == "monorepo detected: please select a workspace package manually" {
+			fallbackErr = err
+			break
+		}
+	}
+
+	if fallbackErr != nil {
+		return nil, fallbackErr
+	}
+
+	if len(configs) == 0 {
+		return nil, fmt.Errorf("no supported language detected")
+	}
+
+	// Read sandbox.toml for overrides (apply to the first candidate)
 	sandboxTomlPath := filepath.Join(appDir, "sandbox.toml")
 	if b, readErr := os.ReadFile(sandboxTomlPath); readErr == nil {
 		var override struct {
@@ -68,213 +162,72 @@ func DetectDevRuntime(repoPath string, subDir string) (DevRuntimeConfig, error) 
 		}
 		if tomlErr := toml.Unmarshal(b, &override); tomlErr == nil {
 			if override.BaseImage != "" {
-				config.BaseImage = override.BaseImage
+				configs[0].BaseImage = override.BaseImage
 			}
 			if override.InstallCmd != "" {
-				config.InstallCmd = override.InstallCmd
+				configs[0].InstallCmd = override.InstallCmd
 			}
 			if override.StartCmd != "" {
-				config.StartCmd = override.StartCmd
+				configs[0].StartCmd = override.StartCmd
 			}
 			if override.WorkDir != "" {
-				config.WorkDir = override.WorkDir
+				configs[0].WorkDir = override.WorkDir
 			}
 			if override.ExposedPort != "" {
-				config.ExposedPort = override.ExposedPort
-			}
-			// If we had no detected config but they provided sandbox.toml, we clear the error if start cmd is provided
-			if override.StartCmd != "" {
-				err = nil
+				configs[0].ExposedPort = override.ExposedPort
 			}
 		}
 	}
 
-	return config, err
+	return configs, nil
 }
 
-func getWorkDir(subDir string) string {
-	if subDir != "" {
-		return "/app/" + subDir
-	}
-	return "/app"
-}
-
-func detectNodeRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
-	packageJsonPath := filepath.Join(appDir, "package.json")
-	content, err := os.ReadFile(packageJsonPath)
-
-	installCmd := "npm install"
-	startCmd := "node --watch index.js" // fallback (native fast watch)
-
-	// Detect package manager
-	if _, err := os.Stat(filepath.Join(appDir, "yarn.lock")); err == nil {
-		installCmd = "yarn install"
-	} else if _, err := os.Stat(filepath.Join(appDir, "pnpm-lock.yaml")); err == nil {
-		installCmd = "pnpm install"
-	} else if _, err := os.Stat(filepath.Join(appDir, "bun.lockb")); err == nil {
-		installCmd = "bun install"
-	}
-
-	hasDevScript := false
-	if err == nil {
-		var pkg map[string]interface{}
-		if err := json.Unmarshal(content, &pkg); err == nil {
-			if scripts, ok := pkg["scripts"].(map[string]interface{}); ok {
-				if dev, ok := scripts["dev"].(string); ok && dev != "" {
-					hasDevScript = true
-				}
-			}
-		}
-	}
-
-	if hasDevScript {
-		startCmd = "npm run dev"
-		if strings.HasPrefix(installCmd, "yarn") {
-			startCmd = "yarn dev"
-		}
-		if strings.HasPrefix(installCmd, "pnpm") {
-			startCmd = "pnpm dev"
-		}
-		if strings.HasPrefix(installCmd, "bun") {
-			startCmd = "bun run dev"
-		}
-	} else {
-		// Fallback chain
-		if _, err := os.Stat(filepath.Join(appDir, "tsconfig.json")); err == nil {
-			if _, err := os.Stat(filepath.Join(appDir, "src", "index.ts")); err == nil {
-				startCmd = "npx tsx --watch src/index.ts"
-			} else if _, err := os.Stat(filepath.Join(appDir, "index.ts")); err == nil {
-				startCmd = "npx tsx --watch index.ts"
-			} else {
-				startCmd = "npx tsx --watch src/main.ts 2>/dev/null || npx tsx --watch main.ts"
-			}
-		} else {
-			if _, err := os.Stat(filepath.Join(appDir, "src", "index.js")); err == nil {
-				startCmd = "npx nodemon src/index.js"
-			} else if _, err := os.Stat(filepath.Join(appDir, "server.js")); err == nil {
-				startCmd = "npx nodemon server.js"
-			} else if _, err := os.Stat(filepath.Join(appDir, "app.js")); err == nil {
-				startCmd = "npx nodemon app.js"
-			} else {
-				startCmd = "npx nodemon index.js"
-			}
-		}
-	}
-
-	baseImage := "node:20-alpine"
-	if strings.HasPrefix(installCmd, "bun") {
-		baseImage = "oven/bun:1-alpine"
-	}
-
-	return DevRuntimeConfig{
-		BaseImage:   baseImage,
-		InstallCmd:  installCmd,
-		StartCmd:    startCmd,
-		WatchHint:   "Node.js detected. Native file events via touch-on-save.",
-		WorkDir:     getWorkDir(subDir),
-		ExposedPort: "3000", // Default to 3000 for Node.js (Next.js, Express, etc)
-	}, nil
-}
-
-func detectPythonRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
-	installCmd := "pip install -r requirements.txt"
-	if _, err := os.Stat(filepath.Join(appDir, "requirements.txt")); err != nil {
-		if _, err := os.Stat(filepath.Join(appDir, "pyproject.toml")); err == nil {
-			installCmd = "pip install ."
-		} else if _, err := os.Stat(filepath.Join(appDir, "Pipfile")); err == nil {
-			installCmd = "pip install pipenv && pipenv install --system"
-		}
-	}
-
-	installCmd += " && pip install uvicorn[standard]" // Ensure uvicorn available
-
-	startCmd := "python main.py"
-
-	// Scan requirements for frameworks
-	reqs, _ := os.ReadFile(filepath.Join(appDir, "requirements.txt"))
-	reqStr := strings.ToLower(string(reqs))
-
-	if strings.Contains(reqStr, "fastapi") {
-		startCmd = "uvicorn main:app --host 0.0.0.0 --reload --reload-dir ."
-		if _, err := os.Stat(filepath.Join(appDir, "app", "main.py")); err == nil {
-			startCmd = "uvicorn app.main:app --host 0.0.0.0 --reload --reload-dir ."
-		}
-	} else if strings.Contains(reqStr, "django") || fileExists(filepath.Join(appDir, "manage.py")) {
-		startCmd = "python manage.py runserver 0.0.0.0:8000"
-	} else if strings.Contains(reqStr, "flask") {
-		if fileExists(filepath.Join(appDir, "app.py")) {
-			startCmd = "FLASK_APP=app.py flask run --host=0.0.0.0 --port=8000 --reload"
-		} else if fileExists(filepath.Join(appDir, "main.py")) {
-			startCmd = "FLASK_APP=main.py flask run --host=0.0.0.0 --port=8000 --reload"
-		} else {
-			// Try to find a single .py file
-			files, _ := filepath.Glob(filepath.Join(appDir, "*.py"))
-			if len(files) == 1 {
-				startCmd = fmt.Sprintf("FLASK_APP=%s flask run --host=0.0.0.0 --port=8000 --reload", filepath.Base(files[0]))
-			} else {
-				startCmd = "flask run --host=0.0.0.0 --port=8000 --reload"
-			}
-		}
-	} else {
-		if fileExists(filepath.Join(appDir, "app.py")) {
-			startCmd = "python app.py"
-		}
-	}
-
-	return DevRuntimeConfig{
-		BaseImage:   "python:3.11-slim",
-		InstallCmd:  installCmd,
-		StartCmd:    startCmd,
-		WatchHint:   "Python detected. Native file events via touch-on-save.",
-		WorkDir:     getWorkDir(subDir),
-		ExposedPort: "8000",
-	}, nil
-}
-
-func detectGoRuntime(appDir, subDir string) (DevRuntimeConfig, error) {
-	return DevRuntimeConfig{
-		BaseImage:   "golang:alpine",
-		InstallCmd:  "go mod download && go install github.com/air-verse/air@v1.52.3",
-		StartCmd:    "if [ ! -f .air.toml ]; then air init && sed -i 's/poll = false/poll = true/g' .air.toml; fi && air || go run .",
-		WatchHint:   "Go detected. Air uses native file events via touch-on-save.",
-		WorkDir:     getWorkDir(subDir),
-		ExposedPort: "8080",
-	}, nil
-}
-
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
-}
-
-func globFiles(dir, pattern string) []string {
-	files, err := filepath.Glob(filepath.Join(dir, pattern))
-	if err != nil {
-		return nil
-	}
-	return files
-}
+// Old detect* functions replaced by plugins
 
 func GenerateSandboxStartScript(config DevRuntimeConfig) string {
-	script := `#!/bin/sh
-set -e
+	workDir := config.WorkDir
+	if workDir == "" {
+		workDir = "/app"
+	}
+	var script strings.Builder
+	script.WriteString("#!/bin/sh\nset -eu\n")
+	script.WriteString("cd " + shellQuote(workDir) + "\n")
+	if strings.TrimSpace(config.InstallCmd) != "" {
+		script.WriteString("echo 'Installing dependencies...'\n")
+		script.WriteString("/bin/sh -c " + shellQuote(config.InstallCmd) + "\n")
+	}
+	if strings.TrimSpace(config.PreDeployCmd) != "" {
+		script.WriteString("echo 'Running pre-deploy command...'\n")
+		script.WriteString("/bin/sh -c " + shellQuote(config.PreDeployCmd) + "\n")
+	}
+	if strings.TrimSpace(config.StartCmd) == "" {
+		script.WriteString("echo 'No application start command configured' >&2\nexit 127\n")
+		return script.String()
+	}
+	script.WriteString("echo 'Starting application...'\n")
+	script.WriteString("exec /bin/sh -c " + shellQuote(config.StartCmd) + "\n")
+	return script.String()
+}
 
-# Change to the application directory
-cd ` + config.WorkDir + `
+func NormalizeRuntimeWorkDir(workDir, envID string) (string, error) {
+	workDir = strings.TrimSpace(workDir)
+	if workDir == "" {
+		return "/app", nil
+	}
+	legacyRoot := "/workspaces/" + envID
+	if workDir == legacyRoot || strings.HasPrefix(workDir, legacyRoot+"/") {
+		workDir = "/app" + strings.TrimPrefix(workDir, legacyRoot)
+	}
+	if !strings.HasPrefix(workDir, "/") {
+		workDir = path.Join("/app", workDir)
+	}
+	clean := path.Clean(workDir)
+	if clean != "/app" && !strings.HasPrefix(clean, "/app/") {
+		return "", fmt.Errorf("runtime working directory %q must be inside /app", workDir)
+	}
+	return clean, nil
+}
 
-echo "========================================="
-echo "🛠️  Setting up Dev Sandbox Runtime"
-echo "========================================="
-echo "Working Directory: ` + config.WorkDir + `"
-
-export HOST=0.0.0.0
-export PORT=` + config.ExposedPort + `
-
-echo "📦 Installing dependencies..."
-` + config.InstallCmd + `
-
-echo "🚀 Starting application..."
-` + config.StartCmd + `
-`
-	return script
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }

@@ -24,19 +24,10 @@ func CreateProject(c *gin.Context) {
 		return
 	}
 
-	var orgMembers []models.OrganizationMember
-	db.DB.Where("user_id = ?", uid).Find(&orgMembers)
-
-	if len(orgMembers) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Must be part of an organization to create projects"})
-		return
-	}
-
 	project := models.Project{
-		Name:                req.Name,
-		Description:         req.Description,
-		CreatedByUserID:     uid,
-		OwnerOrganizationID: orgMembers[0].OrganizationID,
+		Name:            req.Name,
+		Description:     req.Description,
+		CreatedByUserID: uid,
 	}
 
 	if err := db.DB.Create(&project).Error; err != nil {
@@ -45,13 +36,25 @@ func CreateProject(c *gin.Context) {
 	}
 
 	now := time.Now()
-	db.DB.Create(&models.ProjectCollaborator{
+
+	// Add new ProjectMember
+	db.DB.Create(&models.ProjectMember{
 		ProjectID:       project.ID,
 		UserID:          uid,
-		Role:            models.ProjectRoleOwner,
-		InvitedByUserID: uid,
+		Role:            models.ProjectMemberRoleOwner,
+		Status:          models.ProjectMemberStatusAccepted,
+		InvitedByUserID: &uid,
 		AcceptedAt:      &now,
 	})
+
+	// Create Canonical Workspace
+	canonicalWorkspace := models.Workspace{
+		ProjectID:   project.ID,
+		OwnerUserID: uid,
+		Type:        models.WorkspaceTypeCanonical,
+		Status:      models.WorkspaceStatusActive,
+	}
+	db.DB.Create(&canonicalWorkspace)
 
 	c.JSON(http.StatusCreated, gin.H{"project": project})
 }
@@ -59,12 +62,14 @@ func CreateProject(c *gin.Context) {
 func GetUserProjects(c *gin.Context) {
 	userID, _ := c.Get("userId")
 
-	var collabs []models.ProjectCollaborator
-	db.DB.Preload("Project").Where("user_id = ?", userID).Find(&collabs)
+	var members []models.ProjectMember
+	db.DB.Preload("Project").Where("user_id = ? AND status = ?", userID, models.ProjectMemberStatusAccepted).Find(&members)
 
 	var projects []models.Project
-	for _, c := range collabs {
-		projects = append(projects, c.Project)
+	for _, m := range members {
+		if m.Project != nil {
+			projects = append(projects, *m.Project)
+		}
 	}
 
 	c.JSON(http.StatusOK, projects)
@@ -74,7 +79,7 @@ func GetProject(c *gin.Context) {
 	projectID := c.Param("projectId")
 
 	var project models.Project
-	if err := db.DB.Preload("Collaborators").Preload("Collaborators.User").First(&project, "id = ?", projectID).Error; err != nil {
+	if err := db.DB.Preload("Members").Preload("Members.User").First(&project, "id = ?", projectID).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
 		return
 	}
@@ -83,8 +88,8 @@ func GetProject(c *gin.Context) {
 }
 
 type InviteToProjectRequest struct {
-	Identifier string             `json:"identifier" binding:"required"` // Email or Username
-	Role       models.ProjectRole `json:"role" binding:"required"`
+	Identifier string                   `json:"identifier" binding:"required"` // Email or Username
+	Role       models.ProjectMemberRole `json:"role" binding:"required"`
 }
 
 func InviteToProject(c *gin.Context) {
@@ -98,21 +103,15 @@ func InviteToProject(c *gin.Context) {
 		return
 	}
 
-	// Make sure role is valid
-	if req.Role != models.ProjectRoleAdmin && req.Role != models.ProjectRoleCollaborator && req.Role != models.ProjectRoleViewer {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid role specified"})
+	// Make sure role is valid and not OWNER (ownership must be transferred)
+	if req.Role != models.ProjectMemberRoleEditor && req.Role != models.ProjectMemberRoleViewer {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid role specified. Cannot invite as OWNER."})
 		return
 	}
 
-	// Fetch the project to ensure we don't invite to Default Workspace
 	var project models.Project
 	if err := db.DB.First(&project, "id = ?", projectID).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
-		return
-	}
-
-	if project.Name == "Default Workspace" {
-		c.JSON(http.StatusForbidden, gin.H{"error": "You cannot invite collaborators to your Default Workspace. Please create a new project to share with others."})
 		return
 	}
 
@@ -123,34 +122,52 @@ func InviteToProject(c *gin.Context) {
 		return
 	}
 
-	// Check if user is already a collaborator
-	var existingCollab models.ProjectCollaborator
-	if err := db.DB.Where("project_id = ? AND user_id = ?", projectID, userToInvite.ID).First(&existingCollab).Error; err == nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "User is already a collaborator on this project"})
+	// Check if user is already a member
+	var existingMember models.ProjectMember
+	if err := db.DB.Where("project_id = ? AND user_id = ?", projectID, userToInvite.ID).First(&existingMember).Error; err == nil {
+		if existingMember.Status == models.ProjectMemberStatusAccepted {
+			c.JSON(http.StatusConflict, gin.H{"error": "User is already a member of this project"})
+		} else {
+			c.JSON(http.StatusConflict, gin.H{"error": "User already has a pending invite for this project"})
+		}
 		return
 	}
 
-	// Add the collaborator
-	newCollab := models.ProjectCollaborator{
+	// Add the member
+	newMember := models.ProjectMember{
 		ProjectID:       projectID,
 		UserID:          userToInvite.ID,
 		Role:            req.Role,
-		InvitedByUserID: inviterID,
+		Status:          models.ProjectMemberStatusPending,
+		InvitedByUserID: &inviterID,
 	}
 
-	if err := db.DB.Create(&newCollab).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to add collaborator"})
+	if err := db.DB.Create(&newMember).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to add member"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Collaborator added successfully", "collaborator": newCollab})
+	c.JSON(http.StatusOK, gin.H{"message": "Member invited successfully", "member": newMember})
+}
+
+// GetProjectMembers returns all accepted and pending members of a project.
+func GetProjectMembers(c *gin.Context) {
+	projectID := c.Param("projectId")
+
+	var members []models.ProjectMember
+	if err := db.DB.Preload("User").Where("project_id = ?", projectID).Find(&members).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch members"})
+		return
+	}
+
+	c.JSON(http.StatusOK, members)
 }
 
 func GetUserInvites(c *gin.Context) {
 	userID, _ := c.Get("userId")
 
-	var invites []models.ProjectCollaborator
-	if err := db.DB.Preload("Project").Where("user_id = ? AND accepted_at IS NULL", userID).Find(&invites).Error; err != nil {
+	var invites []models.ProjectMember
+	if err := db.DB.Preload("Project").Where("user_id = ? AND status = ?", userID, models.ProjectMemberStatusPending).Find(&invites).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch invites"})
 		return
 	}
@@ -162,15 +179,16 @@ func AcceptProjectInvite(c *gin.Context) {
 	projectID := c.Param("projectId")
 	userID, _ := c.Get("userId")
 
-	var collab models.ProjectCollaborator
-	if err := db.DB.Where("project_id = ? AND user_id = ? AND accepted_at IS NULL", projectID, userID).First(&collab).Error; err != nil {
+	var member models.ProjectMember
+	if err := db.DB.Where("project_id = ? AND user_id = ? AND status = ?", projectID, userID, models.ProjectMemberStatusPending).First(&member).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Invite not found or already accepted"})
 		return
 	}
 
 	now := time.Now()
-	collab.AcceptedAt = &now
-	if err := db.DB.Save(&collab).Error; err != nil {
+	member.AcceptedAt = &now
+	member.Status = models.ProjectMemberStatusAccepted
+	if err := db.DB.Save(&member).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to accept invite"})
 		return
 	}
@@ -182,7 +200,7 @@ func DeclineProjectInvite(c *gin.Context) {
 	projectID := c.Param("projectId")
 	userID, _ := c.Get("userId")
 
-	if err := db.DB.Where("project_id = ? AND user_id = ? AND accepted_at IS NULL", projectID, userID).Delete(&models.ProjectCollaborator{}).Error; err != nil {
+	if err := db.DB.Where("project_id = ? AND user_id = ? AND status = ?", projectID, userID, models.ProjectMemberStatusPending).Delete(&models.ProjectMember{}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decline invite"})
 		return
 	}
@@ -197,32 +215,32 @@ func RemoveCollaborator(c *gin.Context) {
 	currentUserIDVal, _ := c.Get("userId")
 	currentUserID := currentUserIDVal.(string)
 
-	currentRoleVal, _ := c.Get("projectRole")
-	currentRole := currentRoleVal.(models.ProjectRole)
+	currentRoleVal, _ := c.Get("projectMemberRole")
+	currentRole := currentRoleVal.(models.ProjectMemberRole)
 
-	var targetCollab models.ProjectCollaborator
-	if err := db.DB.Where("project_id = ? AND user_id = ?", projectID, targetUserID).First(&targetCollab).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Collaborator not found"})
+	var targetMember models.ProjectMember
+	if err := db.DB.Where("project_id = ? AND user_id = ?", projectID, targetUserID).First(&targetMember).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Member not found"})
 		return
 	}
 
 	// Permission logic
 	if currentUserID != targetUserID {
 		// Removing someone else
-		if currentRole != models.ProjectRoleAdmin && currentRole != models.ProjectRoleOwner {
-			c.JSON(http.StatusForbidden, gin.H{"error": "Insufficient permissions to remove collaborators"})
+		if currentRole != models.ProjectMemberRoleOwner {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Insufficient permissions to remove members. Must be OWNER."})
 			return
 		}
 
-		if targetCollab.Role == models.ProjectRoleOwner {
+		if targetMember.Role == models.ProjectMemberRoleOwner {
 			c.JSON(http.StatusForbidden, gin.H{"error": "Cannot remove an OWNER. They must leave or transfer ownership."})
 			return
 		}
 	} else {
 		// Leaving project
-		if targetCollab.Role == models.ProjectRoleOwner {
+		if targetMember.Role == models.ProjectMemberRoleOwner {
 			var ownerCount int64
-			db.DB.Model(&models.ProjectCollaborator{}).Where("project_id = ? AND role = ?", projectID, models.ProjectRoleOwner).Count(&ownerCount)
+			db.DB.Model(&models.ProjectMember{}).Where("project_id = ? AND role = ? AND status = ?", projectID, models.ProjectMemberRoleOwner, models.ProjectMemberStatusAccepted).Count(&ownerCount)
 			if ownerCount <= 1 {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "You are the only owner. You cannot leave without assigning another owner or deleting the project."})
 				return
@@ -230,10 +248,136 @@ func RemoveCollaborator(c *gin.Context) {
 		}
 	}
 
-	if err := db.DB.Delete(&targetCollab).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to remove collaborator"})
+	if err := db.DB.Delete(&targetMember).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to remove member"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Collaborator removed successfully"})
+	c.JSON(http.StatusOK, gin.H{"message": "Member removed successfully"})
+}
+
+type UpdateMemberRoleRequest struct {
+	Role models.ProjectMemberRole `json:"role" binding:"required"`
+}
+
+func UpdateMemberRole(c *gin.Context) {
+	projectID := c.Param("projectId")
+	targetUserID := c.Param("userId")
+
+	var req UpdateMemberRoleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid payload"})
+		return
+	}
+
+	if req.Role != models.ProjectMemberRoleOwner && req.Role != models.ProjectMemberRoleEditor && req.Role != models.ProjectMemberRoleViewer {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid role specified"})
+		return
+	}
+
+	var targetMember models.ProjectMember
+	if err := db.DB.Where("project_id = ? AND user_id = ?", projectID, targetUserID).First(&targetMember).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Member not found"})
+		return
+	}
+
+	// Permission logic: only OWNER can change roles, which is handled by AuthorizeProjectMemberAccess middleware
+	// But we need to ensure they don't remove the last owner
+	if targetMember.Role == models.ProjectMemberRoleOwner && req.Role != models.ProjectMemberRoleOwner {
+		var ownerCount int64
+		db.DB.Model(&models.ProjectMember{}).Where("project_id = ? AND role = ? AND status = ?", projectID, models.ProjectMemberRoleOwner, models.ProjectMemberStatusAccepted).Count(&ownerCount)
+		if ownerCount <= 1 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Cannot change the role of the only owner."})
+			return
+		}
+	}
+
+	targetMember.Role = req.Role
+	if err := db.DB.Save(&targetMember).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update role"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Role updated successfully", "member": targetMember})
+}
+
+func DeleteProject(c *gin.Context) {
+	projectID := c.Param("projectId")
+
+	// Ensure the project exists
+	var project models.Project
+	if err := db.DB.Where("id = ?", projectID).First(&project).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+		return
+	}
+
+	// Delete project (cascade should handle related entities if setup correctly,
+	// otherwise we just delete the project row and rely on constraints/cleanup)
+	if err := db.DB.Delete(&project).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete project"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Project deleted successfully"})
+}
+
+type TransferOwnershipRequest struct {
+	NewOwnerID string `json:"newOwnerId" binding:"required"`
+}
+
+func TransferProjectOwnership(c *gin.Context) {
+	projectID := c.Param("projectId")
+	currentOwnerIDVal, _ := c.Get("userId")
+	currentOwnerID := currentOwnerIDVal.(string)
+
+	var req TransferOwnershipRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid payload"})
+		return
+	}
+
+	if currentOwnerID == req.NewOwnerID {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "You are already the owner"})
+		return
+	}
+
+	tx := db.DB.Begin()
+
+	// Demote current owner to editor
+	var currentOwner models.ProjectMember
+	if err := tx.Where("project_id = ? AND user_id = ?", projectID, currentOwnerID).First(&currentOwner).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusNotFound, gin.H{"error": "Current owner member record not found"})
+		return
+	}
+	currentOwner.Role = models.ProjectMemberRoleEditor
+	if err := tx.Save(&currentOwner).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to demote current owner"})
+		return
+	}
+
+	// Promote new owner
+	var newOwner models.ProjectMember
+	if err := tx.Where("project_id = ? AND user_id = ?", projectID, req.NewOwnerID).First(&newOwner).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusNotFound, gin.H{"error": "Target user is not a member of this project"})
+		return
+	}
+
+	if newOwner.Status != models.ProjectMemberStatusAccepted {
+		tx.Rollback()
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Target user has not accepted their invite yet"})
+		return
+	}
+
+	newOwner.Role = models.ProjectMemberRoleOwner
+	if err := tx.Save(&newOwner).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to promote new owner"})
+		return
+	}
+
+	tx.Commit()
+	c.JSON(http.StatusOK, gin.H{"message": "Ownership transferred successfully"})
 }

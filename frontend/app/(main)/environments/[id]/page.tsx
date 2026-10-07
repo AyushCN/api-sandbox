@@ -15,11 +15,7 @@ import {
   Loader2,
   Trash2,
   RefreshCw,
-  Folder,
-  FolderOpen,
   File,
-  ChevronRight,
-  ChevronDown,
   Save,
   Code,
   Check,
@@ -27,11 +23,7 @@ import {
   FilePlus,
   FolderPlus,
   ScrollText,
-  X,
   Users,
-  DownloadCloud,
-  Search,
-  Plus,
   Settings as SettingsIcon,
 } from "lucide-react";
 
@@ -41,6 +33,10 @@ import EnvironmentSettings from "@/components/EnvironmentSettings";
 import { useEnvironmentChanges } from "@/hooks/useEnvironmentChanges";
 import ActiveEditors from "@/components/ActiveEditors";
 import { CommitModal, BranchPicker, GitStatusPanel, CommitHistoryPanel } from "@/components/GitUI";
+
+import { FileTreeItem, type FileNode } from "@/components/editor/FileTree";
+import { InviteCollaboratorModal } from "@/components/editor/InviteCollaboratorModal";
+import { TransferSandboxModal } from "@/components/editor/TransferSandboxModal";
 
 const fetcher = async (url: string) => {
   return fetchWithAuth(url);
@@ -53,98 +49,6 @@ const statusColors: Record<string, string> = {
   STOPPED: "text-orange-400 bg-orange-400/10 border-orange-400/20",
   FAILED: "text-red-400 bg-red-400/10 border-red-400/20",
 };
-
-interface FileNode {
-  name: string;
-  path: string;
-  isDir: boolean;
-  children?: FileNode[];
-}
-
-function FileTreeItem({
-  node,
-  onFileSelect,
-  selectedPath,
-  onDelete,
-}: {
-  node: FileNode;
-  onFileSelect: (path: string) => void;
-  selectedPath: string;
-  onDelete: (path: string, e: React.MouseEvent) => void;
-}) {
-  const [isOpen, setIsOpen] = useState(false);
-
-  if (node.isDir) {
-    return (
-      <div className="pl-1">
-        <div className="group flex items-center justify-between hover:bg-white/5 rounded px-2">
-          <button
-            onClick={() => setIsOpen(!isOpen)}
-            className="flex items-center gap-1.5 py-1.5 text-white/70 hover:text-white text-sm flex-1 text-left min-w-0 transition-colors"
-          >
-            {isOpen ? (
-              <ChevronDown className="w-3.5 h-3.5 text-white/40 shrink-0" />
-            ) : (
-              <ChevronRight className="w-3.5 h-3.5 text-white/40 shrink-0" />
-            )}
-            {isOpen ? (
-              <FolderOpen className="w-4 h-4 text-sky-400 shrink-0" />
-            ) : (
-              <Folder className="w-4 h-4 text-sky-400 shrink-0" />
-            )}
-            <span className="truncate">{node.name}</span>
-          </button>
-          <button
-            onClick={(e) => onDelete(node.path, e)}
-            className="opacity-0 group-hover:opacity-100 text-white/40 hover:text-red-400 p-0.5 rounded transition-opacity shrink-0 ml-1"
-            title="Delete Folder"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
-        </div>
-        {isOpen && node.children && (
-          <div className="border-l border-white/5 ml-3.5 pl-1.5">
-            {node.children.map((child) => (
-              <FileTreeItem
-                key={child.path}
-                node={child}
-                onFileSelect={onFileSelect}
-                selectedPath={selectedPath}
-                onDelete={onDelete}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  const isSelected = selectedPath === node.path;
-  return (
-    <div className="group flex items-center justify-between hover:bg-white/5 rounded transition-all">
-      <button
-        onClick={() => onFileSelect(node.path)}
-        className={`flex items-center gap-2 py-1.5 pl-6 flex-1 text-sm text-left min-w-0 transition-all ${
-          isSelected
-            ? "text-primary font-semibold border-l-2 border-primary"
-            : "text-white/60 hover:text-white"
-        }`}
-      >
-        <File
-          className={`w-3.5 h-3.5 shrink-0 ${isSelected ? "text-primary" : "text-white/40"}`}
-        />
-        <span className="truncate">{node.name}</span>
-      </button>
-      <button
-        onClick={(e) => onDelete(node.path, e)}
-        className="opacity-0 group-hover:opacity-100 text-white/40 hover:text-red-400 p-0.5 rounded transition-opacity shrink-0 mr-2 ml-1"
-        title="Delete File"
-      >
-        <Trash2 className="w-3.5 h-3.5" />
-      </button>
-    </div>
-  );
-}
 
 export default function EnvironmentDetail() {
   const params = useParams();
@@ -255,73 +159,22 @@ export default function EnvironmentDetail() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lineNumbersRef = useRef<HTMLDivElement>(null);
 
-  // Docker Logs Modal state
-  const [isDockerLogsOpen, setIsDockerLogsOpen] = useState<boolean>(false);
+  // Docker Logs state
   const [dockerLogs, setDockerLogs] = useState<string>("");
   const [isLoadingDockerLogs, setIsLoadingDockerLogs] =
     useState<boolean>(false);
 
-  // Invite Modal state
+  // Modal states
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
-  const [inviteIdentifier, setInviteIdentifier] = useState("");
-  const [inviteRole, setInviteRole] = useState("COLLABORATOR");
   const [isInviting, setIsInviting] = useState(false);
 
-  // Transfer Modal state
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
-  const [transferProjectId, setTransferProjectId] = useState("");
   const [isTransferring, setIsTransferring] = useState(false);
   const [isForking, setIsForking] = useState(false);
   const { data: projects, isLoading: isProjectsLoading } = useSWR(
     "/api/projects",
     fetcher,
   );
-
-  const [userSearchResults, setUserSearchResults] = useState<
-    { id: string; username: string; email: string }[]
-  >([]);
-  const [isSearchingUsers, setIsSearchingUsers] = useState(false);
-  const [showUserDropdown, setShowUserDropdown] = useState(false);
-
-  useEffect(() => {
-    if (!inviteIdentifier.trim() || inviteIdentifier.trim().length < 2) {
-      setTimeout(() => {
-        setUserSearchResults([]);
-        setShowUserDropdown(false);
-      }, 0);
-      return;
-    }
-
-    const timer = setTimeout(async () => {
-      setIsSearchingUsers(true);
-      try {
-        const token = localStorage.getItem("token");
-        const res = await fetch(
-          `/api/users/search?q=${encodeURIComponent(inviteIdentifier.trim())}`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          },
-        );
-        if (res.ok) {
-          const data = await res.json();
-          if (data.length === 1 && data[0].email === inviteIdentifier.trim()) {
-            setShowUserDropdown(false);
-          } else {
-            setUserSearchResults(data || []);
-            setShowUserDropdown(true);
-          }
-        }
-      } catch (err) {
-        // fail silently for search
-      } finally {
-        setIsSearchingUsers(false);
-      }
-    }, 300); // 300ms debounce
-
-    return () => clearTimeout(timer);
-  }, [inviteIdentifier]);
 
   const fetchDockerLogs = async () => {
     setIsLoadingDockerLogs(true);
@@ -357,21 +210,20 @@ export default function EnvironmentDetail() {
   }, [activeTab]);
 
 
-  const handleTransfer = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!transferProjectId) return;
+  const handleTransfer = async (destProjectId: string) => {
+    if (!destProjectId) return;
     setIsTransferring(true);
     try {
       await fetchWithAuth(`/api/environments/${id}/transfer`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId: transferProjectId }),
+        body: JSON.stringify({ projectId: destProjectId }),
       });
       toast.success("Sandbox transferred successfully!");
       setIsTransferModalOpen(false);
       mutate(`/api/environments/${id}`);
       mutate(`/api/environments?projectId=${env?.projectId}`); // old project
-      mutate(`/api/environments?projectId=${transferProjectId}`); // new project
+      mutate(`/api/environments?projectId=${destProjectId}`); // new project
       mutate(`/api/environments`); // dashboard list
     } catch (e: unknown) {
       toast.error((e as Error).message);
@@ -401,9 +253,8 @@ export default function EnvironmentDetail() {
     }
   };
 
-  const handleInvite = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inviteIdentifier.trim() || !env?.projectId) return;
+  const handleInvite = async (identifier: string, role: string) => {
+    if (!identifier.trim() || !env?.projectId) return;
     setIsInviting(true);
     try {
       const token = localStorage.getItem("token");
@@ -412,10 +263,11 @@ export default function EnvironmentDetail() {
         credentials: "include",
         headers: {
           "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          identifier: inviteIdentifier.trim(),
-          role: inviteRole,
+          identifier: identifier.trim(),
+          role: role,
         }),
       });
 
@@ -426,8 +278,6 @@ export default function EnvironmentDetail() {
 
       toast.success("Collaborator invited successfully!");
       setIsInviteModalOpen(false);
-      setInviteIdentifier("");
-      setInviteRole("COLLABORATOR");
       mutate(`/api/projects/${env.projectId}`);
     } catch (e: unknown) {
       toast.error((e as Error).message);
@@ -443,7 +293,10 @@ export default function EnvironmentDetail() {
   // Auto-switch to logs tab when environment is BUILDING or FAILED
   useEffect(() => {
     if (env?.status === "BUILDING" || env?.status === "FAILED") {
-      setActiveTab("logs");
+      const timer = setTimeout(() => {
+        setActiveTab("logs");
+      }, 0);
+      return () => clearTimeout(timer);
     }
   }, [env?.status]);
 
@@ -843,12 +696,12 @@ export default function EnvironmentDetail() {
                   <div className="flex items-center gap-1.5 text-xs text-on-surface-variant/70 font-mono">
                     <GitBranch className="w-3.5 h-3.5" />
                     <a
-                      href={env.gitUrl}
+                      href={env.gitUrl || "#"}
                       target="_blank"
                       rel="noreferrer"
                       className="hover:text-primary-fixed transition-colors truncate max-w-[200px]"
                     >
-                      {env.gitUrl.replace("https://github.com/", "")}
+                      {env.gitUrl?.replace("https://github.com/", "") || "Local Workspace"}
                     </a>
                     <span className="text-outline-variant">·</span>
                     {!isViewerRole ? (
@@ -1438,200 +1291,23 @@ export default function EnvironmentDetail() {
         </div>
       )}
       {/* Invite Collaborator Modal */}
-      {isInviteModalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ backgroundColor: "rgba(0,0,0,0.75)" }}
-        >
-          <div className="w-full max-w-md bg-surface-container-lowest rounded-2xl border border-outline-variant shadow-2xl overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-outline-variant bg-surface-container/30">
-              <h3 className="font-semibold text-on-surface">
-                Invite Collaborator
-              </h3>
-              <button
-                onClick={() => setIsInviteModalOpen(false)}
-                className="text-on-surface-variant hover:text-on-surface"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <form onSubmit={handleInvite} className="p-5 space-y-4">
-              <div className="relative">
-                <label className="text-sm font-bold tracking-wide text-on-surface-variant uppercase mb-1.5 block">
-                  Search User
-                </label>
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface-variant/50" />
-                  <input
-                    type="text"
-                    value={inviteIdentifier}
-                    onChange={(e) => {
-                      setInviteIdentifier(e.target.value);
-                    }}
-                    onFocus={() => setShowUserDropdown(true)}
-                    placeholder="Email or username"
-                    className="w-full bg-surface-container pl-9 pr-4 py-3 rounded-lg border border-outline-variant text-on-surface focus:border-primary-fixed focus:ring-1 focus:ring-primary-fixed transition-all"
-                  />
-                  {isSearchingUsers && (
-                    <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                      <Loader2 className="w-4 h-4 animate-spin text-primary-fixed" />
-                    </div>
-                  )}
-                </div>
-
-                {/* Dropdown for search results */}
-                {showUserDropdown && userSearchResults.length > 0 && (
-                  <div className="absolute z-10 w-full mt-1 bg-surface-container-lowest border border-outline-variant rounded-lg shadow-xl max-h-48 overflow-y-auto">
-                    {userSearchResults.map(
-                      (user: {
-                        id: string;
-                        username: string;
-                        email: string;
-                      }) => (
-                        <button
-                          key={user.id}
-                          type="button"
-                          onClick={() => {
-                            setInviteIdentifier(user.username || user.email);
-                            setShowUserDropdown(false);
-                          }}
-                          className="w-full text-left px-4 py-2.5 hover:bg-primary-fixed/10 transition-colors flex items-center justify-between group"
-                        >
-                          <div className="flex items-center gap-2">
-                            <div className="w-6 h-6 rounded bg-primary-container text-on-primary-fixed flex items-center justify-center text-xs font-bold shrink-0">
-                              {(user.username ||
-                                user.email ||
-                                "?")[0].toUpperCase()}
-                            </div>
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium text-on-surface truncate group-hover:text-primary-fixed transition-colors">
-                                {user.username || "No Username"}
-                              </p>
-                              <p className="text-xs text-on-surface-variant truncate">
-                                {user.email}
-                              </p>
-                            </div>
-                          </div>
-                          <Plus className="w-4 h-4 text-on-surface-variant group-hover:text-primary-fixed opacity-0 group-hover:opacity-100 transition-all shrink-0 ml-2" />
-                        </button>
-                      ),
-                    )}
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <label className="text-sm font-bold tracking-wide text-on-surface-variant uppercase mb-1.5 block">
-                  Role
-                </label>
-                <select
-                  value={inviteRole}
-                  onChange={(e) => setInviteRole(e.target.value)}
-                  className="w-full bg-surface-container px-4 py-3 rounded-lg border border-outline-variant text-on-surface focus:border-primary-fixed focus:ring-1 focus:ring-primary-fixed transition-all"
-                >
-                  <option value="COLLABORATOR">
-                    Collaborator (Edit & Push)
-                  </option>
-                  <option value="VIEWER">Viewer (Read Only)</option>
-                  <option value="ADMIN">Admin (Manage Team)</option>
-                </select>
-              </div>
-              <div className="pt-2 flex justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={() => setIsInviteModalOpen(false)}
-                  className="px-4 py-2 text-sm font-medium text-on-surface-variant hover:text-on-surface"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isInviting || !inviteIdentifier.trim()}
-                  className="px-5 py-2 bg-primary-container text-on-primary-fixed-variant rounded-lg font-bold hover:shadow-[0_0_15px_rgba(0,240,255,0.2)] disabled:opacity-50 disabled:pointer-events-none flex items-center gap-2"
-                >
-                  {isInviting && <Loader2 className="w-4 h-4 animate-spin" />}
-                  Send Invite
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <InviteCollaboratorModal
+        isOpen={isInviteModalOpen}
+        onClose={() => setIsInviteModalOpen(false)}
+        onInvite={handleInvite}
+        isInviting={isInviting}
+      />
 
       {/* Transfer Sandbox Modal */}
-      {isTransferModalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ backgroundColor: "rgba(0,0,0,0.75)" }}
-        >
-          <div className="w-full max-w-md bg-surface-container-lowest rounded-2xl border border-outline-variant shadow-2xl overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-outline-variant bg-surface-container/30">
-              <h3 className="font-semibold text-on-surface">
-                Transfer Sandbox
-              </h3>
-              <button
-                onClick={() => setIsTransferModalOpen(false)}
-                className="text-on-surface-variant hover:text-on-surface"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <form onSubmit={handleTransfer} className="p-5 space-y-4">
-              <div>
-                <label className="text-sm font-bold tracking-wide text-on-surface-variant uppercase mb-1.5 block">
-                  Select Destination Project
-                </label>
-                {isProjectsLoading ? (
-                  <div className="w-full bg-surface-container px-4 py-3 rounded-lg border border-outline-variant text-on-surface opacity-50 flex items-center">
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Loading
-                    projects...
-                  </div>
-                ) : (
-                  <select
-                    value={transferProjectId}
-                    onChange={(e) => setTransferProjectId(e.target.value)}
-                    className="w-full bg-surface-container px-4 py-3 rounded-lg border border-outline-variant text-on-surface focus:border-primary-fixed focus:ring-1 focus:ring-primary-fixed transition-all"
-                  >
-                    <option value="" disabled>
-                      -- Select a Project --
-                    </option>
-                    {projects
-                      ?.filter((p: { id: string }) => p.id !== env?.projectId)
-                      .map((p: { id: string; name: string }) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name}
-                        </option>
-                      ))}
-                  </select>
-                )}
-                <p className="text-xs text-on-surface-variant mt-2">
-                  Transferring this sandbox will instantly grant access to all
-                  collaborators in the destination project.
-                </p>
-              </div>
-              <div className="pt-2 flex justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={() => setIsTransferModalOpen(false)}
-                  className="px-4 py-2 text-sm font-medium text-on-surface-variant hover:text-on-surface"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isTransferring || !transferProjectId}
-                  className="px-5 py-2 bg-indigo-500/10 text-indigo-400 border border-indigo-500/30 rounded-lg font-bold hover:bg-indigo-500/20 disabled:opacity-50 disabled:pointer-events-none flex items-center gap-2"
-                >
-                  {isTransferring && (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  )}
-                  Confirm Transfer
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <TransferSandboxModal
+        isOpen={isTransferModalOpen}
+        onClose={() => setIsTransferModalOpen(false)}
+        onTransfer={handleTransfer}
+        isTransferring={isTransferring}
+        currentProjectId={env?.projectId}
+        projects={projects}
+        isProjectsLoading={isProjectsLoading}
+      />
     </>
   );
 }

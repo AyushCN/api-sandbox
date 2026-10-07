@@ -5,21 +5,30 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"io"
 	"os"
+	"strings"
 )
 
 func getEncryptionKey() []byte {
-	key := os.Getenv("TOKEN_ENCRYPTION_KEY")
+	key := strings.TrimSpace(os.Getenv("TOKEN_ENCRYPTION_KEY"))
 	if key == "" {
 		panic("TOKEN_ENCRYPTION_KEY environment variable is missing")
 	}
-	// Must be exactly 16, 24, or 32 bytes for AES
-	if len(key) != 16 && len(key) != 24 && len(key) != 32 {
-		panic("TOKEN_ENCRYPTION_KEY must be exactly 16, 24, or 32 bytes")
+
+	// Try hex decoding first (e.g. 32, 48, or 64 hex chars -> 16, 24, 32 bytes)
+	if keyBytes, err := hex.DecodeString(key); err == nil && (len(keyBytes) == 16 || len(keyBytes) == 24 || len(keyBytes) == 32) {
+		return keyBytes
 	}
-	return []byte(key)
+
+	// Fallback to raw string length (16, 24, or 32 bytes)
+	if len(key) == 16 || len(key) == 24 || len(key) == 32 {
+		return []byte(key)
+	}
+
+	panic("TOKEN_ENCRYPTION_KEY must be exactly 16, 24, or 32 bytes (or 32, 48, 64 hex characters)")
 }
 
 // Encrypt encrypts plain text string into base64 encoded string

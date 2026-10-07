@@ -186,17 +186,16 @@ func RateLimitVerifyEmail() gin.HandlerFunc {
 	}
 }
 
-func hasProjectPermission(userRole, requiredRole models.ProjectRole) bool {
-	hierarchy := map[models.ProjectRole]int{
-		models.ProjectRoleOwner:        3,
-		models.ProjectRoleAdmin:        2,
-		models.ProjectRoleCollaborator: 1,
-		models.ProjectRoleViewer:       0,
+func hasProjectMemberPermission(userRole, requiredRole models.ProjectMemberRole) bool {
+	hierarchy := map[models.ProjectMemberRole]int{
+		models.ProjectMemberRoleOwner:  2,
+		models.ProjectMemberRoleEditor: 1,
+		models.ProjectMemberRoleViewer: 0,
 	}
 	return hierarchy[userRole] >= hierarchy[requiredRole]
 }
 
-func AuthorizeProjectAccess(requiredRole models.ProjectRole) gin.HandlerFunc {
+func AuthorizeProjectMemberAccess(requiredRole models.ProjectMemberRole) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		projectID := c.Param("projectId")
 		if projectID == "" {
@@ -211,20 +210,20 @@ func AuthorizeProjectAccess(requiredRole models.ProjectRole) gin.HandlerFunc {
 		}
 		userID := userIDVal.(string)
 
-		var collab models.ProjectCollaborator
+		var member models.ProjectMember
 		err := db.DB.
 			Where("project_id = ? AND user_id = ?", projectID, userID).
-			First(&collab).Error
+			First(&member).Error
 
 		if err != nil {
 			c.JSON(http.StatusForbidden, gin.H{
-				"error": "Not a collaborator on this project or project does not exist",
+				"error": "Not a member of this project or project does not exist",
 			})
 			c.Abort()
 			return
 		}
 
-		if collab.AcceptedAt == nil {
+		if member.Status != models.ProjectMemberStatusAccepted {
 			c.JSON(http.StatusForbidden, gin.H{
 				"error": "Invite pending acceptance",
 			})
@@ -232,7 +231,7 @@ func AuthorizeProjectAccess(requiredRole models.ProjectRole) gin.HandlerFunc {
 			return
 		}
 
-		if !hasProjectPermission(collab.Role, requiredRole) {
+		if !hasProjectMemberPermission(member.Role, requiredRole) {
 			c.JSON(http.StatusForbidden, gin.H{
 				"error": "Insufficient permissions on this project",
 			})
@@ -240,7 +239,7 @@ func AuthorizeProjectAccess(requiredRole models.ProjectRole) gin.HandlerFunc {
 			return
 		}
 
-		c.Set("projectRole", collab.Role)
+		c.Set("projectMemberRole", member.Role)
 		c.Set("projectID", projectID)
 		c.Next()
 	}

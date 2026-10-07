@@ -148,9 +148,7 @@ export default function ProjectsPage() {
                       <div className="relative z-10 flex items-center justify-between text-[10px] font-bold text-on-surface-variant tracking-wider uppercase pt-3 border-t border-outline-variant/50">
                         <div className="flex items-center gap-1">
                           <Users className="w-3 h-3" />
-                          {project.name === "Default Workspace"
-                            ? "Private"
-                            : "Team Workspace"}
+                          Team Workspace
                         </div>
                         <ArrowRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 text-primary-fixed transition-all group-hover:translate-x-0.5 duration-200" />
                       </div>

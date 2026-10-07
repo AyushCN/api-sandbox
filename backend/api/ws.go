@@ -30,11 +30,13 @@ var upgrader = websocket.Upgrader{
 
 // WsClient represents a single websocket connection
 type WsClient struct {
-	ID     string
-	Conn   *websocket.Conn
-	Send   chan interface{}
-	EnvID  string
-	UserID string
+	ID          string
+	Conn        *websocket.Conn
+	Send        chan interface{}
+	ProjectID   string
+	WorkspaceID string
+	EnvID       string
+	UserID      string
 }
 
 // Hub maintains active clients and broadcasts messages
@@ -47,12 +49,14 @@ type Hub struct {
 }
 
 type BroadcastMessage struct {
-	Type      string
-	EnvID     string
-	UserID    string
-	UserName  string
-	Data      interface{}
-	Timestamp time.Time
+	Type        string      `json:"type"`
+	ProjectID   string      `json:"projectId,omitempty"`
+	WorkspaceID string      `json:"workspaceId,omitempty"`
+	EnvID       string      `json:"envId,omitempty"`
+	UserID      string      `json:"userId,omitempty"`
+	UserName    string      `json:"userName,omitempty"`
+	Data        interface{} `json:"data"`
+	Timestamp   time.Time   `json:"timestamp"`
 }
 
 var WSHub = &Hub{
@@ -79,8 +83,17 @@ func (h *Hub) Run() {
 		case message := <-h.broadcast:
 			h.mu.Lock()
 			for client := range h.clients {
-				// Broadcast to all clients connected to this environment
-				if client.EnvID == message.EnvID {
+				// Broadcast if it matches the specific scope
+				shouldSend := false
+				if message.EnvID != "" && client.EnvID == message.EnvID {
+					shouldSend = true
+				} else if message.WorkspaceID != "" && client.WorkspaceID == message.WorkspaceID {
+					shouldSend = true
+				} else if message.ProjectID != "" && client.ProjectID == message.ProjectID {
+					shouldSend = true
+				}
+
+				if shouldSend {
 					select {
 					case client.Send <- message:
 					default:
@@ -94,8 +107,8 @@ func (h *Hub) Run() {
 	}
 }
 
-// ServeWS handles websocket requests from the peer
-func ServeWS(c *gin.Context) {
+// ServeEnvironmentWS handles websocket requests for environments
+func ServeEnvironmentWS(c *gin.Context) {
 	envID := c.Param("id")
 	userID, exists := c.Get("userId")
 	if !exists {
@@ -113,8 +126,8 @@ func ServeWS(c *gin.Context) {
 	if env.UserID == userID {
 		hasAccess = true
 	} else if env.ProjectID != "" {
-		var member models.ProjectCollaborator
-		if err := db.DB.Where("project_id = ? AND user_id = ?", env.ProjectID, userID).First(&member).Error; err == nil {
+		var member models.ProjectMember
+		if err := db.DB.Where("project_id = ? AND user_id = ? AND status = ?", env.ProjectID, userID, models.ProjectMemberStatusAccepted).First(&member).Error; err == nil {
 			hasAccess = true
 		}
 	}
@@ -136,6 +149,85 @@ func ServeWS(c *gin.Context) {
 		Send:   make(chan interface{}, 256),
 		EnvID:  envID,
 		UserID: userID.(string),
+	}
+	WSHub.register <- client
+
+	// Start pump goroutines
+	go client.writePump()
+	go client.readPump()
+}
+
+// ServeProjectWS handles websocket requests for projects
+func ServeProjectWS(c *gin.Context) {
+	projectID := c.Param("projectId")
+	userID, exists := c.Get("userId")
+	if !exists {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	var member models.ProjectMember
+	if err := db.DB.Where("project_id = ? AND user_id = ? AND status = ?", projectID, userID, models.ProjectMemberStatusAccepted).First(&member).Error; err != nil {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		return
+	}
+
+	client := &WsClient{
+		ID:        conn.RemoteAddr().String(),
+		Conn:      conn,
+		Send:      make(chan interface{}, 256),
+		ProjectID: projectID,
+		UserID:    userID.(string),
+	}
+	WSHub.register <- client
+
+	// Start pump goroutines
+	go client.writePump()
+	go client.readPump()
+}
+
+// ServeWorkspaceWS handles websocket requests for workspaces
+func ServeWorkspaceWS(c *gin.Context) {
+	workspaceID := c.Param("workspaceId")
+	projectID := c.Param("projectId")
+	userID, exists := c.Get("userId")
+	if !exists {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	var workspace models.Workspace
+	if err := db.DB.Where("id = ? AND project_id = ?", workspaceID, projectID).First(&workspace).Error; err != nil {
+		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "Workspace not found"})
+		return
+	}
+
+	// Basic check: only owner of workspace or owner of project can access workspace ws
+	var member models.ProjectMember
+	db.DB.Where("project_id = ? AND user_id = ? AND status = ?", projectID, userID, models.ProjectMemberStatusAccepted).First(&member)
+
+	if workspace.OwnerUserID != userID.(string) && member.Role != models.ProjectMemberRoleOwner {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		return
+	}
+
+	client := &WsClient{
+		ID:          conn.RemoteAddr().String(),
+		Conn:        conn,
+		Send:        make(chan interface{}, 256),
+		WorkspaceID: workspaceID,
+		ProjectID:   projectID,
+		UserID:      userID.(string),
 	}
 	WSHub.register <- client
 
@@ -181,7 +273,24 @@ func (c *WsClient) readPump() {
 	}
 }
 
+func BroadcastToEnvironment(envID string, data map[string]interface{}) {
+	broadcastData(data, "", "", envID)
+}
+
+func BroadcastToProject(projectID string, data map[string]interface{}) {
+	broadcastData(data, projectID, "", "")
+}
+
+func BroadcastToWorkspace(workspaceID string, data map[string]interface{}) {
+	broadcastData(data, "", workspaceID, "")
+}
+
 func BroadcastToProjectMembers(envID string, data map[string]interface{}) {
+	// Legacy method for backwards compatibility, broadcast to environment
+	BroadcastToEnvironment(envID, data)
+}
+
+func broadcastData(data map[string]interface{}, projectID, workspaceID, envID string) {
 	msgType, _ := data["type"].(string)
 	userID, _ := data["user_id"].(string)
 	userName, _ := data["user_name"].(string)
@@ -192,12 +301,14 @@ func BroadcastToProjectMembers(envID string, data map[string]interface{}) {
 	}
 
 	WSHub.broadcast <- BroadcastMessage{
-		Type:      msgType,
-		EnvID:     envID,
-		UserID:    userID,
-		UserName:  userName,
-		Data:      data,
-		Timestamp: timestamp,
+		Type:        msgType,
+		ProjectID:   projectID,
+		WorkspaceID: workspaceID,
+		EnvID:       envID,
+		UserID:      userID,
+		UserName:    userName,
+		Data:        data,
+		Timestamp:   timestamp,
 	}
 }
 

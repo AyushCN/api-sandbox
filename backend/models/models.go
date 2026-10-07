@@ -84,6 +84,10 @@ type Environment struct {
 	ContainerID       *string           `gorm:"type:text" json:"containerId"`
 	Port              *int              `gorm:"type:integer" json:"port"`
 	StartCommand      *string           `gorm:"type:text" json:"startCommand"`
+	RootDirectory    *string           `gorm:"type:text" json:"rootDirectory"`
+	DockerfilePath   *string           `gorm:"type:text" json:"dockerfilePath"`
+	PreDeployCommand *string           `gorm:"type:text" json:"preDeployCommand"`
+	RuntimeType       *string           `gorm:"type:text" json:"runtimeType"`
 	HealthCheckType   *string           `gorm:"type:text;default:'http'" json:"healthCheckType"`
 	CreatedAt         time.Time         `gorm:"default:current_timestamp" json:"createdAt"`
 	UpdatedAt         time.Time         `gorm:"default:current_timestamp" json:"updatedAt"`
@@ -96,9 +100,27 @@ type Environment struct {
 	ModifiedByUserID      *string    `gorm:"type:text" json:"modifiedByUserId"`
 	CommitHash            *string    `gorm:"type:text" json:"commitHash"`
 
+	EnvVars    []EnvironmentVariable  `gorm:"constraint:OnDelete:CASCADE;" json:"envVars,omitempty"`
 	Logs       []Log                  `gorm:"constraint:OnDelete:CASCADE;" json:"logs,omitempty"`
 	Metrics    []Metric               `gorm:"constraint:OnDelete:CASCADE;" json:"metrics,omitempty"`
 	Containers []EnvironmentContainer `gorm:"constraint:OnDelete:CASCADE;" json:"containers,omitempty"`
+}
+
+type EnvironmentVariable struct {
+	ID            string       `gorm:"type:text;primaryKey" json:"id"`
+	EnvironmentID string       `gorm:"type:text;not null;index" json:"environmentId"`
+	Environment   *Environment `json:"-"`
+	Key           string       `gorm:"type:text;not null" json:"key"`
+	Value         string       `gorm:"type:text;not null" json:"value"`
+	CreatedAt     time.Time    `gorm:"default:current_timestamp" json:"createdAt"`
+	UpdatedAt     time.Time    `gorm:"default:current_timestamp" json:"updatedAt"`
+}
+
+func (ev *EnvironmentVariable) BeforeCreate(tx *gorm.DB) (err error) {
+	if ev.ID == "" {
+		ev.ID = uuid.NewString()
+	}
+	return
 }
 
 type EnvironmentContainer struct {

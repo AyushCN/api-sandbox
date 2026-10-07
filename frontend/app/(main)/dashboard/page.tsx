@@ -183,7 +183,7 @@ export default function SandboxesDashboard() {
                       <div className="flex items-center gap-1.5 text-xs text-on-surface-variant font-mono">
                         <GitBranch className="w-3.5 h-3.5 shrink-0 text-on-surface-variant/50" />
                         <span className="truncate">
-                          {env.gitUrl.replace("https://github.com/", "")}
+                          {env.gitUrl?.replace("https://github.com/", "") || "Local Workspace"}
                         </span>
                       </div>
                     </div>

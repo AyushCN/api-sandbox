@@ -696,12 +696,12 @@ export default function EnvironmentDetail() {
                   <div className="flex items-center gap-1.5 text-xs text-on-surface-variant/70 font-mono">
                     <GitBranch className="w-3.5 h-3.5" />
                     <a
-                      href={env.gitUrl}
+                      href={env.gitUrl || "#"}
                       target="_blank"
                       rel="noreferrer"
                       className="hover:text-primary-fixed transition-colors truncate max-w-[200px]"
                     >
-                      {env.gitUrl.replace("https://github.com/", "")}
+                      {env.gitUrl?.replace("https://github.com/", "") || "Local Workspace"}
                     </a>
                     <span className="text-outline-variant">·</span>
                     {!isViewerRole ? (

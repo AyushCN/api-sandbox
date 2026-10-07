@@ -53,6 +53,7 @@ func InitDB() {
 		&models.User{},
 		&models.Project{},
 		&models.Environment{},
+		&models.EnvironmentVariable{},
 		&models.EnvironmentMember{},
 		&models.Log{},
 		&models.Metric{},

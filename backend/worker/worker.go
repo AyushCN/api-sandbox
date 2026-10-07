@@ -51,7 +51,7 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 	}
 
 	var env models.Environment
-	if err := db.DB.First(&env, "id = ?", envID).Error; err != nil {
+	if err := db.DB.Preload("EnvVars").First(&env, "id = ?", envID).Error; err != nil {
 		return fmt.Errorf("environment not found: %w", err)
 	}
 	if env.Status != models.StatusBuilding {
@@ -236,7 +236,11 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 	// Resolution runs against the primary repository directory so that
 	// language-specific files (package.json, go.mod, etc.) are found
 	// regardless of whether this is a single or multi-repo workspace.
-	configs, err := provider.ResolveRuntimes(&env, primaryDir, "")
+	subDir := ""
+	if env.RootDirectory != nil {
+		subDir = *env.RootDirectory
+	}
+	configs, err := provider.ResolveRuntimes(&env, primaryDir, subDir)
 	if err != nil {
 		slog.Error("Failed to detect Dev Runtime", "env_id", envID, "error", err)
 		db.DB.Create(&models.Log{
@@ -275,6 +279,7 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 			continue
 		}
 		devConfig.WorkDir = workingDir
+		devConfig.PrimaryDir = primaryDir
 
 		db.DB.Create(&models.Log{
 			EnvironmentID: &env.ID,
@@ -302,6 +307,8 @@ func HandleBuildEnvironmentTask(ctx context.Context, t *asynq.Task) error {
 		containerID, port, provErr := provider.ProvisionDevSandbox(ctx, env.ID, devConfig, userNetworkID, dbURL)
 		if provErr != nil {
 			slog.Error("Dev Sandbox start failed", "env_id", envID, "error", provErr)
+			checkErr = provErr
+			finalCrashLogs = provErr.Error()
 			continue
 		}
 

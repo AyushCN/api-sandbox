@@ -109,10 +109,10 @@ func EditProject(c *gin.Context) {
 
 	// Create environment
 	env := models.Environment{
-		UserID:         uid,
-		ProjectID:      projectID,
-		Name:           fmt.Sprintf("Editor Workspace for %s", uid),
-		Status:         models.StatusBuilding,
+		UserID:    uid,
+		ProjectID: projectID,
+		Name:      fmt.Sprintf("Editor Workspace for %s", uid),
+		Status:    models.StatusBuilding,
 	}
 
 	if err := db.DB.Create(&env).Error; err != nil {
@@ -136,7 +136,7 @@ func EditProject(c *gin.Context) {
 	// Fetch canonical workspace repos to get base commits
 	var canonicalWorkspace models.Workspace
 	db.DB.Where("project_id = ? AND type = ?", projectID, models.WorkspaceTypeCanonical).First(&canonicalWorkspace)
-	
+
 	var canonicalRepos []models.WorkspaceRepository
 	if canonicalWorkspace.ID != "" {
 		db.DB.Where("workspace_id = ?", canonicalWorkspace.ID).Find(&canonicalRepos)
@@ -161,7 +161,7 @@ func EditProject(c *gin.Context) {
 		}
 		db.DB.Create(&wRepo)
 	}
-	
+
 	// Preload the environment so it can be returned
 	editorWorkspace.Environment = &env
 
@@ -207,10 +207,10 @@ func StartWorkspace(c *gin.Context) {
 	db.DB.Where("project_id = ?", projectID).Find(&repos)
 
 	env := models.Environment{
-		UserID:         workspace.OwnerUserID,
-		ProjectID:      projectID,
-		Name:           fmt.Sprintf("Workspace Environment %s", workspace.ID),
-		Status:         models.StatusBuilding,
+		UserID:    workspace.OwnerUserID,
+		ProjectID: projectID,
+		Name:      fmt.Sprintf("Workspace Environment %s", workspace.ID),
+		Status:    models.StatusBuilding,
 	}
 
 	if err := db.DB.Create(&env).Error; err != nil {

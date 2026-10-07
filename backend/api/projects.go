@@ -36,7 +36,7 @@ func CreateProject(c *gin.Context) {
 	}
 
 	now := time.Now()
-	
+
 	// Add new ProjectMember
 	db.DB.Create(&models.ProjectMember{
 		ProjectID:       project.ID,
@@ -303,7 +303,7 @@ func UpdateMemberRole(c *gin.Context) {
 
 func DeleteProject(c *gin.Context) {
 	projectID := c.Param("projectId")
-	
+
 	// Ensure the project exists
 	var project models.Project
 	if err := db.DB.Where("id = ?", projectID).First(&project).Error; err != nil {
@@ -311,7 +311,7 @@ func DeleteProject(c *gin.Context) {
 		return
 	}
 
-	// Delete project (cascade should handle related entities if setup correctly, 
+	// Delete project (cascade should handle related entities if setup correctly,
 	// otherwise we just delete the project row and rely on constraints/cleanup)
 	if err := db.DB.Delete(&project).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete project"})
@@ -364,7 +364,7 @@ func TransferProjectOwnership(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Target user is not a member of this project"})
 		return
 	}
-	
+
 	if newOwner.Status != models.ProjectMemberStatusAccepted {
 		tx.Rollback()
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Target user has not accepted their invite yet"})

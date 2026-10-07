@@ -130,12 +130,7 @@ func GetWorkspaceFiles(c *gin.Context) {
 		return
 	}
 
-	wd, err := os.Getwd()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get working directory"})
-		return
-	}
-	workspaceDir := filepath.Join(wd, "workspaces", id)
+	workspaceDir := provider.GetWorkspacePath(id)
 
 	// Ensure the workspace directory exists (if it was somehow removed or not cloned yet)
 	if _, err := os.Stat(workspaceDir); os.IsNotExist(err) {
@@ -174,12 +169,8 @@ func GetWorkspaceFileContent(c *gin.Context) {
 	}
 	cleanPath := filepath.Clean(filePath)
 
-	wd, err := os.Getwd()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get working directory"})
-		return
-	}
-	fullPath := filepath.Join(wd, "workspaces", id, cleanPath)
+	workspaceDir := provider.GetWorkspacePath(id)
+	fullPath := filepath.Join(workspaceDir, cleanPath)
 
 	content, err := os.ReadFile(fullPath)
 	if err != nil {
@@ -219,12 +210,8 @@ func UpdateWorkspaceFileContent(c *gin.Context) {
 	}
 	cleanPath := filepath.Clean(req.Path)
 
-	wd, err := os.Getwd()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get working directory"})
-		return
-	}
-	fullPath := filepath.Join(wd, "workspaces", id, cleanPath)
+	workspaceDir := provider.GetWorkspacePath(id)
+	fullPath := filepath.Join(workspaceDir, cleanPath)
 
 	// Save code to host workspace synchronously so it is available immediately
 	err = os.WriteFile(fullPath, []byte(req.Content), 0644)
@@ -254,7 +241,7 @@ func UpdateWorkspaceFileContent(c *gin.Context) {
 		}
 	}
 
-	workspaceDir := filepath.Join(wd, "workspaces", id)
+	workspaceDir = provider.GetWorkspacePath(id)
 	userID, _ := c.Get("userId")
 	userIDStr := userID.(string)
 
@@ -390,12 +377,8 @@ func CreateWorkspaceFileOrFolder(c *gin.Context) {
 	}
 	cleanPath := filepath.Clean(req.Path)
 
-	wd, err := os.Getwd()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get working directory"})
-		return
-	}
-	fullPath := filepath.Join(wd, "workspaces", id, cleanPath)
+	workspaceDir := provider.GetWorkspacePath(id)
+	fullPath := filepath.Join(workspaceDir, cleanPath)
 
 	if req.IsDir {
 		err = os.MkdirAll(fullPath, 0755)
@@ -468,13 +451,9 @@ func DeleteWorkspaceFileOrFolder(c *gin.Context) {
 		return
 	}
 
-	wd, err := os.Getwd()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get working directory"})
-		return
-	}
 	cleanPath := filepath.Clean(req.Path)
-	fullPath := filepath.Join(wd, "workspaces", id, cleanPath)
+	workspaceDir := provider.GetWorkspacePath(id)
+	fullPath := filepath.Join(workspaceDir, cleanPath)
 
 	err = os.RemoveAll(fullPath)
 	if err != nil {

@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -38,12 +37,7 @@ func GetGitTree(c *gin.Context) {
 		return
 	}
 
-	wd, err := os.Getwd()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get working directory"})
-		return
-	}
-	workspaceDir := filepath.Join(wd, "workspaces", id)
+	workspaceDir := getEnvironmentPrimaryRepo(id)
 
 	if _, err := os.Stat(workspaceDir); os.IsNotExist(err) {
 		c.JSON(http.StatusOK, gin.H{"nodes": []GitNode{}, "edges": []GitEdge{}})
@@ -182,8 +176,7 @@ func GitStatus(c *gin.Context) {
 		return
 	}
 
-	wd, _ := os.Getwd()
-	workspaceDir := filepath.Join(wd, "workspaces", id)
+	workspaceDir := getEnvironmentPrimaryRepo(id)
 
 	// Get dirty state
 	cmdStatus := exec.Command("git", "status", "--porcelain")
@@ -245,8 +238,7 @@ func GitListBranches(c *gin.Context) {
 		return
 	}
 
-	wd, _ := os.Getwd()
-	workspaceDir := filepath.Join(wd, "workspaces", id)
+	workspaceDir := getEnvironmentPrimaryRepo(id)
 
 	cmd := exec.Command("git", "branch", "-a", "--format=%(refname:short)")
 	cmd.Dir = workspaceDir
@@ -288,8 +280,7 @@ func GitBranch(c *gin.Context) {
 		return
 	}
 
-	wd, _ := os.Getwd()
-	workspaceDir := filepath.Join(wd, "workspaces", id)
+	workspaceDir := getEnvironmentPrimaryRepo(id)
 
 	cmd := exec.Command("git", "checkout", "-b", req.Branch)
 	cmd.Dir = workspaceDir
@@ -327,8 +318,7 @@ func GitCheckout(c *gin.Context) {
 		return
 	}
 
-	wd, _ := os.Getwd()
-	workspaceDir := filepath.Join(wd, "workspaces", id)
+	workspaceDir := getEnvironmentPrimaryRepo(id)
 
 	// Dirty working tree protection
 	if !req.Force {
@@ -378,8 +368,7 @@ func GitPull(c *gin.Context) {
 		return
 	}
 
-	wd, _ := os.Getwd()
-	workspaceDir := filepath.Join(wd, "workspaces", id)
+	workspaceDir := getEnvironmentPrimaryRepo(id)
 
 	cmd := exec.Command("git", "pull")
 	cmd.Dir = workspaceDir
@@ -401,8 +390,7 @@ func GitDiff(c *gin.Context) {
 		return
 	}
 
-	wd, _ := os.Getwd()
-	workspaceDir := filepath.Join(wd, "workspaces", id)
+	workspaceDir := getEnvironmentPrimaryRepo(id)
 
 	// Get overall diff
 	cmd := exec.Command("git", "diff")
@@ -415,15 +403,14 @@ func GitDiff(c *gin.Context) {
 func GitFileDiff(c *gin.Context) {
 	id := c.Param("id")
 	filePath := c.Query("file")
-	
+
 	_, err := checkWorkspaceAccess(c, id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
 
-	wd, _ := os.Getwd()
-	workspaceDir := filepath.Join(wd, "workspaces", id)
+	workspaceDir := getEnvironmentPrimaryRepo(id)
 
 	cmd := exec.Command("git", "diff", "--", filePath)
 	cmd.Dir = workspaceDir
@@ -441,8 +428,7 @@ func GitLog(c *gin.Context) {
 		return
 	}
 
-	wd, _ := os.Getwd()
-	workspaceDir := filepath.Join(wd, "workspaces", id)
+	workspaceDir := getEnvironmentPrimaryRepo(id)
 
 	if _, err := os.Stat(workspaceDir); os.IsNotExist(err) {
 		c.JSON(http.StatusOK, gin.H{"commits": []interface{}{}})
@@ -509,16 +495,10 @@ func GetProjectActivity(c *gin.Context) {
 
 	activityMap := make(map[string]GitActivity) // Deduplicate by hash
 
-	wd, err := os.Getwd()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get working directory"})
-		return
-	}
-
 	envIDs := []string{}
 	for _, env := range envs {
 		envIDs = append(envIDs, env.ID)
-		workspaceDir := filepath.Join(wd, "workspaces", env.ID)
+		workspaceDir := getEnvironmentPrimaryRepo(env.ID)
 		if _, err := os.Stat(workspaceDir); os.IsNotExist(err) {
 			continue
 		}
@@ -656,17 +636,11 @@ func GetProjectTeamStatus(c *gin.Context) {
 		return
 	}
 
-	wd, err := os.Getwd()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get working directory"})
-		return
-	}
-
 	var branches []map[string]interface{}
 	var blockers []map[string]interface{}
 
 	for _, env := range envs {
-		workspaceDir := filepath.Join(wd, "workspaces", env.ID)
+		workspaceDir := getEnvironmentPrimaryRepo(env.ID)
 		if _, err := os.Stat(workspaceDir); os.IsNotExist(err) {
 			continue
 		}
@@ -777,13 +751,7 @@ func CommitChanges(c *gin.Context) {
 		return
 	}
 
-	wd, err := os.Getwd()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get working directory"})
-		return
-	}
-
-	workspaceDir := filepath.Join(wd, "workspaces", envID)
+	workspaceDir := getEnvironmentPrimaryRepo(envID)
 
 	// Configure git user
 	name := user.Username
@@ -888,12 +856,7 @@ func PushChanges(c *gin.Context) {
 		return
 	}
 
-	wd, err := os.Getwd()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get working directory"})
-		return
-	}
-	workspaceDir := filepath.Join(wd, "workspaces", env.ID)
+	workspaceDir := getEnvironmentPrimaryRepo(env.ID)
 
 	// Ensure token is configured locally in git
 	cmdConfig := exec.Command("git", "config", "--local", "url.https://x-access-token:"+githubToken+"@github.com/.insteadOf", "https://github.com/")

@@ -413,7 +413,8 @@ func GetEnvironment(c *gin.Context) {
 			}).
 			Preload("Metrics", func(db *gorm.DB) *gorm.DB {
 				return db.Order("timestamp desc").Limit(100)
-			})
+			}).
+			Preload("EnvVars")
 
 		return query.First(&env, "id = ?", id).Error
 	})
@@ -513,9 +514,14 @@ func UpdateEnvironmentSettings(c *gin.Context) {
 	}
 
 	var req struct {
-		StartCommand    *string `json:"startCommand"`
-		Port            *int    `json:"port"`
-		HealthCheckType *string `json:"healthCheckType"`
+		StartCommand     *string            `json:"startCommand"`
+		RuntimeType      *string            `json:"runtimeType"`
+		Port             *int               `json:"port"`
+		HealthCheckType  *string            `json:"healthCheckType"`
+		EnvVars          *map[string]string `json:"envVars"`
+		RootDirectory    *string            `json:"rootDirectory"`
+		DockerfilePath   *string            `json:"dockerfilePath"`
+		PreDeployCommand *string            `json:"preDeployCommand"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -527,6 +533,22 @@ func UpdateEnvironmentSettings(c *gin.Context) {
 
 	if req.StartCommand != nil {
 		updates["start_command"] = req.StartCommand
+	}
+
+	if req.RuntimeType != nil {
+		updates["runtime_type"] = req.RuntimeType
+	}
+
+	if req.RootDirectory != nil {
+		updates["root_directory"] = req.RootDirectory
+	}
+
+	if req.DockerfilePath != nil {
+		updates["dockerfile_path"] = req.DockerfilePath
+	}
+
+	if req.PreDeployCommand != nil {
+		updates["pre_deploy_command"] = req.PreDeployCommand
 	}
 
 	if req.Port != nil {
@@ -549,6 +571,21 @@ func UpdateEnvironmentSettings(c *gin.Context) {
 		if err := db.DB.Model(&env).Updates(updates).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update settings"})
 			return
+		}
+	}
+
+	if req.EnvVars != nil {
+		db.DB.Where("environment_id = ?", env.ID).Delete(&models.EnvironmentVariable{})
+		var vars []models.EnvironmentVariable
+		for k, v := range *req.EnvVars {
+			vars = append(vars, models.EnvironmentVariable{
+				EnvironmentID: env.ID,
+				Key:           k,
+				Value:         v,
+			})
+		}
+		if len(vars) > 0 {
+			db.DB.Create(&vars)
 		}
 	}
 

@@ -186,7 +186,6 @@ func RateLimitVerifyEmail() gin.HandlerFunc {
 	}
 }
 
-
 func hasProjectMemberPermission(userRole, requiredRole models.ProjectMemberRole) bool {
 	hierarchy := map[models.ProjectMemberRole]int{
 		models.ProjectMemberRoleOwner:  2,

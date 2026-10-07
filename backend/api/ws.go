@@ -210,7 +210,7 @@ func ServeWorkspaceWS(c *gin.Context) {
 	// Basic check: only owner of workspace or owner of project can access workspace ws
 	var member models.ProjectMember
 	db.DB.Where("project_id = ? AND user_id = ? AND status = ?", projectID, userID, models.ProjectMemberStatusAccepted).First(&member)
-	
+
 	if workspace.OwnerUserID != userID.(string) && member.Role != models.ProjectMemberRoleOwner {
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Access denied"})
 		return

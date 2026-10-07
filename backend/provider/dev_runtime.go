@@ -14,18 +14,72 @@ import (
 type DevRuntimeConfig struct {
 	BaseImage       string
 	InstallCmd      string
+	PreDeployCmd    string
 	StartCmd        string
 	WatchHint       string
 	WorkDir         string
 	ExposedPort     string
 	RuntimeType     string
 	StartScriptPath string
+	DockerfilePath  string
+	EnvVars         map[string]string
+	PrimaryDir      string
 }
 
 func ResolveRuntimes(env *models.Environment, repoPath string, subDir string) ([]DevRuntimeConfig, error) {
+	// 1. If manual configuration is provided, bypass detection entirely
+	if env.RuntimeType != nil && *env.RuntimeType != "" && env.StartCommand != nil && *env.StartCommand != "" {
+		baseImage := "node:20-bookworm" // default
+		if *env.RuntimeType == "python" {
+			baseImage = "python:3.10-bookworm"
+		} else if *env.RuntimeType == "go" {
+			baseImage = "golang:1.21-bookworm"
+		} else if *env.RuntimeType == "docker" {
+			baseImage = "docker-build"
+		}
+
+		port := "8080"
+		if env.Port != nil && *env.Port > 0 {
+			port = fmt.Sprintf("%d", *env.Port)
+		}
+		
+		startCmd := ""
+		if env.StartCommand != nil {
+			startCmd = *env.StartCommand
+		}
+
+		envVarsMap := make(map[string]string)
+		for _, v := range env.EnvVars {
+			envVarsMap[v.Key] = v.Value
+		}
+
+		preDeployCmd := ""
+		if env.PreDeployCommand != nil {
+			preDeployCmd = *env.PreDeployCommand
+		}
+
+		dockerfilePath := ""
+		if env.DockerfilePath != nil {
+			dockerfilePath = *env.DockerfilePath
+		}
+
+		return []DevRuntimeConfig{
+			{
+				BaseImage:   baseImage,
+				WorkDir:     "/app/" + subDir,
+				StartCmd:    startCmd,
+				PreDeployCmd: preDeployCmd,
+				ExposedPort: port,
+				RuntimeType: *env.RuntimeType,
+				DockerfilePath: dockerfilePath,
+				EnvVars:     envVarsMap,
+			},
+		}, nil
+	}
+
 	configs, err := DetectDevRuntimes(repoPath, subDir)
 
-	// Apply DB overrides for all candidates
+	// Apply DB overrides for all candidates (if only partial config given)
 	for i := range configs {
 		if env.StartCommand != nil && *env.StartCommand != "" {
 			configs[i].StartCmd = *env.StartCommand
@@ -33,6 +87,22 @@ func ResolveRuntimes(env *models.Environment, repoPath string, subDir string) ([
 		}
 		if env.Port != nil && *env.Port > 0 {
 			configs[i].ExposedPort = fmt.Sprintf("%d", *env.Port)
+		}
+
+		if len(env.EnvVars) > 0 {
+			if configs[i].EnvVars == nil {
+				configs[i].EnvVars = make(map[string]string)
+			}
+			for _, v := range env.EnvVars {
+				configs[i].EnvVars[v.Key] = v.Value
+			}
+		}
+
+		if env.PreDeployCommand != nil && *env.PreDeployCommand != "" {
+			configs[i].PreDeployCmd = *env.PreDeployCommand
+		}
+		if env.DockerfilePath != nil && *env.DockerfilePath != "" {
+			configs[i].DockerfilePath = *env.DockerfilePath
 		}
 	}
 
@@ -125,6 +195,10 @@ func GenerateSandboxStartScript(config DevRuntimeConfig) string {
 	if strings.TrimSpace(config.InstallCmd) != "" {
 		script.WriteString("echo 'Installing dependencies...'\n")
 		script.WriteString("/bin/sh -c " + shellQuote(config.InstallCmd) + "\n")
+	}
+	if strings.TrimSpace(config.PreDeployCmd) != "" {
+		script.WriteString("echo 'Running pre-deploy command...'\n")
+		script.WriteString("/bin/sh -c " + shellQuote(config.PreDeployCmd) + "\n")
 	}
 	if strings.TrimSpace(config.StartCmd) == "" {
 		script.WriteString("echo 'No application start command configured' >&2\nexit 127\n")

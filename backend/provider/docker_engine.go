@@ -689,11 +689,6 @@ func ReapOrphanContainers(ctx context.Context) error {
 					failures = append(failures, dbErr)
 				}
 			}
-			if orphan && isMain {
-				if cleanupErr := CleanupWorkspace(envID); cleanupErr != nil {
-					failures = append(failures, fmt.Errorf("cleanup orphan workspace %s: %w", envID, cleanupErr))
-				}
-			}
 		}
 	}
 

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -176,16 +177,38 @@ func ProvisionDevSandbox(ctx context.Context, envID string, config DevRuntimeCon
 		}
 	}
 
+	if config.BaseImage == "docker-build" {
+		createLog(envID, "Building custom Docker image from repository...", models.LogLevelInfo)
+
+		dockerfile := config.DockerfilePath
+		if dockerfile == "" {
+			dockerfile = "Dockerfile"
+		}
+
+		imageName := "sandbox-custom-" + envID
+
+		cmd := exec.Command("docker", "build", "-t", imageName, "-f", filepath.Join(config.PrimaryDir, dockerfile), config.PrimaryDir)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return "", 0, fmt.Errorf("docker build failed: %v\n%s", err, string(output))
+		}
+
+		config.BaseImage = imageName
+	}
+
 	if containerID == "" {
 		// Cold start
-		pullCtx, cancelPull := context.WithTimeout(ctx, 10*time.Minute)
-		defer cancelPull()
-		if err := dockerClient.PullImage(docker.PullImageOptions{
-			Repository:        config.BaseImage,
-			Context:           pullCtx,
-			InactivityTimeout: time.Minute,
-		}, docker.AuthConfiguration{}); err != nil {
-			return "", 0, fmt.Errorf("pull runtime image %s: %w", config.BaseImage, err)
+
+		if !strings.HasPrefix(config.BaseImage, "sandbox-custom-") {
+			pullCtx, cancelPull := context.WithTimeout(ctx, 10*time.Minute)
+			defer cancelPull()
+			if err := dockerClient.PullImage(docker.PullImageOptions{
+				Repository:        config.BaseImage,
+				Context:           pullCtx,
+				InactivityTimeout: time.Minute,
+			}, docker.AuthConfiguration{}); err != nil {
+				return "", 0, fmt.Errorf("pull runtime image %s: %w", config.BaseImage, err)
+			}
 		}
 
 		wd, _ := os.Getwd()
@@ -301,6 +324,11 @@ func ClearRuntimeRoute(ctx context.Context, envID string) error {
 
 func runtimeEnvironment(config DevRuntimeConfig, dbURL string) []string {
 	envVars := []string{fmt.Sprintf("PORT=%s", config.ExposedPort), "HOST=0.0.0.0"}
+
+	for k, v := range config.EnvVars {
+		envVars = append(envVars, fmt.Sprintf("%s=%s", k, v))
+	}
+
 	if dbURL == "" {
 		return envVars
 	}

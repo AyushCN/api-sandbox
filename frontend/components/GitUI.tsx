@@ -211,7 +211,7 @@ export function BranchPicker({
   };
 
   // Clean branch name from remotes
-  const displayBranch = currentBranch.replace("remotes/origin/", "");
+  const displayBranch = currentBranch?.replace("remotes/origin/", "") || "main";
 
   return (
     <div className="relative" ref={dropdownRef}>

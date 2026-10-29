@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
@@ -158,9 +159,35 @@ func (o *Orchestrator) ContainerIP(ctx context.Context, containerID, networkName
 	return ip, nil
 }
 
-// StartContainer starts an existing (hibernated) container.
+// StartContainer starts an existing (hibernated) container. It is idempotent:
+// if a container with the given name already exists (e.g. from a previous
+// provision that was not cleaned up), it is removed first so that the new
+// start succeeds.
+//
+// This fixes the berth bc06e7d issue where `stop -> start` was impossible
+// because Docker refused with "Conflict. The container name is already in use".
 func (o *Orchestrator) StartContainer(ctx context.Context, containerID string) error {
 	if err := o.docker.ContainerStart(ctx, containerID, container.StartOptions{}); err != nil {
+		if client.IsErrNotFound(err) || strings.Contains(err.Error(), "No such container") {
+			// Container already gone; nothing to start, but this is not an error.
+			return nil
+		}
+		// Check for container name collision: Docker may refuse to start a
+		// container if one with the same name already exists (e.g. stopped but
+		// not removed). In that case, remove the existing container first,
+		// then retry the start.
+		if strings.Contains(err.Error(), "is already in use") || strings.Contains(err.Error(), "already in use") {
+			o.logger.Info("start: container name collision detected, removing existing container first",
+				slog.String("container", containerID))
+			if err := o.RemoveContainer(ctx, containerID); err != nil {
+				return fmt.Errorf("orchestrator: removing container after name collision: %w", err)
+			}
+			// Retry starting the container.
+			if err := o.docker.ContainerStart(ctx, containerID, container.StartOptions{}); err != nil {
+				return fmt.Errorf("orchestrator: starting container %s after removal: %w", containerID, err)
+			}
+			return nil
+		}
 		return fmt.Errorf("orchestrator: starting container %s: %w", containerID, err)
 	}
 	return nil
@@ -178,6 +205,9 @@ func (o *Orchestrator) StopContainer(ctx context.Context, containerID string) er
 // RemoveContainer force-removes a container and its volumes (destroy path).
 func (o *Orchestrator) RemoveContainer(ctx context.Context, containerID string) error {
 	if err := o.docker.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true, RemoveVolumes: false}); err != nil {
+		if client.IsErrNotFound(err) || strings.Contains(err.Error(), "No such container") {
+			return nil
+		}
 		return fmt.Errorf("orchestrator: removing container %s: %w", containerID, err)
 	}
 	return nil
@@ -186,6 +216,9 @@ func (o *Orchestrator) RemoveContainer(ctx context.Context, containerID string) 
 // RemoveVolume deletes a named Docker volume (destroy path — irreversible).
 func (o *Orchestrator) RemoveVolume(ctx context.Context, name string) error {
 	if err := o.docker.VolumeRemove(ctx, name, true); err != nil {
+		if client.IsErrNotFound(err) || strings.Contains(err.Error(), "No such volume") {
+			return nil
+		}
 		return fmt.Errorf("orchestrator: removing volume %s: %w", name, err)
 	}
 	return nil
@@ -194,6 +227,9 @@ func (o *Orchestrator) RemoveVolume(ctx context.Context, name string) error {
 // RemoveNetwork deletes a private sandbox network (destroy path).
 func (o *Orchestrator) RemoveNetwork(ctx context.Context, sandboxID string) error {
 	if err := o.docker.NetworkRemove(ctx, netName(sandboxID)); err != nil {
+		if client.IsErrNotFound(err) || strings.Contains(err.Error(), "No such network") {
+			return nil
+		}
 		return fmt.Errorf("orchestrator: removing network %s: %w", netName(sandboxID), err)
 	}
 	return nil

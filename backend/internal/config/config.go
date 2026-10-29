@@ -98,6 +98,16 @@ func Load() (*Config, error) {
 	if len(cfg.EncryptionKey) == 0 {
 		return nil, fmt.Errorf("config: SECRETS_ENCRYPTION_KEY must be a base64-encoded 32-byte key")
 	}
+
+	// Fail-closed production configuration: if GITHUB_CLIENT_ID is empty and
+	// the environment is production, refuse to start. An empty client ID in
+	// production would cause DevAuth to auto-authenticate as the seeded devuser,
+	// making the entire system openly accessible.
+	if cfg.DevAuth && os.Getenv("ENV") == "production" {
+		return nil, fmt.Errorf("config: cannot start in production mode without GITHUB_CLIENT_ID set " +
+			"(DevAuth would auto-authenticate as devuser; set GITHUB_CLIENT_ID or ENV=development)")
+	}
+
 	return cfg, nil
 }
 

@@ -160,6 +160,16 @@ func (d *Deployer) DeploySandbox(ctx context.Context, sandbox *db.Sandbox, opts 
 		result.Port = discovered
 	}
 
+	// Wait for the application to be healthy (listening on the discovered port)
+	// before marking the sandbox RUNNING. This ensures we don't report a sandbox
+	// as running when the app inside the container is not yet accepting requests,
+	// which would be misleading and could cause client errors.
+	healthyCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+	if err := d.orch.WaitHealthy(healthyCtx, result.ContainerID, result.IPAddress, result.Port, 90*time.Second); err != nil {
+		return markFailed(fmt.Errorf("deploy: app did not become healthy within timeout: %w", err))
+	}
+
 now := time.Now()
 	if err := d.store.UpdateSandbox(sandbox.ID, map[string]any{
 		"status":            string(db.StatusRunning),

@@ -34,9 +34,7 @@ export async function POST(req: NextRequest) {
           if (meData?.username) {
             const unameLower = meData.username.toLowerCase();
             const fallbackEmail =
-              unameLower === "ayushcn" || unameLower === "ayush"
-                ? "ayushcn@gmail.com"
-                : unameLower === "admin"
+              unameLower === "admin"
                 ? "admin@api-sandbox.local"
                 : `${unameLower}@users.api-sandbox.local`;
             creator = {

@@ -649,10 +649,13 @@ export default function EnvironmentDetail() {
   );
 
   const fallbackProject = useMemo(() => {
-    const isAyush = !currentUser?.username || currentUser.username.toLowerCase() === "ayushcn" || currentUser.username.toLowerCase() === "ayush";
-    const defaultEmail = isAyush ? "ayushcn@gmail.com" : `${currentUser?.username?.toLowerCase()}@users.api-sandbox.local`;
-    const defaultUsername = isAyush ? "AyushCN" : currentUser?.username || "AyushCN";
-    const defaultUserId = currentUser?.id || (isAyush ? "user-ayushcn" : `user-${defaultUsername.toLowerCase()}`);
+    const defaultUsername = currentUser?.username || "Owner";
+    const defaultEmail =
+      currentUser?.email ||
+      (currentUser?.username
+        ? `${currentUser.username.toLowerCase()}@users.api-sandbox.local`
+        : "owner@api-sandbox.local");
+    const defaultUserId = currentUser?.id || `user-${defaultUsername.toLowerCase()}`;
     return {
       id: env?.projectId || "default-project",
       name: "Default Workspace",
@@ -666,8 +669,8 @@ export default function EnvironmentDetail() {
           acceptedAt: new Date().toISOString(),
           createdAt: new Date().toISOString(),
           user: {
-            email: currentUser?.email || defaultEmail,
-            username: currentUser?.username || defaultUsername,
+            email: defaultEmail,
+            username: defaultUsername,
           },
         },
       ],
@@ -1704,7 +1707,7 @@ export default function EnvironmentDetail() {
                         </span>
                       </div>
                       <p className="text-xs text-on-surface-variant mt-0.5 leading-relaxed">
-                        This environment is part of your private Default Project and is owned exclusively by you (<strong>{currentUser?.username || "AyushCN"}</strong>). It cannot be shared with collaborators. To share containers and work with teammates, create a Shareable Project from the Projects section.
+                        This environment is part of your private Default Project and is owned exclusively by you (<strong>{currentUser?.username || "You"}</strong>). It cannot be shared with collaborators. To share containers and work with teammates, create a Shareable Project from the Projects section.
                       </p>
                     </div>
                   </div>
@@ -1954,13 +1957,7 @@ export default function EnvironmentDetail() {
                               </div>
 
                               {(() => {
-                                const unameLower = (collab.user?.username || "").toLowerCase();
-                                const isAyush = unameLower === "ayushcn" || unameLower === "ayush";
-                                const displayCollabEmail = isAyush
-                                  ? (collab.user?.email && !collab.user.email.includes("@api-sandbox.local")
-                                      ? collab.user.email
-                                      : "ayushcn@gmail.com")
-                                  : (collab.user?.email || "No email available");
+                                const displayCollabEmail = collab.user?.email || "No email available";
                                 return (
                                   <div className="flex items-center gap-2 text-xs text-on-surface-variant/80 mt-0.5">
                                     <span className="truncate">{displayCollabEmail}</span>

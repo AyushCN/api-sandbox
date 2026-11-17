@@ -44,17 +44,17 @@ const DEFAULT_PROJECT: StoredProject = {
   description: "Personal private development environment",
   createdAt: "2026-01-01T00:00:00Z",
   isDefault: true,
-  createdBy: "ayushcn@gmail.com",
+  createdBy: "owner@api-sandbox.local",
   collaborators: [
     {
       id: "collab-owner",
-      userId: "user-ayushcn",
+      userId: "user-owner",
       role: "OWNER",
       status: "ACTIVE",
       acceptedAt: "2026-01-01T00:00:00Z",
       user: {
-        username: "AyushCN",
-        email: "ayushcn@gmail.com",
+        username: "Owner",
+        email: "owner@api-sandbox.local",
       },
     },
   ],
@@ -75,47 +75,15 @@ export function getProjects(): StoredProject[] {
       return [DEFAULT_PROJECT];
     }
     // Ensure default-project exists in the list and isDefault is true
-    let mutated = false;
     let foundDefault = false;
     for (const p of list) {
       if (p.id === "default-project") {
         p.isDefault = true;
         foundDefault = true;
-        // Default Project (Personal Space) must be owned by the user, not Admin
-        if (Array.isArray(p.collaborators) && p.collaborators.length > 0) {
-          const ownerCollab = p.collaborators[0];
-          if (ownerCollab.user?.username === "Admin" || ownerCollab.userId === "user-admin") {
-            ownerCollab.userId = "user-ayushcn";
-            ownerCollab.user = {
-              username: "AyushCN",
-              email: "ayushcn@gmail.com",
-            };
-            p.createdBy = "ayushcn@gmail.com";
-            mutated = true;
-          }
-        }
       }
     }
     if (!foundDefault) {
       list.unshift(DEFAULT_PROJECT);
-    }
-
-    // Auto-migrate legacy user emails if needed
-    for (const p of list) {
-      if (Array.isArray(p.collaborators)) {
-        for (const c of p.collaborators) {
-          const uname = (c.user?.username || "").toLowerCase();
-          if (uname === "ayushcn" || uname === "ayush") {
-            if (c.user.email !== "ayushcn@gmail.com") {
-              c.user.email = "ayushcn@gmail.com";
-              mutated = true;
-            }
-          }
-        }
-      }
-    }
-    if (mutated) {
-      saveProjects(list);
     }
 
     return list;
@@ -151,15 +119,13 @@ export function addProject(
   const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   const id = `proj-${slug || Date.now()}`;
 
-  const username = creator?.username || "Admin";
+  const username = creator?.username || "Owner";
   const unameLower = username.toLowerCase();
-  const defaultEmail = (unameLower === "ayushcn" || unameLower === "ayush")
-    ? "ayushcn@gmail.com"
-    : unameLower === "admin"
+  const defaultEmail = creator?.email || (unameLower === "admin"
     ? "admin@api-sandbox.local"
-    : `${unameLower}@users.api-sandbox.local`;
+    : `${unameLower}@users.api-sandbox.local`);
   const email = creator?.email || defaultEmail;
-  const userId = creator?.userId || `user-${username.toLowerCase()}`;
+  const userId = creator?.userId || `user-${unameLower}`;
 
   const ownerCollab = {
     id: `collab-owner-${Date.now()}`,
@@ -356,13 +322,11 @@ export function acceptProjectInvitation(
   if (!proj.collaborators) proj.collaborators = [];
   const username = user?.username || invite.inviteeIdentifier.split("@")[0] || "Collaborator";
   const unameLower = username.toLowerCase();
-  const defaultInviteEmail = (unameLower === "ayushcn" || unameLower === "ayush")
-    ? "ayushcn@gmail.com"
-    : unameLower === "admin"
+  const defaultInviteEmail = unameLower === "admin"
     ? "admin@api-sandbox.local"
     : `${unameLower}@users.api-sandbox.local`;
   const email = user?.email || (invite.inviteeIdentifier.includes("@") ? invite.inviteeIdentifier : defaultInviteEmail);
-  const userId = user?.userId || `user-${username.toLowerCase()}`;
+  const userId = user?.userId || `user-${unameLower}`;
 
   const existingCollab = proj.collaborators.find((c) => c.userId === userId || c.user?.email === email);
   if (existingCollab) {

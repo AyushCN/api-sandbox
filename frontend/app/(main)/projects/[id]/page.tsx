@@ -724,7 +724,7 @@ function MembersTab({
             </div>
             <p className="text-xs text-on-surface-variant mt-1 leading-relaxed">
               This environment is part of your private Default Project and is owned exclusively by you (
-              <strong>{currentUser?.username || "AyushCN"}</strong>). It cannot be shared with collaborators. To share containers and invite teammates with role-based access, create a Shareable Project from the Projects section.
+              <strong>{currentUser?.username || "You"}</strong>). It cannot be shared with collaborators. To share containers and invite teammates with role-based access, create a Shareable Project from the Projects section.
             </p>
           </div>
         </div>

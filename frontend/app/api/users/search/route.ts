@@ -12,13 +12,6 @@ interface RegisteredUser {
 // Canonical registered user pool across the platform
 const REGISTERED_USERS: RegisteredUser[] = [
   {
-    id: "user-ayushcn",
-    username: "AyushCN",
-    email: "ayushcn@gmail.com",
-    displayName: "Ayush Chaurasia",
-    avatarUrl: "",
-  },
-  {
     id: "00000000-0000-0000-0000-000000000001",
     username: "Admin",
     email: "admin@api-sandbox.local",
@@ -103,13 +96,6 @@ export async function GET(req: NextRequest) {
     }
   } catch {
     // Fallback if backend offline
-  }
-
-  // Also read dev auth cookie/storage cues
-  if (!currentUsername) {
-    currentUsername = "ayushcn";
-    currentEmail = "ayushcn@gmail.com";
-    currentUserId = "user-ayushcn";
   }
 
   // 2. Fetch remote DB users from backend if available
@@ -229,3 +215,4 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({ users: results });
 }
+

@@ -487,10 +487,7 @@ export default function ProfilePage() {
     );
   }
 
-  const isAyush = (user.username?.toLowerCase() === "ayushcn" || user.username?.toLowerCase() === "ayush");
-  const displayEmail = isAyush
-    ? (user.email && !user.email.includes("@api-sandbox.local") ? user.email : "ayushcn@gmail.com")
-    : (user.email || `${user.username?.toLowerCase() || "user"}@users.api-sandbox.local`);
+  const displayEmail = user.email || `${user.username?.toLowerCase() || "user"}@users.api-sandbox.local`;
 
   const initials = (user.username || displayEmail || "Admin").slice(0, 2).toUpperCase();
   const rawEnvs = Array.isArray(environments)

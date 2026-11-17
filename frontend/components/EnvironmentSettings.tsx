@@ -1,6 +1,23 @@
 import { useState, useEffect } from "react"
+import useSWR from "swr"
 import toast from "react-hot-toast"
-import { Loader2, Settings, Save, Trash2, Plus, Moon, Clock, ShieldAlert, CheckCircle2, AlertTriangle, ShieldCheck } from "lucide-react"
+import {
+  Loader2,
+  Settings,
+  Save,
+  Trash2,
+  Plus,
+  Moon,
+  Clock,
+  ShieldAlert,
+  CheckCircle2,
+  AlertTriangle,
+  ShieldCheck,
+  HardDrive,
+  Calendar,
+  Hourglass,
+} from "lucide-react"
+import { fetchWithAuth } from "@/lib/auth"
 
 export default function EnvironmentSettings({ env, mutate, isViewerRole }: { env: Record<string, unknown>, mutate: () => void, isViewerRole: boolean }) {
   const [startCommand, setStartCommand] = useState((env.startCommand as string) || "")
@@ -16,14 +33,21 @@ export default function EnvironmentSettings({ env, mutate, isViewerRole }: { env
   })
   const [isSaving, setIsSaving] = useState(false)
 
-  // Lifecycle & Timer state
-  const status = ((env.status as string) || "IDLE").toUpperCase()
-  const idleTimeoutSec = Number(env.idle_timeout_seconds || env.idleTimeoutSeconds || 900)
-  const expiresAtStr = (env.expires_at || env.expiresAt) as string | undefined
-  const lastActiveStr = (env.last_request_at || env.lastRequestAt || env.last_activity_at || env.updatedAt || env.createdAt) as string | undefined
+  // Real-time lifecycle polling for authoritative UTC timestamps
+  const { data: lifecycle, mutate: mutateLifecycle } = useSWR<any>(
+    env?.id ? `/api/environments/${env.id}/lifecycle/status` : null,
+    fetchWithAuth,
+    { refreshInterval: 1000 }
+  )
+
+  const status = (lifecycle?.status || (env.status as string) || "IDLE").toUpperCase()
+  const idleTimeoutSec = Number(lifecycle?.idle_timeout_seconds || env.idle_timeout_seconds || env.idleTimeoutSeconds || 900)
+  const hibernatedExpirySec = Number(lifecycle?.hibernated_expiration_seconds || (env as any).hibernated_expiration_seconds || 7200)
+  const workspaceRetentionSec = Number(lifecycle?.workspace_retention_seconds || (env as any).workspace_retention_seconds || 604800)
 
   const [idleTimeout, setIdleTimeout] = useState(idleTimeoutSec.toString())
-  const [maxLifetime, setMaxLifetime] = useState(String(env.lifetime_seconds || env.lifetimeSeconds || 3600))
+  const [hibernatedExpiration, setHibernatedExpiration] = useState(hibernatedExpirySec.toString())
+  const [workspaceRetention, setWorkspaceRetention] = useState(workspaceRetentionSec.toString())
   const [now, setNow] = useState(Date.now())
 
   useEffect(() => {
@@ -31,43 +55,67 @@ export default function EnvironmentSettings({ env, mutate, isViewerRole }: { env
     return () => clearInterval(timer)
   }, [])
 
-  // Compute hibernation countdown
+  // Compute live hibernation countdown
   let hibernationText = "Active"
   if (status === "HIBERNATED") {
-    hibernationText = "Hibernated (Inactive)"
+    hibernationText = "Paused (Hibernated)"
+  } else if (status === "WAKING") {
+    hibernationText = "Waking Up..."
   } else if (status === "EXPIRED" || status === "DELETED") {
-    hibernationText = "Inactive (Torn Down)"
+    hibernationText = "Not applicable"
   } else if (status === "RUNNING") {
-    const lastActive = lastActiveStr ? new Date(lastActiveStr).getTime() : now
-    const targetHibernate = lastActive + idleTimeoutSec * 1000
-    const rem = Math.max(0, Math.floor((targetHibernate - now) / 1000))
-    const mins = Math.floor(rem / 60)
-    const secs = rem % 60
+    const rem = lifecycle?.idle_ttl_remaining_sec !== undefined ? lifecycle.idle_ttl_remaining_sec : idleTimeoutSec
+    const mins = Math.floor(Math.max(0, rem) / 60)
+    const secs = Math.max(0, rem) % 60
     hibernationText = `${mins}m ${secs.toString().padStart(2, "0")}s`
   } else {
     hibernationText = status
   }
 
-  // Compute expiration countdown
-  let expirationText = "No Expiration"
-  if (status === "EXPIRED" || status === "DELETED") {
-    expirationText = "Expired (Torn Down)"
-  } else if (expiresAtStr) {
-    const targetExpire = new Date(expiresAtStr).getTime()
-    const rem = Math.max(0, Math.floor((targetExpire - now) / 1000))
-    if (rem <= 0) {
-      expirationText = "Expired"
-    } else {
-      const days = Math.floor(rem / 86400)
-      const hours = Math.floor((rem % 86400) / 3600)
-      const mins = Math.floor((rem % 3600) / 60)
-      const secs = rem % 60
-      if (days > 0) {
-        expirationText = `${days}d ${hours}h ${mins}m`
+  // Compute live hibernated expiration countdown
+  let expirationCountdown = "Not applicable"
+  let absoluteExpiration = "Not applicable"
+  if (status === "HIBERNATED") {
+    const expiresAtStr = lifecycle?.expires_at || (env as any).expires_at
+    if (expiresAtStr && new Date(expiresAtStr).getTime() > 0) {
+      const targetExpire = new Date(expiresAtStr).getTime()
+      const rem = Math.max(0, Math.floor((targetExpire - now) / 1000))
+      if (rem <= 0) {
+        expirationCountdown = "Expired"
       } else {
-        expirationText = `${hours.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
+        const hours = Math.floor(rem / 3600)
+        const mins = Math.floor((rem % 3600) / 60)
+        const secs = rem % 60
+        expirationCountdown = `${hours}h ${mins.toString().padStart(2, "0")}m ${secs.toString().padStart(2, "0")}s`
       }
+      absoluteExpiration = new Date(expiresAtStr).toUTCString()
+    } else {
+      expirationCountdown = "Calculating..."
     }
+  } else if (status === "EXPIRED" || status === "DELETED") {
+    expirationCountdown = "Expired (Container Torn Down)"
+    absoluteExpiration = "Expired"
+  } else {
+    // RUNNING or WAKING
+    expirationCountdown = "Not applicable"
+    absoluteExpiration = "Not applicable (Inactive while Running)"
+  }
+
+  // Compute data retention deadline
+  let retentionText = "7 days post-expiration"
+  let retentionDeadline = "Scheduled after expiration"
+  const retentionExpiresAtStr = lifecycle?.retention_expires_at
+  if (status === "EXPIRED" && retentionExpiresAtStr) {
+    const targetRetention = new Date(retentionExpiresAtStr).getTime()
+    const rem = Math.max(0, Math.floor((targetRetention - now) / 1000))
+    const days = Math.floor(rem / 86400)
+    const hours = Math.floor((rem % 86400) / 3600)
+    retentionText = `${days}d ${hours}h remaining`
+    retentionDeadline = new Date(retentionExpiresAtStr).toUTCString()
+  } else {
+    const days = Math.round(parseInt(workspaceRetention) / 86400)
+    retentionText = `${days} days post-expiration`
+    retentionDeadline = `Retained on disk for ${days} days after container expiration`
   }
 
   const handleSave = async () => {
@@ -88,7 +136,8 @@ export default function EnvironmentSettings({ env, mutate, isViewerRole }: { env
           port: port ? parseInt(port) : null,
           healthCheckType,
           idleTimeoutSeconds: parseInt(idleTimeout),
-          lifetimeSeconds: parseInt(maxLifetime),
+          hibernatedExpirationSeconds: parseInt(hibernatedExpiration),
+          workspaceRetentionSeconds: parseInt(workspaceRetention),
           envVars: envVars.reduce((acc, curr) => {
             if (curr.key.trim()) acc[curr.key.trim()] = curr.value
             return acc
@@ -99,6 +148,7 @@ export default function EnvironmentSettings({ env, mutate, isViewerRole }: { env
       if (res.ok) {
         toast.success(data.message || "Settings updated!")
         mutate()
+        mutateLifecycle()
       } else {
         throw new Error(data.error || "Failed to update settings")
       }
@@ -136,51 +186,91 @@ export default function EnvironmentSettings({ env, mutate, isViewerRole }: { env
             </span>
           </div>
 
-          {/* Live Dual Countdowns */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* Hibernation Timer */}
-            <div className="p-4 rounded-xl bg-surface-container/50 border border-outline-variant/50 space-y-1.5">
-              <div className="flex items-center justify-between text-xs text-on-surface-variant">
-                <span className="flex items-center gap-1.5 font-semibold text-amber-500">
-                  <Moon className="w-4 h-4" />
-                  Time Until Hibernation
-                </span>
-                <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-amber-500/10 text-amber-500 border border-amber-500/20">
-                  {status === "HIBERNATED" ? "Hibernated" : "Inactivity Timer"}
-                </span>
+          {/* Authoritative Resettable Lifecycle Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Card 1: Hibernation */}
+            <div className="p-4 rounded-xl bg-surface-container/50 border border-outline-variant/50 flex flex-col justify-between space-y-3">
+              <div>
+                <div className="flex items-center justify-between text-xs text-on-surface-variant mb-1">
+                  <span className="flex items-center gap-1.5 font-semibold text-amber-500">
+                    <Moon className="w-4 h-4" />
+                    Hibernation
+                  </span>
+                  <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-amber-500/10 text-amber-500 border border-amber-500/20">
+                    {status === "HIBERNATED" ? "Hibernated" : "Inactivity Timer"}
+                  </span>
+                </div>
+                <div className="text-2xl font-mono font-bold text-on-surface tracking-tight my-1">
+                  {hibernationText}
+                </div>
+                <p className="text-[11px] text-on-surface-variant/70 leading-relaxed">
+                  {status === "HIBERNATED" 
+                    ? "Container is paused on disk. Requests to the preview URL or code workspace automatically wake it."
+                    : `Hibernates if no HTTP traffic arrives for ${Math.floor(parseInt(idleTimeout) / 60)} minutes.`}
+                </p>
               </div>
-              <div className="text-2xl font-mono font-bold text-on-surface tracking-tight">
-                {hibernationText}
+              <div className="pt-2 border-t border-outline-variant/30 text-[10px] text-on-surface-variant/60">
+                Configured: {Math.floor(parseInt(idleTimeout) / 60)}m idle threshold
               </div>
-              <p className="text-[11px] text-on-surface-variant/70">
-                {status === "HIBERNATED" 
-                  ? "Container is paused on disk. Requests to the preview URL automatically wake it."
-                  : `Hibernates if no HTTP traffic arrives for ${Math.floor(parseInt(idleTimeout) / 60)} minutes.`}
-              </p>
             </div>
 
-            {/* Expiration Timer */}
-            <div className="p-4 rounded-xl bg-surface-container/50 border border-outline-variant/50 space-y-1.5">
-              <div className="flex items-center justify-between text-xs text-on-surface-variant">
-                <span className="flex items-center gap-1.5 font-semibold text-red-400">
-                  <Clock className="w-4 h-4" />
-                  Time Until Expiration
-                </span>
-                <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-red-400/10 text-red-400 border border-red-400/20">
-                  Hard Cap (TTL)
-                </span>
+            {/* Card 2: Hibernated Expiration */}
+            <div className="p-4 rounded-xl bg-surface-container/50 border border-outline-variant/50 flex flex-col justify-between space-y-3">
+              <div>
+                <div className="flex items-center justify-between text-xs text-on-surface-variant mb-1">
+                  <span className="flex items-center gap-1.5 font-semibold text-red-400">
+                    <Hourglass className="w-4 h-4" />
+                    Hibernated Expiration
+                  </span>
+                  <span className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded border ${
+                    status === "HIBERNATED"
+                      ? "bg-red-400/10 text-red-400 border-red-400/20"
+                      : "bg-surface-container text-on-surface-variant/70 border-outline-variant"
+                  }`}>
+                    {status === "HIBERNATED" ? "Sliding Expiry Active" : "Inactive"}
+                  </span>
+                </div>
+                <div className="text-2xl font-mono font-bold text-on-surface tracking-tight my-1">
+                  {expirationCountdown}
+                </div>
+                <p className="text-[11px] text-on-surface-variant/70 leading-relaxed">
+                  {status === "HIBERNATED"
+                    ? "Sliding expiration active. Waking the sandbox and returning to RUNNING invalidates this countdown."
+                    : "Not applicable — expiration countdown only starts after the sandbox hibernates. Waking resets the timer."}
+                </p>
               </div>
-              <div className="text-2xl font-mono font-bold text-on-surface tracking-tight">
-                {expirationText}
+              <div className="pt-2 border-t border-outline-variant/30 text-[10px] text-on-surface-variant/60 truncate" title={absoluteExpiration}>
+                Scheduled: {absoluteExpiration}
               </div>
-              <p className="text-[11px] text-on-surface-variant/70">
-                Irreversible shutdown. Once expired, the container is permanently torn down.
-              </p>
+            </div>
+
+            {/* Card 3: Workspace Data Retention */}
+            <div className="p-4 rounded-xl bg-surface-container/50 border border-outline-variant/50 flex flex-col justify-between space-y-3">
+              <div>
+                <div className="flex items-center justify-between text-xs text-on-surface-variant mb-1">
+                  <span className="flex items-center gap-1.5 font-semibold text-blue-400">
+                    <HardDrive className="w-4 h-4" />
+                    Data Retention
+                  </span>
+                  <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-blue-400/10 text-blue-400 border border-blue-400/20">
+                    Disk Safety
+                  </span>
+                </div>
+                <div className="text-2xl font-mono font-bold text-on-surface tracking-tight my-1">
+                  {retentionText}
+                </div>
+                <p className="text-[11px] text-on-surface-variant/70 leading-relaxed">
+                  Workspace files and commits remain intact even after container expiration until the retention window expires.
+                </p>
+              </div>
+              <div className="pt-2 border-t border-outline-variant/30 text-[10px] text-on-surface-variant/60 truncate" title={retentionDeadline}>
+                Cleanup: {retentionDeadline}
+              </div>
             </div>
           </div>
 
-          {/* Policy Configuration Controls */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+          {/* Policy Configuration Controls: 3 Independent Dropdowns */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
             <div>
               <label className="block text-xs font-semibold text-on-surface-variant mb-1">
                 Idle Inactivity Timeout
@@ -198,24 +288,46 @@ export default function EnvironmentSettings({ env, mutate, isViewerRole }: { env
                 <option value="3600">1 hour</option>
                 <option value="7200">2 hours</option>
               </select>
+              <p className="text-[10px] text-on-surface-variant/60 mt-1">Inactivity before auto-hibernation</p>
             </div>
 
             <div>
               <label className="block text-xs font-semibold text-on-surface-variant mb-1">
-                Max Sandbox Lifetime
+                Hibernated Expiration Timeout
               </label>
               <select
-                value={maxLifetime}
-                onChange={(e) => setMaxLifetime(e.target.value)}
+                value={hibernatedExpiration}
+                onChange={(e) => setHibernatedExpiration(e.target.value)}
                 disabled={isViewerRole}
                 className="w-full px-3 py-2 text-xs bg-surface-container/60 border border-outline-variant rounded-lg focus:border-primary-fixed focus:outline-none disabled:opacity-50 text-on-surface cursor-pointer"
               >
+                <option value="1800">30 minutes</option>
                 <option value="3600">1 hour</option>
-                <option value="21600">6 hours</option>
-                <option value="43200">12 hours</option>
+                <option value="7200">2 hours (Default)</option>
+                <option value="14400">4 hours</option>
+                <option value="28800">8 hours</option>
                 <option value="86400">24 hours (1 day)</option>
-                <option value="604800">7 days (Platform Hard Cap)</option>
               </select>
+              <p className="text-[10px] text-on-surface-variant/60 mt-1">Sliding countdown while hibernated</p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-on-surface-variant mb-1">
+                Workspace Data Retention
+              </label>
+              <select
+                value={workspaceRetention}
+                onChange={(e) => setWorkspaceRetention(e.target.value)}
+                disabled={isViewerRole}
+                className="w-full px-3 py-2 text-xs bg-surface-container/60 border border-outline-variant rounded-lg focus:border-primary-fixed focus:outline-none disabled:opacity-50 text-on-surface cursor-pointer"
+              >
+                <option value="86400">1 day</option>
+                <option value="259200">3 days</option>
+                <option value="604800">7 days (Default)</option>
+                <option value="1209600">14 days</option>
+                <option value="2592000">30 days</option>
+              </select>
+              <p className="text-[10px] text-on-surface-variant/60 mt-1">Disk preservation post-expiration</p>
             </div>
           </div>
 

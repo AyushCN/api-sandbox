@@ -57,6 +57,7 @@ type Project struct {
 	Repositories    []ProjectRepository `json:"repositories,omitempty"`
 	Workspaces      []Workspace         `json:"workspaces,omitempty"`
 	Environments    []Environment       `json:"environments,omitempty"`
+	IsDefault       bool                `gorm:"default:false;not null" json:"isDefault"`
 	IsPublic        bool                `gorm:"default:false" json:"isPublic"`
 	CreatedAt       time.Time           `gorm:"default:current_timestamp" json:"createdAt"`
 	UpdatedAt       time.Time           `gorm:"default:current_timestamp" json:"updatedAt"`

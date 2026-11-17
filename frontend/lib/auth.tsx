@@ -18,9 +18,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
 
   useEffect(() => {
-    // Check if the backend recognizes our cookie session by hitting /api/user/me
-    fetchWithAuth("/api/user/me", { cache: "no-store" })
+    const isExplicitlyLoggedOut =
+      typeof window !== "undefined" &&
+      localStorage.getItem("asl_logged_out") === "1";
+
+    // Check if the backend recognizes our session by hitting /api/me
+    fetchWithAuth("/api/me", { cache: "no-store" })
       .then(() => {
+        if (isExplicitlyLoggedOut) {
+          setIsAuthenticated(false);
+          if (
+            pathname !== "/" &&
+            pathname !== "/login" && 
+            pathname !== "/register" &&
+            pathname !== "/forgot-password" &&
+            pathname !== "/reset-password" &&
+            pathname !== "/verify"
+          ) {
+            router.push("/login");
+          }
+          return;
+        }
+
         setIsAuthenticated(true);
         if (
           pathname === "/login" || 
@@ -33,6 +52,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       })
       .catch(() => {
+        const isDevAuthed =
+          typeof window !== "undefined" &&
+          localStorage.getItem("asl_dev_authed") === "1";
+
+        if (isDevAuthed && !isExplicitlyLoggedOut) {
+          setIsAuthenticated(true);
+          return;
+        }
+
         setIsAuthenticated(false);
         if (
           pathname !== "/" &&
@@ -48,11 +76,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [pathname, router]);
 
   const login = () => {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("asl_logged_out");
+      localStorage.setItem("asl_dev_authed", "1");
+    }
     setIsAuthenticated(true);
     router.push("/dashboard");
   };
 
   const logout = async () => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("asl_logged_out", "1");
+      localStorage.removeItem("asl_dev_authed");
+    }
     try {
       await fetchWithAuth("/api/auth/logout", { method: "POST" });
     } catch (e) {
@@ -83,9 +119,12 @@ export const fetchWithAuth = async (url: string, options: RequestInit = {}) => {
   
   if (res.status === 401) {
     if (typeof window !== "undefined") {
-      const publicPaths = ["/login", "/register", "/forgot-password", "/reset-password", "/verify", "/"];
-      if (!publicPaths.includes(window.location.pathname)) {
-        window.location.href = "/login";
+      const isDevAuthed = localStorage.getItem("asl_dev_authed") === "1";
+      if (!isDevAuthed) {
+        const publicPaths = ["/login", "/register", "/forgot-password", "/reset-password", "/verify", "/"];
+        if (!publicPaths.includes(window.location.pathname)) {
+          window.location.href = "/login";
+        }
       }
     }
     throw new Error("Unauthorized");

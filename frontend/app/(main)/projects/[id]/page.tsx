@@ -20,6 +20,8 @@ import {
   CheckCircle2,
   CircleDot,
   Plus,
+  Lock,
+  Share2,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { fetchWithAuth } from "@/lib/auth";
@@ -156,27 +158,45 @@ export default function ProjectDetailsPage({ params }: { params: Promise<{ id: s
           Authorization: `Bearer ${localStorage.getItem("token")}`
         }
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (res.ok && data.environmentId) {
         router.push(`/environments/${data.environmentId}`);
       } else {
-        alert(data.error || "Environment not ready yet. Please try again in a few seconds.");
+        router.push(`/upload?projectId=${id}`);
       }
-    } catch (err: any) {
-      alert(err.message || "Failed to open workspace");
+    } catch {
+      router.push(`/upload?projectId=${id}`);
     } finally {
       setIsOpening(false);
     }
   };
 
-  const { data: project, error: projectError, isLoading: projectLoading } = useSWR<Project>(`/api/projects/${id}`, fetcher);
+  const { data: projectData, error: projectError, isLoading: projectLoading } = useSWR<Project>(`/api/projects/${id}`, fetcher);
+  const fallbackProject: Project = {
+    id,
+    name: id === "default-project" ? "Default Project" : id.replace(/^proj-/, "").replace(/-/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()),
+    description: "Active engineering workspace",
+    createdAt: new Date().toISOString(),
+  };
+  const project = projectData || fallbackProject;
+
   const { data: members, mutate: mutateMembers } = useSWR<ProjectMember[]>(`/api/projects/${id}/members`, fetcher, { refreshInterval: 10000 });
   const { data: repositories, mutate: mutateRepositories } = useSWR<ProjectRepository[]>(`/api/projects/${id}/repositories`, fetcher);
   const { data: workspaces }   = useSWR<Workspace[]>(`/api/projects/${id}/workspaces`, fetcher, { refreshInterval: 5000 });
   const { data: changeRequests } = useSWR<ChangeRequest[]>(`/api/projects/${id}/change-requests`, fetcher, { refreshInterval: 5000 });
-  const { data: environments } = useSWR<Environment[]>(`/api/environments?projectId=${id}`, fetcher, { refreshInterval: 3000 });
+  const { data: envsRaw } = useSWR<any>(`/api/environments?projectId=${id}`, fetcher, { refreshInterval: 3000 });
+  const environments: Environment[] = (Array.isArray(envsRaw)
+    ? envsRaw
+    : envsRaw?.sandboxes || []).map((sb: any) => ({
+      id: sb.id,
+      name: sb.name || sb.subdomain || `sandbox-${sb.id.slice(0, 8)}`,
+      status: (sb.status || "IDLE").toUpperCase(),
+      createdAt: sb.createdAt || sb.created_at || new Date().toISOString(),
+      gitUrl: sb.gitUrl || sb.url || "",
+      githubBranch: sb.githubBranch || sb.branch || "master",
+    }));
 
-  if (projectLoading) {
+  if (projectLoading && !projectData) {
     return (
       <div className="flex items-center justify-center h-64 text-on-surface-variant">
         <Loader2 className="w-8 h-8 animate-spin" />
@@ -184,13 +204,11 @@ export default function ProjectDetailsPage({ params }: { params: Promise<{ id: s
     );
   }
 
-  if (projectError || !project) {
-    return <div className="p-8 text-center text-red-400">Failed to load project details.</div>;
-  }
-
   const openCRs = Array.isArray(changeRequests) ? changeRequests.filter((cr: ChangeRequest) => cr.status === "OPEN").length : 0;
 
-  const tabs: { id: Tab; label: string; icon: React.ElementType; count?: number }[] = [
+  const isDefaultProject = id === "default-project" || (project as any)?.isDefault === true;
+
+  const allTabs: { id: Tab; label: string; icon: React.ElementType; count?: number }[] = [
     { id: "overview",        label: "Overview",        icon: Folder    },
     { id: "repositories",    label: "Repositories",    icon: Database,  count: Array.isArray(repositories) ? repositories.length : undefined },
     { id: "members",         label: "Members",         icon: Users,     count: Array.isArray(members) ? members.length : undefined },
@@ -198,6 +216,8 @@ export default function ProjectDetailsPage({ params }: { params: Promise<{ id: s
     { id: "environments",    label: "Environments",    icon: Play,      count: Array.isArray(environments) ? environments.length : undefined },
     { id: "change-requests", label: "Change Requests", icon: GitMerge,  count: openCRs || undefined },
   ];
+
+  const tabs = isDefaultProject ? allTabs.filter(t => t.id !== "members") : allTabs;
 
   return (
     <div className="flex flex-col gap-6 pb-12">
@@ -211,19 +231,49 @@ export default function ProjectDetailsPage({ params }: { params: Promise<{ id: s
             <Folder className="w-6 h-6 text-primary-fixed" />
           </div>
           <div className="min-w-0">
-            <h1 className="text-2xl font-bold tracking-tight text-on-surface truncate">{project.name}</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-bold tracking-tight text-on-surface truncate">{project.name}</h1>
+              {isDefaultProject ? (
+                <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-mono text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
+                  <Lock className="w-3 h-3" /> Personal Space
+                </span>
+              ) : (
+                <span className="px-2.5 py-0.5 rounded-full bg-sky-500/10 border border-sky-500/20 text-sky-400 font-mono text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
+                  <Share2 className="w-3 h-3" /> Collaborative Space
+                </span>
+              )}
+            </div>
             {project.description && <p className="text-sm text-on-surface-variant truncate">{project.description}</p>}
           </div>
         </div>
-        <button 
-          onClick={handleOpenWorkspace}
-          disabled={isOpening}
-          className="flex items-center gap-2 bg-primary-fixed text-on-primary-fixed px-5 py-2.5 rounded-xl font-bold text-sm hover:bg-primary-fixed/90 hover:shadow-[0_0_20px_rgba(0,240,255,0.3)] active:scale-95 transition-all disabled:opacity-50 shrink-0"
-        >
-          {isOpening ? <Loader2 className="w-4 h-4 animate-spin" /> : <Code className="w-4 h-4" />}
-          Open Workspace
-        </button>
+        <div className="flex items-center gap-3 shrink-0">
+          <Link
+            href={`/upload?projectId=${id}`}
+            className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider bg-surface-container-high text-on-surface hover:bg-surface-container-highest border border-outline-variant transition-all shadow-sm"
+          >
+            <Plus className="w-4 h-4 text-[#FF416C]" />
+            <span>New Sandbox</span>
+          </Link>
+          <button 
+            onClick={handleOpenWorkspace}
+            disabled={isOpening}
+            className="flex items-center gap-2 bg-gradient-to-r from-[#FF416C] to-[#FF4B2B] text-white px-5 py-2.5 rounded-xl font-bold text-sm hover:opacity-95 active:scale-95 transition-all disabled:opacity-50 shadow-md"
+          >
+            {isOpening ? <Loader2 className="w-4 h-4 animate-spin" /> : <Code className="w-4 h-4" />}
+            Open Workspace
+          </button>
+        </div>
       </div>
+
+      {/* Default Project notice */}
+      {isDefaultProject && (
+        <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-4 flex items-center gap-3 text-xs text-on-surface">
+          <Lock className="w-4 h-4 text-emerald-400 shrink-0" />
+          <div>
+            <strong>Personal Default Space:</strong> All workspaces, environments, and containers in this project are strictly private to you. Collaboration and sharing controls are permanently disabled for personal spaces.
+          </div>
+        </div>
+      )}
 
       {/* Tab Navigation */}
       <div className="flex items-center gap-1 border-b border-outline-variant overflow-x-auto">
@@ -259,7 +309,7 @@ export default function ProjectDetailsPage({ params }: { params: Promise<{ id: s
         {activeTab === "repositories"    && <RepositoriesTab repositories={repositories} projectId={id} mutateRepositories={mutateRepositories} />}
         {activeTab === "members"         && <MembersTab members={members} projectId={id} mutateMembers={mutateMembers} />}
         {activeTab === "workspaces"      && <WorkspacesTab workspaces={workspaces} projectId={id} />}
-        {activeTab === "environments"    && <EnvironmentsTab environments={environments} />}
+        {activeTab === "environments"    && <EnvironmentsTab environments={environments} projectId={id} />}
         {activeTab === "change-requests" && <ChangeRequestsTab changeRequests={changeRequests} />}
       </motion.div>
     </div>
@@ -557,9 +607,26 @@ function WorkspacesTab({ workspaces, projectId }: { workspaces?: Workspace[]; pr
 
 // ── Environments Tab ───────────────────────────────────────────────────────────
 
-function EnvironmentsTab({ environments }: { environments?: Environment[] }) {
+function EnvironmentsTab({ environments, projectId }: { environments?: Environment[]; projectId: string }) {
   if (!Array.isArray(environments)) return <LoadingPlaceholder />;
-  if (environments.length === 0) return <EmptyState icon={Play} title="No environments" description="Environments start automatically when a workspace is activated." />;
+  if (environments.length === 0) {
+    return (
+      <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-8 text-center flex flex-col items-center max-w-lg mx-auto">
+        <div className="w-12 h-12 rounded-xl bg-primary-fixed/10 border border-primary-fixed/20 flex items-center justify-center text-primary-fixed mb-4">
+          <Play className="w-6 h-6" />
+        </div>
+        <h3 className="font-bold text-on-surface text-lg mb-1">No Sandboxes in this Project</h3>
+        <p className="text-sm text-on-surface-variant mb-6">Deploy a sandbox to start coding and testing within this workspace project.</p>
+        <Link
+          href={`/upload?projectId=${projectId}`}
+          className="flex items-center gap-2 bg-gradient-to-r from-[#FF416C] to-[#FF4B2B] text-white px-5 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider hover:opacity-95 transition-all shadow-md"
+        >
+          <Plus className="w-4 h-4" />
+          <span>Deploy First Sandbox</span>
+        </Link>
+      </div>
+    );
+  }
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

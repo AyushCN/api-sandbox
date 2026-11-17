@@ -8,11 +8,12 @@ import { User } from "lucide-react";
 const fetcher = (url: string) => fetchWithAuth(url);
 
 export function UserAvatar() {
-  const { data: user } = useSWR<{ email: string }>("/api/user/me", fetcher, {
+  const { data: user } = useSWR<{ email?: string; username?: string }>("/api/me", fetcher, {
     revalidateOnFocus: false,
   });
 
-  const initials = user?.email ? user.email.slice(0, 2).toUpperCase() : null;
+  const display = user?.username || user?.email;
+  const initials = display ? display.slice(0, 2).toUpperCase() : null;
 
   return (
     <Link

@@ -63,6 +63,44 @@ func (m *ProjectMember) BeforeCreate(tx *gorm.DB) (err error) {
 	return
 }
 
+type InvitationStatus string
+
+const (
+	InvitePending  InvitationStatus = "PENDING"
+	InviteAccepted InvitationStatus = "ACCEPTED"
+	InviteRejected InvitationStatus = "REJECTED"
+	InviteRevoked  InvitationStatus = "REVOKED"
+	InviteExpired  InvitationStatus = "EXPIRED"
+)
+
+type CollaborationInvitation struct {
+	ID         string            `gorm:"type:text;primaryKey" json:"id"`
+	ProjectID  string            `gorm:"type:text;not null;index" json:"projectId"`
+	Project    *Project          `json:"project,omitempty"`
+	InviterID  string            `gorm:"type:text;not null;index" json:"inviterId"`
+	Inviter    *User             `gorm:"foreignKey:InviterID" json:"inviter,omitempty"`
+	InviteeID  string            `gorm:"type:text;not null;index" json:"inviteeId"`
+	Invitee    *User             `gorm:"foreignKey:InviteeID" json:"invitee,omitempty"`
+	Role       ProjectMemberRole `gorm:"type:text;not null" json:"role"`
+	Status     InvitationStatus  `gorm:"type:text;default:'PENDING';not null;index" json:"status"`
+	CreatedAt  time.Time         `gorm:"default:current_timestamp" json:"createdAt"`
+	ExpiresAt  time.Time         `gorm:"not null" json:"expiresAt"`
+	AcceptedAt *time.Time        `json:"acceptedAt,omitempty"`
+}
+
+func (i *CollaborationInvitation) BeforeCreate(tx *gorm.DB) (err error) {
+	if i.ID == "" {
+		i.ID = uuid.NewString()
+	}
+	if i.ExpiresAt.IsZero() {
+		i.ExpiresAt = time.Now().Add(7 * 24 * time.Hour) // 7 days default
+	}
+	if i.Status == "" {
+		i.Status = InvitePending
+	}
+	return
+}
+
 type WorkspaceType string
 
 const (

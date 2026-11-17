@@ -1,6 +1,6 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import toast from "react-hot-toast"
-import { Loader2, Settings, Save, Trash2, Plus } from "lucide-react"
+import { Loader2, Settings, Save, Trash2, Plus, Moon, Clock, ShieldAlert, CheckCircle2, AlertTriangle, ShieldCheck } from "lucide-react"
 
 export default function EnvironmentSettings({ env, mutate, isViewerRole }: { env: Record<string, unknown>, mutate: () => void, isViewerRole: boolean }) {
   const [startCommand, setStartCommand] = useState((env.startCommand as string) || "")
@@ -15,6 +15,60 @@ export default function EnvironmentSettings({ env, mutate, isViewerRole }: { env
     return env.envVars.map((v: any) => ({ key: v.key, value: v.value }))
   })
   const [isSaving, setIsSaving] = useState(false)
+
+  // Lifecycle & Timer state
+  const status = ((env.status as string) || "IDLE").toUpperCase()
+  const idleTimeoutSec = Number(env.idle_timeout_seconds || env.idleTimeoutSeconds || 900)
+  const expiresAtStr = (env.expires_at || env.expiresAt) as string | undefined
+  const lastActiveStr = (env.last_request_at || env.lastRequestAt || env.last_activity_at || env.updatedAt || env.createdAt) as string | undefined
+
+  const [idleTimeout, setIdleTimeout] = useState(idleTimeoutSec.toString())
+  const [maxLifetime, setMaxLifetime] = useState(String(env.lifetime_seconds || env.lifetimeSeconds || 3600))
+  const [now, setNow] = useState(Date.now())
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [])
+
+  // Compute hibernation countdown
+  let hibernationText = "Active"
+  if (status === "HIBERNATED") {
+    hibernationText = "Hibernated (Inactive)"
+  } else if (status === "EXPIRED" || status === "DELETED") {
+    hibernationText = "Inactive (Torn Down)"
+  } else if (status === "RUNNING") {
+    const lastActive = lastActiveStr ? new Date(lastActiveStr).getTime() : now
+    const targetHibernate = lastActive + idleTimeoutSec * 1000
+    const rem = Math.max(0, Math.floor((targetHibernate - now) / 1000))
+    const mins = Math.floor(rem / 60)
+    const secs = rem % 60
+    hibernationText = `${mins}m ${secs.toString().padStart(2, "0")}s`
+  } else {
+    hibernationText = status
+  }
+
+  // Compute expiration countdown
+  let expirationText = "No Expiration"
+  if (status === "EXPIRED" || status === "DELETED") {
+    expirationText = "Expired (Torn Down)"
+  } else if (expiresAtStr) {
+    const targetExpire = new Date(expiresAtStr).getTime()
+    const rem = Math.max(0, Math.floor((targetExpire - now) / 1000))
+    if (rem <= 0) {
+      expirationText = "Expired"
+    } else {
+      const days = Math.floor(rem / 86400)
+      const hours = Math.floor((rem % 86400) / 3600)
+      const mins = Math.floor((rem % 3600) / 60)
+      const secs = rem % 60
+      if (days > 0) {
+        expirationText = `${days}d ${hours}h ${mins}m`
+      } else {
+        expirationText = `${hours.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
+      }
+    }
+  }
 
   const handleSave = async () => {
     setIsSaving(true)
@@ -33,6 +87,8 @@ export default function EnvironmentSettings({ env, mutate, isViewerRole }: { env
           runtimeType: runtimeType || null,
           port: port ? parseInt(port) : null,
           healthCheckType,
+          idleTimeoutSeconds: parseInt(idleTimeout),
+          lifetimeSeconds: parseInt(maxLifetime),
           envVars: envVars.reduce((acc, curr) => {
             if (curr.key.trim()) acc[curr.key.trim()] = curr.value
             return acc
@@ -65,6 +121,113 @@ export default function EnvironmentSettings({ env, mutate, isViewerRole }: { env
       </div>
       
       <div className="space-y-6">
+        {/* Sandbox Lifecycle & Security Policy Card */}
+        <div className="border border-outline-variant/60 rounded-xl bg-surface-container/30 p-5 space-y-5">
+          <div className="flex items-center justify-between pb-3 border-b border-outline-variant/40">
+            <div className="flex items-center gap-2">
+              <Clock className="w-5 h-5 text-primary-fixed" />
+              <div>
+                <h4 className="text-sm font-bold text-on-surface">Lifecycle & Security Policy</h4>
+                <p className="text-xs text-on-surface-variant/70">Server-enforced idle timeouts, auto-hibernation, and maximum lifetime caps.</p>
+              </div>
+            </div>
+            <span className="text-[11px] font-mono px-2.5 py-1 rounded-full border border-outline-variant bg-surface-container-high text-on-surface-variant font-semibold">
+              Status: {status}
+            </span>
+          </div>
+
+          {/* Live Dual Countdowns */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* Hibernation Timer */}
+            <div className="p-4 rounded-xl bg-surface-container/50 border border-outline-variant/50 space-y-1.5">
+              <div className="flex items-center justify-between text-xs text-on-surface-variant">
+                <span className="flex items-center gap-1.5 font-semibold text-amber-500">
+                  <Moon className="w-4 h-4" />
+                  Time Until Hibernation
+                </span>
+                <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-amber-500/10 text-amber-500 border border-amber-500/20">
+                  {status === "HIBERNATED" ? "Hibernated" : "Inactivity Timer"}
+                </span>
+              </div>
+              <div className="text-2xl font-mono font-bold text-on-surface tracking-tight">
+                {hibernationText}
+              </div>
+              <p className="text-[11px] text-on-surface-variant/70">
+                {status === "HIBERNATED" 
+                  ? "Container is paused on disk. Requests to the preview URL automatically wake it."
+                  : `Hibernates if no HTTP traffic arrives for ${Math.floor(parseInt(idleTimeout) / 60)} minutes.`}
+              </p>
+            </div>
+
+            {/* Expiration Timer */}
+            <div className="p-4 rounded-xl bg-surface-container/50 border border-outline-variant/50 space-y-1.5">
+              <div className="flex items-center justify-between text-xs text-on-surface-variant">
+                <span className="flex items-center gap-1.5 font-semibold text-red-400">
+                  <Clock className="w-4 h-4" />
+                  Time Until Expiration
+                </span>
+                <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-red-400/10 text-red-400 border border-red-400/20">
+                  Hard Cap (TTL)
+                </span>
+              </div>
+              <div className="text-2xl font-mono font-bold text-on-surface tracking-tight">
+                {expirationText}
+              </div>
+              <p className="text-[11px] text-on-surface-variant/70">
+                Irreversible shutdown. Once expired, the container is permanently torn down.
+              </p>
+            </div>
+          </div>
+
+          {/* Policy Configuration Controls */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+            <div>
+              <label className="block text-xs font-semibold text-on-surface-variant mb-1">
+                Idle Inactivity Timeout
+              </label>
+              <select
+                value={idleTimeout}
+                onChange={(e) => setIdleTimeout(e.target.value)}
+                disabled={isViewerRole}
+                className="w-full px-3 py-2 text-xs bg-surface-container/60 border border-outline-variant rounded-lg focus:border-primary-fixed focus:outline-none disabled:opacity-50 text-on-surface cursor-pointer"
+              >
+                <option value="300">5 minutes</option>
+                <option value="600">10 minutes</option>
+                <option value="900">15 minutes (Default)</option>
+                <option value="1800">30 minutes</option>
+                <option value="3600">1 hour</option>
+                <option value="7200">2 hours</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-on-surface-variant mb-1">
+                Max Sandbox Lifetime
+              </label>
+              <select
+                value={maxLifetime}
+                onChange={(e) => setMaxLifetime(e.target.value)}
+                disabled={isViewerRole}
+                className="w-full px-3 py-2 text-xs bg-surface-container/60 border border-outline-variant rounded-lg focus:border-primary-fixed focus:outline-none disabled:opacity-50 text-on-surface cursor-pointer"
+              >
+                <option value="3600">1 hour</option>
+                <option value="21600">6 hours</option>
+                <option value="43200">12 hours</option>
+                <option value="86400">24 hours (1 day)</option>
+                <option value="604800">7 days (Platform Hard Cap)</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 p-3 rounded-lg bg-surface-container/40 border border-outline-variant/30 text-[11px] text-on-surface-variant">
+            <ShieldAlert className="w-4 h-4 text-primary-fixed shrink-0" />
+            <span>
+              {isViewerRole 
+                ? "Viewer permissions: Lifecycle configurations are read-only. Contact the project Owner to modify."
+                : "Security policy: Health checks and automated probes do not reset the inactivity timer. Only genuine developer traffic keeps sandboxes alive."}
+            </span>
+          </div>
+        </div>
         <div>
           <label className="block text-sm font-medium text-on-surface-variant mb-1">Runtime Type</label>
           <select

@@ -1,0 +1,62 @@
+import { NextRequest, NextResponse } from "next/server";
+import { getProjects, addProject } from "@/lib/projects-store";
+
+export async function GET() {
+  const projects = getProjects();
+  return NextResponse.json(projects);
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json().catch(() => ({}));
+    const name = (body.name || "").trim();
+    if (!name) {
+      return NextResponse.json({ error: "Project name is required" }, { status: 400 });
+    }
+    const description = (body.description || "").trim();
+
+    // Determine creator
+    let creator = body.creator;
+    if (!creator?.username) {
+      const backend = process.env.BACKEND_URL || "http://localhost:8080";
+      const cookie = req.headers.get("cookie") || "";
+      const authHeader = req.headers.get("authorization") || "";
+      try {
+        const meRes = await fetch(`${backend}/api/me`, {
+          headers: {
+            cookie,
+            ...(authHeader ? { authorization: authHeader } : {}),
+          },
+          cache: "no-store",
+        });
+        if (meRes.ok) {
+          const meData = await meRes.json();
+          if (meData?.username) {
+            const unameLower = meData.username.toLowerCase();
+            const fallbackEmail =
+              unameLower === "ayushcn" || unameLower === "ayush"
+                ? "ayushcn@gmail.com"
+                : unameLower === "admin"
+                ? "admin@api-sandbox.local"
+                : `${unameLower}@users.api-sandbox.local`;
+            creator = {
+              userId: meData.id || `user-${unameLower}`,
+              username: meData.username,
+              email: meData.email || fallbackEmail,
+            };
+          }
+        }
+      } catch {
+        // Fallback to default owner
+      }
+    }
+
+    const newProj = addProject(name, description, creator);
+    return NextResponse.json(newProj, { status: 201 });
+  } catch (err: unknown) {
+    return NextResponse.json(
+      { error: (err as Error).message },
+      { status: 500 }
+    );
+  }
+}

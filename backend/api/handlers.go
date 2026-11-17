@@ -43,8 +43,14 @@ func SetupRoutes(router *gin.Engine) {
 		api.GET("/health", HealthCheck)
 
 		api.POST("/auth/logout", Logout)
+		api.POST("/auth/dev-login", DevLogin)
+		api.GET("/auth/dev-login", DevLogin)
 		api.GET("/auth/github", GithubLogin)
 		api.GET("/auth/github/callback", GithubCallback)
+		api.GET("/me", AuthMiddleware(), GetMe)
+		api.GET("/user/invitations", AuthMiddleware(), GetUserInvitations)
+		api.POST("/invitations/:id/accept", AuthMiddleware(), AcceptInvitation)
+		api.POST("/invitations/:id/reject", AuthMiddleware(), RejectInvitation)
 
 		projects := api.Group("/projects")
 		projects.Use(AuthMiddleware(), RateLimitAPI())
@@ -68,6 +74,8 @@ func SetupRoutes(router *gin.Engine) {
 				projectDetail.GET("/team-status", GetProjectTeamStatus)
 				projectDetail.GET("/members", GetProjectMembers)
 				projectDetail.POST("/invite", AuthorizeProjectMemberAccess(models.ProjectMemberRoleOwner), InviteToProject)
+				projectDetail.POST("/invitations", AuthorizeProjectMemberAccess(models.ProjectMemberRoleOwner), InviteToProject)
+				projectDetail.DELETE("/invitations/:id", AuthorizeProjectMemberAccess(models.ProjectMemberRoleOwner), RevokeInvitation)
 				projectDetail.DELETE("/collaborators/:userId", RemoveCollaborator)
 				projectDetail.PUT("/collaborators/:userId/role", AuthorizeProjectMemberAccess(models.ProjectMemberRoleOwner), UpdateMemberRole)
 
@@ -122,6 +130,29 @@ func SetupRoutes(router *gin.Engine) {
 			protected.GET("/:id/git/log", GitLog)
 			protected.GET("/:id/git/diff", GitDiff)
 			protected.GET("/:id/git/file-diff", GitFileDiff)
+		}
+
+		sandboxes := api.Group("/sandboxes")
+		sandboxes.Use(AuthMiddleware(), RateLimitAPI())
+		{
+			sandboxes.GET("", GetEnvironments)
+			sandboxes.POST("", CreateEnvironment)
+			sandboxes.GET("/:id", GetEnvironment)
+			sandboxes.PUT("/:id/settings", UpdateEnvironmentSettings)
+			sandboxes.POST("/:id/restart", RestartEnvironment)
+			sandboxes.POST("/:id/transfer", TransferEnvironment)
+			sandboxes.POST("/:id/fork", ForkEnvironment)
+			sandboxes.DELETE("/:id", DeleteEnvironment)
+			sandboxes.GET("/:id/logs/stream", StreamLogs)
+			sandboxes.GET("/:id/files", GetWorkspaceFiles)
+			sandboxes.GET("/:id/files/content", GetWorkspaceFileContent)
+			sandboxes.POST("/:id/files/content", UpdateWorkspaceFileContent)
+			sandboxes.POST("/:id/files/create", CreateWorkspaceFileOrFolder)
+			sandboxes.POST("/:id/files/delete", DeleteWorkspaceFileOrFolder)
+			sandboxes.GET("/:id/docker-logs", GetDockerLogs)
+			sandboxes.GET("/:id/git-tree", GetGitTree)
+			sandboxes.POST("/:id/commit", CommitChanges)
+			sandboxes.POST("/:id/push", PushChanges)
 		}
 
 		wsGroup := api.Group("/ws")
@@ -507,7 +538,7 @@ type TransferEnvironmentRequest struct {
 
 func UpdateEnvironmentSettings(c *gin.Context) {
 	id := c.Param("id")
-	env, err := checkWorkspaceWriteAccess(c, id)
+	env, err := checkWorkspaceOwnerAccess(c, id)
 	if err != nil {
 		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		return
@@ -639,13 +670,12 @@ func TransferEnvironment(c *gin.Context) {
 func DeleteEnvironment(c *gin.Context) {
 	id := c.Param("id")
 	userID, _ := c.Get("userId")
-	var env models.Environment
-	query := applyEnvironmentScope(db.DB, userID)
-
-	if err := query.First(&env, "id = ?", id).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Environment not found"})
+	envPtr, err := checkWorkspaceOwnerAccess(c, id)
+	if err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		return
 	}
+	env := *envPtr
 
 	// Stop runtime resources and clear the workspace before deleting the row so
 	// any failure remains retryable and visible to the caller.
@@ -701,20 +731,12 @@ func DeleteEnvironment(c *gin.Context) {
 func RestartEnvironment(c *gin.Context) {
 	id := c.Param("id")
 	userID, _ := c.Get("userId")
-	projectIDs := getUserProjectIDs(userID)
-
-	var env models.Environment
-	query := db.DB
-	if len(projectIDs) > 0 {
-		query = query.Where("project_id IN ? OR user_id = ?", projectIDs, userID)
-	} else {
-		query = query.Where("user_id = ?", userID)
-	}
-
-	if err := query.First(&env, "id = ?", id).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Environment not found"})
+	envPtr, err := checkWorkspaceWriteAccess(c, id)
+	if err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		return
 	}
+	env := *envPtr
 
 	TouchEnvironmentActivity(env.ID)
 

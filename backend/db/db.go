@@ -65,6 +65,7 @@ func InitDB() {
 		&models.Workspace{},
 		&models.WorkspaceRepository{},
 		&models.ChangeRequest{},
+		&models.CollaborationInvitation{},
 	)
 	if err != nil {
 		slog.Error("Failed to auto migrate database schemas", "error", err)

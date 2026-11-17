@@ -74,52 +74,76 @@ func buildFileTree(rootDir, currentDir string) ([]*FileNode, error) {
 }
 
 func checkWorkspaceAccess(c *gin.Context, envID string) (*models.Environment, error) {
-	userID, _ := c.Get("userId")
-	projectIDs := getUserProjectIDs(userID)
-
-	var env models.Environment
-	query := db.DB.Preload("User")
-	if len(projectIDs) > 0 {
-		query = query.Where("project_id IN ? OR user_id = ?", projectIDs, userID)
-	} else {
-		query = query.Where("user_id = ?", userID)
-	}
-
-	if err := query.First(&env, "id = ?", envID).Error; err != nil {
-		return nil, fmt.Errorf("environment not found or access denied")
-	}
-
-	// Update last activity timestamp
-	TouchEnvironmentActivity(env.ID)
-
-	return &env, nil
+	return checkWorkspaceAccessWithRole(c, envID, models.ProjectMemberRoleViewer)
 }
 
 func checkWorkspaceWriteAccess(c *gin.Context, envID string) (*models.Environment, error) {
-	env, err := checkWorkspaceAccess(c, envID)
-	if err != nil {
-		return nil, err
+	return checkWorkspaceAccessWithRole(c, envID, models.ProjectMemberRoleEditor)
+}
+
+func checkWorkspaceOwnerAccess(c *gin.Context, envID string) (*models.Environment, error) {
+	return checkWorkspaceAccessWithRole(c, envID, models.ProjectMemberRoleOwner)
+}
+
+func checkWorkspaceAccessWithRole(c *gin.Context, envID string, requiredRole models.ProjectMemberRole) (*models.Environment, error) {
+	userIDVal, exists := c.Get("userId")
+	if !exists {
+		return nil, fmt.Errorf("unauthorized")
+	}
+	userID := userIDVal.(string)
+
+	var env models.Environment
+	if err := db.DB.Preload("Project").Preload("User").First(&env, "id = ?", envID).Error; err != nil {
+		return nil, fmt.Errorf("environment not found or access denied")
 	}
 
-	userID, _ := c.Get("userId")
-	userIDStr := userID.(string)
-
-	// If the user created the environment, they have write access
-	if env.UserID == userIDStr {
-		return env, nil
-	}
-
-	// Check project member role
+	// 1. If environment is assigned to a Project
 	if env.ProjectID != "" {
-		var member models.ProjectMember
-		if err := db.DB.Where("project_id = ? AND user_id = ? AND status = ?", env.ProjectID, userIDStr, models.ProjectMemberStatusAccepted).First(&member).Error; err == nil {
-			if member.Role == models.ProjectMemberRoleViewer {
-				return nil, fmt.Errorf("viewers cannot modify environments or use git commands")
+		var proj models.Project
+		if env.Project != nil {
+			proj = *env.Project
+		} else {
+			if err := db.DB.First(&proj, "id = ?", env.ProjectID).Error; err != nil {
+				return nil, fmt.Errorf("project not found or access denied")
 			}
 		}
+
+		// A. Default Project (Personal Space): Strictly private to its owner.
+		if proj.IsDefault || proj.ID == "default-project" {
+			if proj.CreatedByUserID != userID && env.UserID != userID {
+				return nil, fmt.Errorf("access denied: personal default workspace is private")
+			}
+			TouchEnvironmentActivity(env.ID)
+			return &env, nil
+		}
+
+		// B. Shareable Collaborative Project: Must be an accepted ProjectMember with required role.
+		var member models.ProjectMember
+		if err := db.DB.Where("project_id = ? AND user_id = ? AND status = ?", env.ProjectID, userID, models.ProjectMemberStatusAccepted).First(&member).Error; err != nil {
+			return nil, fmt.Errorf("access denied: not a member of this shared project")
+		}
+
+		if !hasProjectMemberPermission(member.Role, requiredRole) {
+			if requiredRole == models.ProjectMemberRoleEditor {
+				return nil, fmt.Errorf("viewers have read-only access and cannot modify files, commit changes, or restart environments")
+			}
+			if requiredRole == models.ProjectMemberRoleOwner {
+				return nil, fmt.Errorf("only project owners have permission for this operation")
+			}
+			return nil, fmt.Errorf("insufficient permissions on this project")
+		}
+
+		TouchEnvironmentActivity(env.ID)
+		return &env, nil
 	}
 
-	return env, nil
+	// 2. Standalone personal environment
+	if env.UserID != userID {
+		return nil, fmt.Errorf("access denied: environment belongs to another user")
+	}
+
+	TouchEnvironmentActivity(env.ID)
+	return &env, nil
 }
 
 func GetWorkspaceFiles(c *gin.Context) {

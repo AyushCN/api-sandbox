@@ -23,6 +23,8 @@ Designed for trusted users on a dedicated single host. Do not expose to untruste
 9. **Role-based access** — `OWNER`, `EDITOR`, `VIEWER` enforced via robust backend middleware.
 10. **Warm Image Pool** — Pre-pulls `node`, `python`, and `go` images. Every environment still gets a new container; warm containers are not reused.
 11. **Environment-Scoped Dependency Caches** — Package caches are mounted separately for each environment.
+12. **Default Personal Space vs Shareable Projects** — Every user has an exclusive, private Default Project that cannot be shared or invited to. Separate Shareable Projects support collaboration invitations and RBAC permissions.
+13. **Advanced Sandbox Lifecycle & Data Preservation** — Multi-user activity tracking, idle warnings, 60-second grace periods with one-click reset, bounded build operations, and 7-day cold workspace data retention (expired containers are never revived; restored into fresh instances).
 
 ## What It Does Not Do
 

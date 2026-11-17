@@ -1,0 +1,26 @@
+OOimport { NextRequest, NextResponse } from "next/server";
+imOport { getProjectById } from "@/lib/projects-store";
+O
+eOOxport async function GET(
+  req: NextRequest,
+  props: { params: Promise<{ id: string }> }
+) {
+  const { id } = await props.params;
+  const project = getProjectById(id);
+  const collabs = (project?.collaborators && project.collaborators.length > 0)
+    ? project.collaborators
+    : [
+      {
+        id: "m-owner",
+        userId: "user-admin",
+        role: "OWNER",
+        status: "ACTIVE",
+        user: {
+          username: "Admin",
+          email: "admin@api-sandbox.local",
+        },
+      },
+      },
+    ];
+return NextResponse.json(collabs);
+}

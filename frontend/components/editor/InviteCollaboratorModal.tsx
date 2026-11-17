@@ -23,7 +23,7 @@ export function InviteCollaboratorModal({
   isInviting,
 }: InviteCollaboratorModalProps) {
   const [inviteIdentifier, setInviteIdentifier] = useState("");
-  const [inviteRole, setInviteRole] = useState("COLLABORATOR");
+  const [inviteRole, setInviteRole] = useState("EDITOR");
   const [userSearchResults, setUserSearchResults] = useState<UserSearchResult[]>([]);
   const [isSearchingUsers, setIsSearchingUsers] = useState(false);
   const [showUserDropdown, setShowUserDropdown] = useState(false);
@@ -68,7 +68,8 @@ export function InviteCollaboratorModal({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inviteIdentifier.trim()) return;
-    await onInvite(inviteIdentifier.trim(), inviteRole);
+    const roleToSubmit = inviteRole === "VIEWER" ? "VIEWER" : "EDITOR";
+    await onInvite(inviteIdentifier.trim(), roleToSubmit);
   };
 
   return (
@@ -142,17 +143,19 @@ export function InviteCollaboratorModal({
 
           <div>
             <label className="text-sm font-bold tracking-wide text-on-surface-variant uppercase mb-1.5 block">
-              Role
+              Role & Permissions
             </label>
             <select
               value={inviteRole}
               onChange={(e) => setInviteRole(e.target.value)}
-              className="w-full bg-surface-container px-4 py-3 rounded-lg border border-outline-variant text-on-surface focus:border-primary-fixed focus:ring-1 focus:ring-primary-fixed transition-all"
+              className="w-full bg-surface-container px-4 py-3 rounded-lg border border-outline-variant text-on-surface focus:border-primary-fixed focus:ring-1 focus:ring-primary-fixed transition-all text-sm font-medium"
             >
-              <option value="COLLABORATOR">Collaborator (Edit & Push)</option>
-              <option value="VIEWER">Viewer (Read Only)</option>
-              <option value="ADMIN">Admin (Manage Team)</option>
+              <option value="EDITOR">Editor — Can edit code, run terminal, commit & deploy</option>
+              <option value="VIEWER">Viewer — Read-only access to preview URL & logs</option>
             </select>
+            <p className="text-[11px] text-on-surface-variant/70 mt-1.5">
+              Project ownership can be transferred from the project settings.
+            </p>
           </div>
           <div className="pt-2 flex justify-end gap-3">
             <button

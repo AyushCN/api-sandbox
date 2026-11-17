@@ -42,6 +42,8 @@ import {
   UserCheck,
   Sparkles,
   AlertTriangle,
+  Send,
+  X,
 } from "lucide-react";
 
 import { fetchWithAuth } from "@/lib/auth";
@@ -1308,10 +1310,11 @@ export default function EnvironmentDetail() {
                   {!isViewerRole && (
                     <button
                       onClick={() => setIsCommitModalOpen(true)}
-                      className={`px-4 py-1.5 rounded-lg border flex items-center gap-1.5 transition-colors text-xs font-semibold ${hasUncommittedChanges
-                        ? "border-amber-500/30 bg-amber-500/10 text-amber-500 hover:bg-amber-500/20 shadow-[0_0_8px_rgba(245,158,11,0.2)]"
-                        : "border-[#2ea44f]/30 bg-[#2ea44f]/10 text-[#2ea44f] hover:bg-[#2ea44f]/20"
-                        }`}
+                      className={`px-4 py-1.5 rounded-lg border flex items-center gap-1.5 transition-colors text-xs font-semibold ${
+                        hasUncommittedChanges
+                          ? "border-amber-500/30 bg-amber-500/10 text-amber-500 hover:bg-amber-500/20 shadow-[0_0_8px_rgba(245,158,11,0.2)]"
+                          : "border-[#2ea44f]/30 bg-[#2ea44f]/10 text-[#2ea44f] hover:bg-[#2ea44f]/20"
+                      }`}
                     >
                       <Save className="w-3.5 h-3.5" />
                       {hasUncommittedChanges ? "Review & Commit" : "Git Actions"}
@@ -1459,10 +1462,11 @@ export default function EnvironmentDetail() {
         <div className="flex border-b border-outline-variant gap-6">
           <button
             onClick={() => setActiveTab("logs")}
-            className={`pb-3 text-sm font-medium transition-all relative ${activeTab === "logs"
-              ? "text-primary-fixed border-b-2 border-primary-fixed"
-              : "text-on-surface-variant hover:text-on-surface"
-              }`}
+            className={`pb-3 text-sm font-medium transition-all relative ${
+              activeTab === "logs"
+                ? "text-primary-fixed border-b-2 border-primary-fixed"
+                : "text-on-surface-variant hover:text-on-surface"
+            }`}
           >
             <span className="flex items-center gap-2">
               <TerminalIcon className="w-4 h-4" />
@@ -1471,10 +1475,11 @@ export default function EnvironmentDetail() {
           </button>
           <button
             onClick={() => setActiveTab("workspace")}
-            className={`pb-3 text-sm font-medium transition-all relative ${activeTab === "workspace"
-              ? "text-primary-fixed border-b-2 border-primary-fixed"
-              : "text-on-surface-variant hover:text-on-surface"
-              }`}
+            className={`pb-3 text-sm font-medium transition-all relative ${
+              activeTab === "workspace"
+                ? "text-primary-fixed border-b-2 border-primary-fixed"
+                : "text-on-surface-variant hover:text-on-surface"
+            }`}
           >
             <span className="flex items-center gap-2">
               <Code className="w-4 h-4" />
@@ -1483,10 +1488,11 @@ export default function EnvironmentDetail() {
           </button>
           <button
             onClick={() => setActiveTab("collaborators")}
-            className={`pb-3 text-sm font-medium transition-all relative ${activeTab === "collaborators"
-              ? "text-primary-fixed border-b-2 border-primary-fixed"
-              : "text-on-surface-variant hover:text-on-surface"
-              }`}
+            className={`pb-3 text-sm font-medium transition-all relative ${
+              activeTab === "collaborators"
+                ? "text-primary-fixed border-b-2 border-primary-fixed"
+                : "text-on-surface-variant hover:text-on-surface"
+            }`}
           >
             <span className="flex items-center gap-2">
               <Users className="w-4 h-4" />
@@ -1495,10 +1501,11 @@ export default function EnvironmentDetail() {
           </button>
           <button
             onClick={() => setActiveTab("team-activity")}
-            className={`pb-3 text-sm font-medium transition-all relative ${activeTab === "team-activity"
-              ? "text-primary-fixed border-b-2 border-primary-fixed"
-              : "text-on-surface-variant hover:text-on-surface"
-              }`}
+            className={`pb-3 text-sm font-medium transition-all relative ${
+              activeTab === "team-activity"
+                ? "text-primary-fixed border-b-2 border-primary-fixed"
+                : "text-on-surface-variant hover:text-on-surface"
+            }`}
           >
             <span className="flex items-center gap-2">
               <Activity className="w-4 h-4" />
@@ -1507,10 +1514,11 @@ export default function EnvironmentDetail() {
           </button>
           <button
             onClick={() => setActiveTab("settings")}
-            className={`pb-3 text-sm font-medium transition-all relative ${activeTab === "settings"
-              ? "text-primary-fixed border-b-2 border-primary-fixed"
-              : "text-on-surface-variant hover:text-on-surface"
-              }`}
+            className={`pb-3 text-sm font-medium transition-all relative ${
+              activeTab === "settings"
+                ? "text-primary-fixed border-b-2 border-primary-fixed"
+                : "text-on-surface-variant hover:text-on-surface"
+            }`}
           >
             <span className="flex items-center gap-2">
               <SettingsIcon className="w-4 h-4" />
@@ -1545,15 +1553,16 @@ export default function EnvironmentDetail() {
                 const lastLog = (latest?.log_excerpt || "").toLowerCase();
                 const step = lastLog.includes("starting") || lastLog.includes("launch") ? 3
                   : lastLog.includes("install") || lastLog.includes("build") || lastLog.includes("mise") ? 2
-                    : lastLog.includes("clon") ? 1
-                      : 0;
+                  : lastLog.includes("clon") ? 1
+                  : 0;
                 const steps = ["Cloning", "Installing", "Starting", "Live"];
                 return (
                   <div className="flex items-center gap-0 px-4 py-2 border-b border-[#CBD1D8] dark:border-[#31363f] bg-[#E4E7EB] dark:bg-[#21252b] transition-colors">
                     {steps.map((s, i) => (
                       <div key={s} className="flex items-center">
-                        <div className={`flex items-center gap-1.5 text-xs font-medium ${i < step ? "text-[#1A7F37] dark:text-[#98c379]" : i === step ? "text-[#0969DA] dark:text-[#61afef] animate-pulse font-semibold" : "text-[#57606A] dark:text-[#5c6370]"
-                          }`}>
+                        <div className={`flex items-center gap-1.5 text-xs font-medium ${
+                          i < step ? "text-[#1A7F37] dark:text-[#98c379]" : i === step ? "text-[#0969DA] dark:text-[#61afef] animate-pulse font-semibold" : "text-[#57606A] dark:text-[#5c6370]"
+                        }`}>
                           {i < step ? (
                             <Check className="w-3 h-3 text-[#1A7F37] dark:text-[#98c379]" />
                           ) : i === step ? (
@@ -1798,10 +1807,11 @@ export default function EnvironmentDetail() {
                       <button
                         key={filter}
                         onClick={() => setCollabRoleFilter(filter)}
-                        className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap cursor-pointer ${isActive
-                          ? "bg-primary-fixed/20 text-primary-fixed border border-primary-fixed/30"
-                          : "text-on-surface-variant hover:text-on-surface hover:bg-surface-container border border-transparent"
-                          }`}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap cursor-pointer ${
+                          isActive
+                            ? "bg-primary-fixed/20 text-primary-fixed border border-primary-fixed/30"
+                            : "text-on-surface-variant hover:text-on-surface hover:bg-surface-container border border-transparent"
+                        }`}
                       >
                         {filter === "ALL" ? "All Roles" : filter.charAt(0) + filter.slice(1).toLowerCase()}
                       </button>
@@ -1974,51 +1984,112 @@ export default function EnvironmentDetail() {
 
                           {/* Role Selector & Actions */}
                           <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-outline-variant/30">
-                            {/* Role Dropdown (If Owner and not modifying self) */}
-                            {isOwnerOrAdmin && !isMe ? (
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-[11px] text-on-surface-variant/60 hidden sm:inline">Role:</span>
-                                <select
-                                  value={collab.role === "COLLABORATOR" ? "EDITOR" : collab.role}
-                                  onChange={(e) => handleUpdateRole(collabUserId, e.target.value)}
-                                  className="text-xs bg-surface-container font-semibold rounded-lg px-2.5 py-1.5 border border-outline-variant text-on-surface focus:border-primary-fixed focus:outline-none cursor-pointer"
-                                >
-                                  <option value="OWNER">Owner (Full Access)</option>
-                                  <option value="EDITOR">Editor (Edit & Deploy)</option>
-                                  <option value="VIEWER">Viewer (Read Only)</option>
-                                </select>
-                              </div>
+                            {isPending ? (
+                              isOwnerOrAdmin && (
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    onClick={async () => {
+                                      try {
+                                        const inviteId = collab.inviteId || collab.id;
+                                        const res = await fetch(`/api/projects/${env?.projectId}/invites/${inviteId}/resend`, {
+                                          method: "POST",
+                                        });
+                                        if (res.ok) {
+                                          toast.success("Invitation resent successfully");
+                                          mutateMembers();
+                                        } else {
+                                          toast.error("Failed to resend invitation");
+                                        }
+                                      } catch {
+                                        toast.error("Error resending invitation");
+                                      }
+                                    }}
+                                    className="px-2.5 py-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high border border-outline-variant text-on-surface-variant hover:text-on-surface text-xs font-semibold transition-colors flex items-center gap-1 cursor-pointer"
+                                    title="Resend invitation"
+                                  >
+                                    <Send className="w-3 h-3" />
+                                    <span>Resend</span>
+                                  </button>
+                                  <button
+                                    onClick={async () => {
+                                      if (!confirm(`Revoke invitation for ${collab.user?.username || collab.user?.email}?`)) return;
+                                      try {
+                                        const inviteId = collab.inviteId || collab.id;
+                                        const res = await fetch(`/api/projects/${env?.projectId}/invites/${inviteId}/revoke`, {
+                                          method: "POST",
+                                        });
+                                        if (res.ok) {
+                                          toast.success("Invitation revoked");
+                                          mutateMembers();
+                                        } else {
+                                          toast.error("Failed to revoke invitation");
+                                        }
+                                      } catch {
+                                        toast.error("Error revoking invitation");
+                                      }
+                                    }}
+                                    className="px-2.5 py-1.5 rounded-lg bg-error/10 hover:bg-error/20 border border-error/20 text-error text-xs font-semibold transition-colors flex items-center gap-1 cursor-pointer"
+                                    title="Revoke invitation"
+                                  >
+                                    <X className="w-3 h-3" />
+                                    <span>Revoke</span>
+                                  </button>
+                                </div>
+                              )
                             ) : (
-                              <div
-                                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${currentRoleCfg.badgeClass}`}
-                              >
-                                <RoleIcon className="w-3.5 h-3.5" />
-                                <span>{currentRoleCfg.label}</span>
-                              </div>
-                            )}
-
-                            {/* Remove / Leave Action Button */}
-                            {canRemove && (
-                              <button
-                                onClick={() => handleRemoveCollaborator(collabUserId, isMe)}
-                                className={`px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors text-xs font-medium cursor-pointer ${isMe
-                                  ? "bg-amber-500/10 text-amber-500 hover:bg-amber-500/20 border border-amber-500/20"
-                                  : "bg-error/10 text-error hover:bg-error/20 border border-error/20"
-                                  }`}
-                                title={isMe ? "Leave this project" : "Remove collaborator"}
-                              >
-                                {isMe ? (
-                                  <>
-                                    <LogOut className="w-3.5 h-3.5" />
-                                    <span>Leave</span>
-                                  </>
+                              <>
+                                {/* Role Dropdown (If Owner and not modifying self) */}
+                                {isOwnerOrAdmin && !isMe ? (
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-[11px] text-on-surface-variant/60 hidden sm:inline">Role:</span>
+                                    <select
+                                      value={collab.role === "COLLABORATOR" ? "EDITOR" : collab.role}
+                                      onChange={(e) => {
+                                        const newRole = e.target.value;
+                                        if (confirm(`Change role for ${collab.user?.username || collab.user?.email} to ${newRole}?`)) {
+                                          handleUpdateRole(collabUserId, newRole);
+                                        }
+                                      }}
+                                      className="text-xs bg-surface-container font-semibold rounded-lg px-2.5 py-1.5 border border-outline-variant text-on-surface focus:border-primary-fixed focus:outline-none cursor-pointer"
+                                    >
+                                      <option value="EDITOR">Editor (Edit & Deploy)</option>
+                                      <option value="VIEWER">Viewer (Read Only)</option>
+                                    </select>
+                                  </div>
                                 ) : (
-                                  <>
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                    <span className="hidden sm:inline">Remove</span>
-                                  </>
+                                  <div
+                                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${currentRoleCfg.badgeClass}`}
+                                  >
+                                    <RoleIcon className="w-3.5 h-3.5" />
+                                    <span>{currentRoleCfg.label}</span>
+                                  </div>
                                 )}
-                              </button>
+
+                                {/* Remove / Leave Action Button */}
+                                {canRemove && (
+                                  <button
+                                    onClick={() => handleRemoveCollaborator(collabUserId, isMe)}
+                                    className={`px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors text-xs font-medium cursor-pointer ${
+                                      isMe
+                                        ? "bg-amber-500/10 text-amber-500 hover:bg-amber-500/20 border border-amber-500/20"
+                                        : "bg-error/10 text-error hover:bg-error/20 border border-error/20"
+                                    }`}
+                                    title={isMe ? "Leave this project" : "Remove collaborator"}
+                                  >
+                                    {isMe ? (
+                                      <>
+                                        <LogOut className="w-3.5 h-3.5" />
+                                        <span>Leave</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                        <span className="hidden sm:inline">Remove</span>
+                                      </>
+                                    )}
+                                  </button>
+                                )}
+                              </>
                             )}
                           </div>
                         </div>
@@ -2161,7 +2232,7 @@ export default function EnvironmentDetail() {
                           className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-primary/10 border border-primary/30 text-primary hover:bg-primary/20 disabled:opacity-30 disabled:hover:bg-primary/10 transition-colors text-xs font-semibold"
                         >
                           {saveState === "saving" ||
-                            saveState === "reloading" ? (
+                          saveState === "reloading" ? (
                             <Loader2 className="w-3.5 h-3.5 animate-spin" />
                           ) : (
                             <Save className="w-3.5 h-3.5" />
@@ -2173,12 +2244,13 @@ export default function EnvironmentDetail() {
                       {/* Dev Loop Status Indicator */}
                       {saveState !== "idle" && (
                         <div
-                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded border text-xs font-semibold transition-colors ${saveState === "live"
-                            ? "bg-green-500/20 border-green-500/40 text-green-400 shadow-[0_0_10px_rgba(34,197,94,0.3)]"
-                            : saveState === "failed"
-                              ? "bg-red-500/20 border-red-500/40 text-red-400 shadow-[0_0_10px_rgba(239,68,68,0.3)]"
-                              : "bg-amber-500/10 border-amber-500/20 text-amber-400"
-                            }`}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded border text-xs font-semibold transition-colors ${
+                            saveState === "live"
+                              ? "bg-green-500/20 border-green-500/40 text-green-400 shadow-[0_0_10px_rgba(34,197,94,0.3)]"
+                              : saveState === "failed"
+                                ? "bg-red-500/20 border-red-500/40 text-red-400 shadow-[0_0_10px_rgba(239,68,68,0.3)]"
+                                : "bg-amber-500/10 border-amber-500/20 text-amber-400"
+                          }`}
                         >
                           {saveState === "saving" && (
                             <>
@@ -2275,6 +2347,8 @@ export default function EnvironmentDetail() {
         onClose={() => setIsInviteModalOpen(false)}
         onInvite={handleInvite}
         isInviting={isInviting}
+        projectId={env?.projectId}
+        projectName={project?.name || env?.name || "Environment Workspace"}
       />
 
       {/* Transfer Sandbox Modal */}

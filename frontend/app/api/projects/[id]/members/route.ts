@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getProjectById } from "@/lib/projects-store";
+import { getProjectById, getInvitations } from "@/lib/projects-store";
 
 export async function GET(
   req: NextRequest,
@@ -57,18 +57,55 @@ export async function GET(
   }
 
   const collabs = (project?.collaborators && project.collaborators.length > 0)
-    ? project.collaborators
+    ? [...project.collaborators]
     : [
         {
           id: "m-owner",
           userId: "user-ayushcn",
           role: "OWNER",
           status: "ACTIVE",
+          acceptedAt: "2026-01-01T00:00:00Z",
           user: {
             username: "AyushCN",
             email: "ayushcn@gmail.com",
           },
         },
       ];
+
+  // Include pending invitations for this project
+  try {
+    const allInvites = getInvitations();
+    const now = new Date();
+    const pendingForProj = allInvites.filter(
+      (inv) => inv.projectId === id && inv.status === "PENDING" && new Date(inv.expiresAt) > now
+    );
+
+    for (const inv of pendingForProj) {
+      const username = inv.inviteeIdentifier.split("@")[0] || "Invited User";
+      const unameLower = username.toLowerCase();
+      const defaultEmail = (unameLower === "ayushcn" || unameLower === "ayush")
+        ? "ayushcn@gmail.com"
+        : `${unameLower}@users.api-sandbox.local`;
+      const email = inv.inviteeIdentifier.includes("@") ? inv.inviteeIdentifier : defaultEmail;
+
+      collabs.push({
+        id: inv.id,
+        inviteId: inv.id,
+        userId: inv.inviteeId || `user-${unameLower}`,
+        role: inv.role,
+        status: "PENDING",
+        createdAt: inv.createdAt,
+        expiresAt: inv.expiresAt,
+        inviterName: inv.inviterName,
+        user: {
+          username,
+          email,
+        },
+      });
+    }
+  } catch {
+    // Non-fatal if invitations file cannot be read
+  }
+
   return NextResponse.json(collabs);
 }

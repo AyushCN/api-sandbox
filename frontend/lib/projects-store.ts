@@ -275,6 +275,11 @@ export function createProjectInvitation(
     throw new Error("An invitation is already pending for this user");
   }
 
+  // Ownership guard
+  if (role === "OWNER") {
+    throw new Error("Project ownership cannot be assigned through ordinary invitations");
+  }
+
   const validRole = role === "VIEWER" ? "VIEWER" : "EDITOR";
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
@@ -410,6 +415,23 @@ export function revokeProjectInvitation(projectId: string, invitationId: string)
   invite.status = "REVOKED";
   saveInvitations(invites);
   return true;
+}
+
+export function resendProjectInvitation(projectId: string, invitationId: string): StoredInvitation {
+  const invites = getInvitations();
+  const invite = invites.find((i) => i.id === invitationId && i.projectId === projectId);
+  if (!invite) {
+    throw new Error("Invitation not found");
+  }
+
+  if (invite.status !== "PENDING") {
+    throw new Error("Only pending invitations can be resent");
+  }
+
+  // Extend expiration by 7 days from now
+  invite.expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  saveInvitations(invites);
+  return invite;
 }
 
 export function inviteCollaborator(projectId: string, identifier: string, role = "EDITOR"): any {

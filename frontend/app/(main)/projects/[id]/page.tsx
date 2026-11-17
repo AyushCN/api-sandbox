@@ -22,8 +22,23 @@ import {
   Plus,
   Lock,
   Share2,
+  Crown,
+  ShieldCheck,
+  Eye,
+  Clock,
+  Trash2,
+  Copy,
+  Edit3,
+  Send,
+  Search,
+  RefreshCw,
+  UserPlus,
+  Shield,
+  X,
+  Check,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
+import toast from "react-hot-toast";
 import { fetchWithAuth } from "@/lib/auth";
 import { motion } from "framer-motion";
 import { InviteCollaboratorModal } from "@/components/editor/InviteCollaboratorModal";
@@ -47,6 +62,11 @@ interface ProjectMember {
   role: string;
   status: string;
   user?: { username?: string; email?: string };
+  acceptedAt?: string;
+  createdAt?: string;
+  expiresAt?: string;
+  inviteId?: string;
+  inviterName?: string;
 }
 
 interface ProjectRepository {
@@ -181,6 +201,7 @@ export default function ProjectDetailsPage({ params }: { params: Promise<{ id: s
   const project = projectData || fallbackProject;
 
   const { data: members, mutate: mutateMembers } = useSWR<ProjectMember[]>(`/api/projects/${id}/members`, fetcher, { refreshInterval: 10000 });
+  const { data: currentUser } = useSWR<{ id?: string; username?: string; email?: string }>("/api/me", fetcher);
   const { data: repositories, mutate: mutateRepositories } = useSWR<ProjectRepository[]>(`/api/projects/${id}/repositories`, fetcher);
   const { data: workspaces }   = useSWR<Workspace[]>(`/api/projects/${id}/workspaces`, fetcher, { refreshInterval: 5000 });
   const { data: changeRequests } = useSWR<ChangeRequest[]>(`/api/projects/${id}/change-requests`, fetcher, { refreshInterval: 5000 });
@@ -207,6 +228,19 @@ export default function ProjectDetailsPage({ params }: { params: Promise<{ id: s
   const openCRs = Array.isArray(changeRequests) ? changeRequests.filter((cr: ChangeRequest) => cr.status === "OPEN").length : 0;
 
   const isDefaultProject = id === "default-project" || (project as any)?.isDefault === true;
+  const isOwner = isDefaultProject || Boolean(
+    currentUser && (
+      (project as any)?.createdBy === currentUser.email ||
+      (project as any)?.createdBy === currentUser.username ||
+      members?.some(
+        (m) =>
+          (m.role === "OWNER" || m.role === "ADMIN") &&
+          (m.userId === currentUser.id ||
+            m.user?.email === currentUser.email ||
+            m.user?.username === currentUser.username)
+      )
+    )
+  );
 
   const allTabs: { id: Tab; label: string; icon: React.ElementType; count?: number }[] = [
     { id: "overview",        label: "Overview",        icon: Folder    },
@@ -307,7 +341,17 @@ export default function ProjectDetailsPage({ params }: { params: Promise<{ id: s
       <motion.div key={activeTab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }}>
         {activeTab === "overview"        && <OverviewTab project={project} members={members} repositories={repositories} workspaces={workspaces} openCRs={openCRs} />}
         {activeTab === "repositories"    && <RepositoriesTab repositories={repositories} projectId={id} mutateRepositories={mutateRepositories} />}
-        {activeTab === "members"         && <MembersTab members={members} projectId={id} mutateMembers={mutateMembers} />}
+        {activeTab === "members"         && (
+          <MembersTab
+            members={members}
+            projectId={id}
+            projectName={project.name}
+            isOwner={isOwner}
+            isDefaultProject={isDefaultProject}
+            currentUser={currentUser}
+            mutateMembers={mutateMembers}
+          />
+        )}
         {activeTab === "workspaces"      && <WorkspacesTab workspaces={workspaces} projectId={id} />}
         {activeTab === "environments"    && <EnvironmentsTab environments={environments} projectId={id} />}
         {activeTab === "change-requests" && <ChangeRequestsTab changeRequests={changeRequests} />}
@@ -480,74 +524,824 @@ function RepositoriesTab({ repositories, projectId, mutateRepositories }: { repo
 
 // ── Members Tab ────────────────────────────────────────────────────────────────
 
-function MembersTab({ members, projectId, mutateMembers }: { members?: ProjectMember[], projectId: string, mutateMembers: () => void }) {
+interface MembersTabProps {
+  members?: ProjectMember[];
+  projectId: string;
+  projectName: string;
+  isOwner: boolean;
+  isDefaultProject: boolean;
+  currentUser?: { id?: string; username?: string; email?: string };
+  mutateMembers: () => void;
+}
+
+function MembersTab({
+  members,
+  projectId,
+  projectName,
+  isOwner,
+  isDefaultProject,
+  currentUser,
+  mutateMembers,
+}: MembersTabProps) {
   const [isInviteOpen, setIsInviteOpen] = useState(false);
   const [isInviting, setIsInviting] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [roleFilter, setRoleFilter] = useState<"ALL" | "OWNER" | "EDITOR" | "VIEWER" | "PENDING">("ALL");
 
+  // Confirmation Modals State
+  const [roleChangeModal, setRoleChangeModal] = useState<{
+    member: ProjectMember;
+    targetRole: "EDITOR" | "VIEWER";
+  } | null>(null);
+
+  const [removeModal, setRemoveModal] = useState<ProjectMember | null>(null);
+  const [revokeModal, setRevokeModal] = useState<ProjectMember | null>(null);
+  const [isSubmittingAction, setIsSubmittingAction] = useState(false);
+
+  // Invite handler
   const handleInvite = async (identifier: string, role: string) => {
     setIsInviting(true);
     try {
       const res = await fetch(`/api/projects/${projectId}/invite`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${localStorage.getItem("token")}` },
-        body: JSON.stringify({ identifier, role: role === "COLLABORATOR" ? "EDITOR" : role })
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${localStorage.getItem("token")}`,
+        },
+        body: JSON.stringify({
+          identifier,
+          role: role === "VIEWER" ? "VIEWER" : "EDITOR",
+          inviter: currentUser
+            ? {
+                userId: currentUser.id,
+                username: currentUser.username,
+                email: currentUser.email,
+              }
+            : undefined,
+        }),
       });
+
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
         setIsInviteOpen(false);
+        toast.success(`Invitation sent to ${identifier}`);
         mutateMembers();
       } else {
-        const errorData = await res.json();
-        alert(errorData.error || "Failed to invite user");
+        toast.error(data.error || "Failed to invite user");
+        throw new Error(data.error || "Failed to invite user");
       }
     } finally {
       setIsInviting(false);
     }
   };
 
+  // Change Role handler
+  const handleConfirmRoleChange = async () => {
+    if (!roleChangeModal) return;
+    const { member, targetRole } = roleChangeModal;
+    const memberId = member.userId || member.id;
+    setIsSubmittingAction(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/collaborators/${memberId}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${localStorage.getItem("token")}`,
+        },
+        body: JSON.stringify({ role: targetRole }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        toast.success(`Role updated to ${targetRole} for ${member.user?.username || member.user?.email}`);
+        mutateMembers();
+        setRoleChangeModal(null);
+      } else {
+        toast.error(data.error || "Failed to update member role");
+      }
+    } catch {
+      toast.error("Network error while updating role");
+    } finally {
+      setIsSubmittingAction(false);
+    }
+  };
+
+  // Remove Member handler
+  const handleConfirmRemoveMember = async () => {
+    if (!removeModal) return;
+    const memberId = removeModal.userId || removeModal.id;
+    setIsSubmittingAction(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/collaborators/${memberId}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("token")}`,
+        },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        toast.success(`Removed ${removeModal.user?.username || removeModal.user?.email} from project`);
+        mutateMembers();
+        setRemoveModal(null);
+      } else {
+        toast.error(data.error || "Failed to remove member");
+      }
+    } catch {
+      toast.error("Network error while removing member");
+    } finally {
+      setIsSubmittingAction(false);
+    }
+  };
+
+  // Resend Invite handler
+  const handleResendInvite = async (member: ProjectMember) => {
+    const inviteId = member.inviteId || member.id;
+    try {
+      const res = await fetch(`/api/projects/${projectId}/invites/${inviteId}/resend`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${localStorage.getItem("token")}`,
+        },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        toast.success(`Invitation resent to ${member.user?.username || member.user?.email}`);
+        mutateMembers();
+      } else {
+        toast.error(data.error || "Failed to resend invitation");
+      }
+    } catch {
+      toast.error("Network error while resending invitation");
+    }
+  };
+
+  // Revoke Invite handler
+  const handleConfirmRevokeInvite = async () => {
+    if (!revokeModal) return;
+    const inviteId = revokeModal.inviteId || revokeModal.id;
+    setIsSubmittingAction(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/invites/${inviteId}/revoke`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${localStorage.getItem("token")}`,
+        },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        toast.success(`Revoked invitation for ${revokeModal.user?.username || revokeModal.user?.email}`);
+        mutateMembers();
+        setRevokeModal(null);
+      } else {
+        toast.error(data.error || "Failed to revoke invitation");
+      }
+    } catch {
+      toast.error("Network error while revoking invitation");
+    } finally {
+      setIsSubmittingAction(false);
+    }
+  };
+
   if (!Array.isArray(members)) return <LoadingPlaceholder />;
 
+  // Personal space isolation guard banner
+  if (isDefaultProject) {
+    return (
+      <div className="space-y-4">
+        <div className="p-5 rounded-2xl bg-primary-fixed/10 border border-primary-fixed/30 flex items-start gap-4 shadow-sm">
+          <div className="w-10 h-10 rounded-xl bg-primary-fixed/20 border border-primary-fixed/30 flex items-center justify-center text-primary-fixed shrink-0">
+            <Shield className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="font-bold text-sm uppercase tracking-wider text-primary-fixed">
+                Default Project (Personal Space)
+              </h3>
+              <span className="text-[10px] bg-primary-fixed/20 text-primary-fixed px-2 py-0.5 rounded-full font-bold">
+                Private Space
+              </span>
+            </div>
+            <p className="text-xs text-on-surface-variant mt-1 leading-relaxed">
+              This environment is part of your private Default Project and is owned exclusively by you (
+              <strong>{currentUser?.username || "AyushCN"}</strong>). It cannot be shared with collaborators. To share containers and invite teammates with role-based access, create a Shareable Project from the Projects section.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Summary counts
+  const totalCount = members.length;
+  const ownerCount = members.filter((m) => m.role === "OWNER").length;
+  const editorCount = members.filter((m) => m.role === "EDITOR" || m.role === "COLLABORATOR" || m.role === "ADMIN").length;
+  const viewerCount = members.filter((m) => m.role === "VIEWER").length;
+  const pendingCount = members.filter((m) => m.status === "PENDING" || !m.acceptedAt).length;
+
+  // Filtered members
+  const filteredMembers = members.filter((m) => {
+    const q = searchQuery.toLowerCase().trim();
+    const uname = (m.user?.username || "").toLowerCase();
+    const email = (m.user?.email || "").toLowerCase();
+    const role = (m.role || "").toLowerCase();
+
+    const matchesSearch = !q || uname.includes(q) || email.includes(q) || role.includes(q);
+    if (!matchesSearch) return false;
+
+    if (roleFilter === "ALL") return true;
+    if (roleFilter === "PENDING") return m.status === "PENDING" || !m.acceptedAt;
+    if (roleFilter === "OWNER") return m.role === "OWNER";
+    if (roleFilter === "EDITOR") return m.role === "EDITOR" || m.role === "COLLABORATOR" || m.role === "ADMIN";
+    if (roleFilter === "VIEWER") return m.role === "VIEWER";
+    return true;
+  });
+
   return (
-    <div className="space-y-3">
-      <div className="flex justify-between items-center pb-2">
-        <h2 className="text-sm font-bold tracking-wide text-on-surface-variant uppercase">Project Members</h2>
-        <button
-          onClick={() => setIsInviteOpen(true)}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary-fixed/10 text-primary-fixed hover:bg-primary-fixed/20 text-sm font-semibold transition-colors border border-primary-fixed/20"
-        >
-          <Plus className="w-4 h-4" /> Add Member
-        </button>
+    <div className="space-y-6">
+      {/* Header & Action Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-outline-variant/60">
+        <div>
+          <div className="flex items-center gap-2">
+            <Users className="w-5 h-5 text-emerald-500" />
+            <h2 className="text-base font-bold text-on-surface">Project Members & Access Control</h2>
+          </div>
+          <p className="text-xs text-on-surface-variant mt-0.5">
+            Manage project member permissions, roles (Owner, Editor, Viewer), and collaboration invitations.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2.5">
+          <button
+            onClick={() => {
+              mutateMembers();
+              toast.success("Members list refreshed");
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high border border-outline-variant text-on-surface-variant hover:text-on-surface transition-colors text-xs font-semibold cursor-pointer"
+            title="Refresh list"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            Refresh
+          </button>
+
+          {isOwner && (
+            <button
+              onClick={() => setIsInviteOpen(true)}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold transition-all shadow-md shadow-emerald-500/20 cursor-pointer"
+            >
+              <UserPlus className="w-4 h-4" />
+              Invite Members
+            </button>
+          )}
+        </div>
       </div>
 
-      {members.length === 0 ? (
-        <EmptyState icon={Users} title="No members" description="Invite collaborators to this project." />
-      ) : (
-        members.map((m: ProjectMember, idx: number) => (
-          <motion.div key={m.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.04 }}
-            className="bg-surface-container-lowest border border-outline-variant rounded-xl p-5 flex items-center gap-4"
-          >
-            <div className="w-10 h-10 rounded-full bg-primary-fixed/10 border border-primary-fixed/20 flex items-center justify-center shrink-0 text-primary-fixed font-bold text-sm">
-              {(m.user?.username || m.user?.email || "?")[0].toUpperCase()}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="font-semibold text-on-surface">{m.user?.username || m.user?.email || m.userId}</p>
-              <p className="text-xs text-on-surface-variant">{m.user?.email}</p>
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <RoleBadge role={m.role} />
-              {m.status === "PENDING" && (
-                <span className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full bg-yellow-400/10 text-yellow-400 border border-yellow-400/20 uppercase">Pending</span>
-              )}
-            </div>
-          </motion.div>
-        ))
-      )}
+      {/* Summary Stats Row */}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+        <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-xl p-3.5 flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg bg-primary-fixed/10 border border-primary-fixed/20 flex items-center justify-center text-primary-fixed shrink-0">
+            <Users className="w-4 h-4" />
+          </div>
+          <div>
+            <div className="text-[11px] font-medium text-on-surface-variant uppercase tracking-wider">Total</div>
+            <div className="text-lg font-bold text-on-surface leading-tight">{totalCount}</div>
+          </div>
+        </div>
 
+        <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-xl p-3.5 flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-500 shrink-0">
+            <Crown className="w-4 h-4" />
+          </div>
+          <div>
+            <div className="text-[11px] font-medium text-on-surface-variant uppercase tracking-wider">Owners</div>
+            <div className="text-lg font-bold text-on-surface leading-tight">{ownerCount}</div>
+          </div>
+        </div>
+
+        <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-xl p-3.5 flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-500 shrink-0">
+            <ShieldCheck className="w-4 h-4" />
+          </div>
+          <div>
+            <div className="text-[11px] font-medium text-on-surface-variant uppercase tracking-wider">Editors</div>
+            <div className="text-lg font-bold text-on-surface leading-tight">{editorCount}</div>
+          </div>
+        </div>
+
+        <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-xl p-3.5 flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg bg-slate-500/10 border border-slate-500/20 flex items-center justify-center text-slate-400 shrink-0">
+            <Eye className="w-4 h-4" />
+          </div>
+          <div>
+            <div className="text-[11px] font-medium text-on-surface-variant uppercase tracking-wider">Viewers</div>
+            <div className="text-lg font-bold text-on-surface leading-tight">{viewerCount}</div>
+          </div>
+        </div>
+
+        <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-xl p-3.5 flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg bg-orange-500/10 border border-orange-500/20 flex items-center justify-center text-orange-500 shrink-0">
+            <Clock className="w-4 h-4" />
+          </div>
+          <div>
+            <div className="text-[11px] font-medium text-on-surface-variant uppercase tracking-wider">Pending</div>
+            <div className="text-lg font-bold text-on-surface leading-tight">{pendingCount}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Search & Filter Toolbar */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-surface-container/30 p-2.5 rounded-xl border border-outline-variant/50">
+        <div className="relative flex-1 max-w-md">
+          <Search className="w-4 h-4 text-on-surface-variant/50 absolute left-3 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search by email, username or role..."
+            className="w-full pl-9 pr-3 py-1.5 text-xs rounded-lg bg-surface-container border border-outline-variant text-on-surface placeholder:text-on-surface-variant/40 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 transition-all font-medium"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery("")}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-on-surface-variant hover:text-on-surface"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+          {(["ALL", "OWNER", "EDITOR", "VIEWER", "PENDING"] as const).map((filter) => {
+            const isActive = roleFilter === filter;
+            return (
+              <button
+                key={filter}
+                onClick={() => setRoleFilter(filter)}
+                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all whitespace-nowrap cursor-pointer ${
+                  isActive
+                    ? "bg-emerald-500/15 text-emerald-500 border border-emerald-500/30"
+                    : "text-on-surface-variant hover:text-on-surface hover:bg-surface-container border border-transparent"
+                }`}
+              >
+                {filter === "ALL" ? "All Roles" : filter.charAt(0) + filter.slice(1).toLowerCase()}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Members Management Table */}
+      <div className="bg-surface-container-lowest border border-outline-variant rounded-xl overflow-hidden shadow-sm">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-surface-container/40 border-b border-outline-variant/60 text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
+                <th className="py-3 px-4">Member</th>
+                <th className="py-3 px-4">Email</th>
+                <th className="py-3 px-4">Assigned Role</th>
+                <th className="py-3 px-4">Status</th>
+                <th className="py-3 px-4">Joined / Invited</th>
+                <th className="py-3 px-4 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-outline-variant/40 text-xs">
+              {filteredMembers.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-12 text-center text-on-surface-variant">
+                    <Users className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                    <p className="font-semibold text-sm">No members found</p>
+                    <p className="text-xs text-on-surface-variant/70 mt-1">
+                      {searchQuery || roleFilter !== "ALL"
+                        ? "Try clearing your search query or switching filters."
+                        : "Invite teammates to collaborate with Editor or Viewer roles."}
+                    </p>
+                  </td>
+                </tr>
+              ) : (
+                filteredMembers.map((m) => {
+                  const memberUserId = m.userId || m.id;
+                  const isMe = currentUser && (
+                    currentUser.id === memberUserId ||
+                    currentUser.email === m.user?.email ||
+                    currentUser.username === m.user?.username
+                  );
+                  const isTargetOwner = m.role === "OWNER";
+                  const isPending = m.status === "PENDING" || !m.acceptedAt;
+
+                  // Role badge config
+                  const roleConfig: Record<string, { label: string; icon: any; badgeClass: string; avatarBorder: string }> = {
+                    OWNER: {
+                      label: "Owner",
+                      icon: Crown,
+                      badgeClass: "bg-amber-500/10 text-amber-500 border-amber-500/30",
+                      avatarBorder: "border-amber-500/40 bg-amber-500/10 text-amber-500",
+                    },
+                    EDITOR: {
+                      label: "Editor",
+                      icon: ShieldCheck,
+                      badgeClass: "bg-emerald-500/10 text-emerald-500 border-emerald-500/30",
+                      avatarBorder: "border-emerald-500/40 bg-emerald-500/10 text-emerald-500",
+                    },
+                    COLLABORATOR: {
+                      label: "Editor",
+                      icon: ShieldCheck,
+                      badgeClass: "bg-emerald-500/10 text-emerald-500 border-emerald-500/30",
+                      avatarBorder: "border-emerald-500/40 bg-emerald-500/10 text-emerald-500",
+                    },
+                    ADMIN: {
+                      label: "Admin",
+                      icon: ShieldCheck,
+                      badgeClass: "bg-purple-500/10 text-purple-500 border-purple-500/30",
+                      avatarBorder: "border-purple-500/40 bg-purple-500/10 text-purple-500",
+                    },
+                    VIEWER: {
+                      label: "Viewer",
+                      icon: Eye,
+                      badgeClass: "bg-slate-500/10 text-slate-400 border-slate-500/30",
+                      avatarBorder: "border-slate-500/40 bg-slate-500/10 text-slate-400",
+                    },
+                  };
+
+                  const currentRoleCfg = roleConfig[m.role] || roleConfig.VIEWER;
+                  const RoleIcon = currentRoleCfg.icon;
+
+                  const rawDate = isPending ? m.createdAt : m.acceptedAt || m.createdAt;
+                  const formattedDate = rawDate
+                    ? formatDistanceToNow(new Date(rawDate), { addSuffix: true })
+                    : "–";
+
+                  return (
+                    <tr key={m.id || memberUserId} className="hover:bg-surface-container/20 transition-colors">
+                      {/* Member */}
+                      <td className="py-3 px-4">
+                        <div className="flex items-center gap-3">
+                          <div
+                            className={`w-9 h-9 rounded-full border-2 flex items-center justify-center font-bold text-xs shrink-0 ${currentRoleCfg.avatarBorder}`}
+                          >
+                            {(m.user?.username || m.user?.email || "?")[0]?.toUpperCase()}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-1.5 font-semibold text-on-surface">
+                              <span>{m.user?.username || "Collaborator"}</span>
+                              {isMe && (
+                                <span className="text-[10px] bg-primary-fixed/20 text-primary-fixed px-1.5 py-0.2 rounded-full font-bold">
+                                  You
+                                </span>
+                              )}
+                            </div>
+                            {isPending && m.inviterName && (
+                              <span className="text-[10px] text-on-surface-variant/60 block">
+                                Invited by {m.inviterName}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* Email */}
+                      <td className="py-3 px-4 text-on-surface-variant">
+                        <div className="flex items-center gap-1.5 max-w-[200px]">
+                          <span className="truncate">{m.user?.email || "–"}</span>
+                          {m.user?.email && (
+                            <button
+                              onClick={() => {
+                                navigator.clipboard.writeText(m.user?.email || "");
+                                toast.success("Email copied to clipboard");
+                              }}
+                              className="text-on-surface-variant/40 hover:text-on-surface transition-colors cursor-pointer"
+                              title="Copy email"
+                            >
+                              <Copy className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* Role */}
+                      <td className="py-3 px-4">
+                        <span
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold border ${currentRoleCfg.badgeClass}`}
+                        >
+                          <RoleIcon className="w-3 h-3" />
+                          <span>{currentRoleCfg.label}</span>
+                        </span>
+                      </td>
+
+                      {/* Status */}
+                      <td className="py-3 px-4">
+                        {isPending ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] bg-amber-500/15 text-amber-500 px-2 py-0.5 rounded-full font-semibold border border-amber-500/30">
+                            <Clock className="w-3 h-3 animate-spin" />
+                            Pending Invite
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[11px] bg-emerald-500/15 text-emerald-500 px-2 py-0.5 rounded-full font-semibold border border-emerald-500/30">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                            Active
+                          </span>
+                        )}
+                      </td>
+
+                      {/* Joined / Invited Date */}
+                      <td className="py-3 px-4 text-on-surface-variant text-[11px]">
+                        {formattedDate}
+                      </td>
+
+                      {/* Actions */}
+                      <td className="py-3 px-4 text-right">
+                        {isPending ? (
+                          /* Pending Invitation Actions */
+                          isOwner && (
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                onClick={() => handleResendInvite(m)}
+                                className="px-2.5 py-1 rounded-lg bg-surface-container hover:bg-surface-container-high border border-outline-variant text-on-surface-variant hover:text-on-surface text-[11px] font-semibold transition-colors flex items-center gap-1 cursor-pointer"
+                                title="Resend invitation"
+                              >
+                                <Send className="w-3 h-3" />
+                                Resend
+                              </button>
+                              <button
+                                onClick={() => setRevokeModal(m)}
+                                className="px-2.5 py-1 rounded-lg bg-error/10 hover:bg-error/20 border border-error/20 text-error text-[11px] font-semibold transition-colors flex items-center gap-1 cursor-pointer"
+                                title="Revoke invitation"
+                              >
+                                <X className="w-3 h-3" />
+                                Revoke
+                              </button>
+                            </div>
+                          )
+                        ) : isTargetOwner ? (
+                          /* Primary Owner Protection */
+                          <span className="text-[11px] font-medium text-amber-500/80 italic">
+                            Primary Owner
+                          </span>
+                        ) : (
+                          /* Accepted Member Actions */
+                          isOwner && !isMe && (
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                onClick={() =>
+                                  setRoleChangeModal({
+                                    member: m,
+                                    targetRole: m.role === "VIEWER" ? "EDITOR" : "VIEWER",
+                                  })
+                                }
+                                className="px-2.5 py-1 rounded-lg bg-surface-container hover:bg-surface-container-high border border-outline-variant text-on-surface-variant hover:text-on-surface text-[11px] font-semibold transition-colors flex items-center gap-1 cursor-pointer"
+                                title="Change Role"
+                              >
+                                <Edit3 className="w-3 h-3" />
+                                Change Role
+                              </button>
+                              <button
+                                onClick={() => setRemoveModal(m)}
+                                className="px-2.5 py-1 rounded-lg bg-error/10 hover:bg-error/20 border border-error/20 text-error text-[11px] font-semibold transition-colors flex items-center gap-1 cursor-pointer"
+                                title="Remove member"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                Remove
+                              </button>
+                            </div>
+                          )
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Role-Based Access Control (RBAC) Permissions Matrix */}
+      <div className="border border-outline-variant/60 rounded-xl bg-surface-container/30 p-5 space-y-3">
+        <div className="flex items-center gap-2">
+          <Shield className="w-4 h-4 text-emerald-500" />
+          <h4 className="text-xs font-bold text-on-surface uppercase tracking-wider">
+            Role-Based Access Control (RBAC) Permissions Matrix
+          </h4>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+          <div className="p-3.5 rounded-xl bg-surface-container/60 border border-outline-variant/40 space-y-1.5">
+            <div className="flex items-center gap-1.5 font-bold text-amber-500">
+              <Crown className="w-3.5 h-3.5" />
+              <span>Owner</span>
+            </div>
+            <p className="text-[11px] text-on-surface-variant leading-relaxed">
+              Full administrative control. Can invite collaborators, assign/change member roles, transfer ownership, modify environment configurations, and delete sandboxes.
+            </p>
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-surface-container/60 border border-outline-variant/40 space-y-1.5">
+            <div className="flex items-center gap-1.5 font-bold text-emerald-500">
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>Editor</span>
+            </div>
+            <p className="text-[11px] text-on-surface-variant leading-relaxed">
+              Read and write development access. Can access workspaces, create/edit code in Monaco editor, execute terminal commands via xterm.js, and deploy containers.
+            </p>
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-surface-container/60 border border-outline-variant/40 space-y-1.5">
+            <div className="flex items-center gap-1.5 font-bold text-slate-400">
+              <Eye className="w-3.5 h-3.5" />
+              <span>Viewer</span>
+            </div>
+            <p className="text-[11px] text-on-surface-variant leading-relaxed">
+              Read-only audit access. Can view live preview URLs, inspect real-time logs, stream WebSocket outputs, and review project metrics without modifying resources.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Invite Collaborator Modal */}
       <InviteCollaboratorModal
         isOpen={isInviteOpen}
         onClose={() => setIsInviteOpen(false)}
         onInvite={handleInvite}
         isInviting={isInviting}
+        projectId={projectId}
+        projectName={projectName}
       />
+
+      {/* Role Change Confirmation Modal */}
+      {roleChangeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+          <div className="w-full max-w-md bg-surface-container-lowest rounded-2xl border border-outline-variant p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-500 shrink-0">
+                <Edit3 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-sm text-on-surface">Change Member Role</h3>
+                <p className="text-xs text-on-surface-variant">
+                  Update role for <strong>{roleChangeModal.member.user?.username || roleChangeModal.member.user?.email}</strong>
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-2 pt-2">
+              <label className="text-xs font-bold uppercase tracking-wider text-on-surface-variant block">
+                Assign New Role
+              </label>
+
+              <div
+                onClick={() =>
+                  setRoleChangeModal({ ...roleChangeModal, targetRole: "EDITOR" })
+                }
+                className={`p-3 rounded-xl border-2 cursor-pointer transition-all ${
+                  roleChangeModal.targetRole === "EDITOR"
+                    ? "border-emerald-500 bg-emerald-500/5"
+                    : "border-outline-variant/60 hover:border-outline-variant"
+                }`}
+              >
+                <div className="flex items-center justify-between font-bold text-xs text-on-surface">
+                  <span>Editor</span>
+                  {roleChangeModal.targetRole === "EDITOR" && (
+                    <span className="text-[10px] bg-emerald-500/20 text-emerald-500 px-2 py-0.5 rounded-full">
+                      Selected
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-on-surface-variant mt-1">
+                  Full development access to edit files, execute commands, and run containers.
+                </p>
+              </div>
+
+              <div
+                onClick={() =>
+                  setRoleChangeModal({ ...roleChangeModal, targetRole: "VIEWER" })
+                }
+                className={`p-3 rounded-xl border-2 cursor-pointer transition-all ${
+                  roleChangeModal.targetRole === "VIEWER"
+                    ? "border-emerald-500 bg-emerald-500/5"
+                    : "border-outline-variant/60 hover:border-outline-variant"
+                }`}
+              >
+                <div className="flex items-center justify-between font-bold text-xs text-on-surface">
+                  <span>Viewer</span>
+                  {roleChangeModal.targetRole === "VIEWER" && (
+                    <span className="text-[10px] bg-emerald-500/20 text-emerald-500 px-2 py-0.5 rounded-full">
+                      Selected
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-on-surface-variant mt-1">
+                  Read-only access to view files, container logs, and preview URLs.
+                </p>
+              </div>
+            </div>
+
+            <div className="pt-3 flex items-center justify-end gap-3 border-t border-outline-variant/60">
+              <button
+                type="button"
+                onClick={() => setRoleChangeModal(null)}
+                disabled={isSubmittingAction}
+                className="px-4 py-2 text-xs font-semibold text-on-surface-variant hover:text-on-surface rounded-lg hover:bg-surface-container transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmRoleChange}
+                disabled={isSubmittingAction}
+                className="px-4 py-2 text-xs font-bold rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white shadow-md flex items-center gap-2 cursor-pointer"
+              >
+                {isSubmittingAction && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                Confirm Role Change
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Remove Member Confirmation Modal */}
+      {removeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+          <div className="w-full max-w-md bg-surface-container-lowest rounded-2xl border border-outline-variant p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-error/10 border border-error/30 flex items-center justify-center text-error shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-sm text-on-surface">Remove Member</h3>
+                <p className="text-xs text-on-surface-variant">
+                  Revoke project access for <strong>{removeModal.user?.username || removeModal.user?.email}</strong>
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-on-surface-variant leading-relaxed">
+              Are you sure you want to remove <strong>{removeModal.user?.username || removeModal.user?.email}</strong> from this project? They will immediately lose access to all shared repositories, workspaces, and preview environments.
+            </p>
+
+            <div className="pt-3 flex items-center justify-end gap-3 border-t border-outline-variant/60">
+              <button
+                type="button"
+                onClick={() => setRemoveModal(null)}
+                disabled={isSubmittingAction}
+                className="px-4 py-2 text-xs font-semibold text-on-surface-variant hover:text-on-surface rounded-lg hover:bg-surface-container transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmRemoveMember}
+                disabled={isSubmittingAction}
+                className="px-4 py-2 text-xs font-bold rounded-xl bg-error hover:bg-error/90 text-on-error shadow-md flex items-center gap-2 cursor-pointer"
+              >
+                {isSubmittingAction && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                Remove Member
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Revoke Invitation Confirmation Modal */}
+      {revokeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+          <div className="w-full max-w-md bg-surface-container-lowest rounded-2xl border border-outline-variant p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-error/10 border border-error/30 flex items-center justify-center text-error shrink-0">
+                <X className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-sm text-on-surface">Revoke Invitation</h3>
+                <p className="text-xs text-on-surface-variant">
+                  Cancel pending invitation for <strong>{revokeModal.user?.username || revokeModal.user?.email}</strong>
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-on-surface-variant leading-relaxed">
+              Are you sure you want to revoke the pending invitation for <strong>{revokeModal.user?.username || revokeModal.user?.email}</strong>? The invitation link will immediately expire.
+            </p>
+
+            <div className="pt-3 flex items-center justify-end gap-3 border-t border-outline-variant/60">
+              <button
+                type="button"
+                onClick={() => setRevokeModal(null)}
+                disabled={isSubmittingAction}
+                className="px-4 py-2 text-xs font-semibold text-on-surface-variant hover:text-on-surface rounded-lg hover:bg-surface-container transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmRevokeInvite}
+                disabled={isSubmittingAction}
+                className="px-4 py-2 text-xs font-bold rounded-xl bg-error hover:bg-error/90 text-on-error shadow-md flex items-center gap-2 cursor-pointer"
+              >
+                {isSubmittingAction && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                Revoke Invitation
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

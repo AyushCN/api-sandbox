@@ -121,9 +121,7 @@ export function addProject(
 
   const username = creator?.username || "Owner";
   const unameLower = username.toLowerCase();
-  const defaultEmail = creator?.email || (unameLower === "admin"
-    ? "admin@api-sandbox.local"
-    : `${unameLower}@users.api-sandbox.local`);
+  const defaultEmail = creator?.email || `${unameLower}@users.api-sandbox.local`;
   const email = creator?.email || defaultEmail;
   const userId = creator?.userId || `user-${unameLower}`;
 
@@ -322,9 +320,7 @@ export function acceptProjectInvitation(
   if (!proj.collaborators) proj.collaborators = [];
   const username = user?.username || invite.inviteeIdentifier.split("@")[0] || "Collaborator";
   const unameLower = username.toLowerCase();
-  const defaultInviteEmail = unameLower === "admin"
-    ? "admin@api-sandbox.local"
-    : `${unameLower}@users.api-sandbox.local`;
+  const defaultInviteEmail = `${unameLower}@users.api-sandbox.local`;
   const email = user?.email || (invite.inviteeIdentifier.includes("@") ? invite.inviteeIdentifier : defaultInviteEmail);
   const userId = user?.userId || `user-${unameLower}`;
 

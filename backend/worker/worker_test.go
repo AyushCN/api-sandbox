@@ -26,7 +26,11 @@ func setupTestDB(t *testing.T) {
 
 	err = db.DB.AutoMigrate(
 		&models.Environment{},
+		&models.EnvironmentVariable{},
 		&models.Log{},
+		&models.Workspace{},
+		&models.WorkspaceRepository{},
+		&models.ProjectRepository{},
 	)
 	if err != nil {
 		t.Fatalf("AutoMigrate failed: %v", err)

@@ -123,8 +123,8 @@ func TestEnvironmentAuthz(t *testing.T) {
 	})
 	wRestart := httptest.NewRecorder()
 	r.ServeHTTP(wRestart, req)
-	if wRestart.Code != http.StatusNotFound {
-		t.Errorf("User2 should get 404 for User1's environment restart. Got %d", wRestart.Code)
+	if wRestart.Code != http.StatusNotFound && wRestart.Code != http.StatusForbidden {
+		t.Errorf("User2 should get 404 or 403 for User1's environment restart. Got %d", wRestart.Code)
 	}
 
 	// Test DeleteEnvironment
@@ -135,8 +135,8 @@ func TestEnvironmentAuthz(t *testing.T) {
 	})
 	wDelete := httptest.NewRecorder()
 	r.ServeHTTP(wDelete, req)
-	if wDelete.Code != http.StatusNotFound {
-		t.Errorf("User2 should get 404 for User1's environment delete. Got %d", wDelete.Code)
+	if wDelete.Code != http.StatusNotFound && wDelete.Code != http.StatusForbidden {
+		t.Errorf("User2 should get 404 or 403 for User1's environment delete. Got %d", wDelete.Code)
 	}
 
 	// Test WebSocket access

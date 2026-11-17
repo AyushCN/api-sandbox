@@ -9,59 +9,6 @@ interface RegisteredUser {
   avatarUrl?: string;
 }
 
-// Canonical registered user pool across the platform
-const REGISTERED_USERS: RegisteredUser[] = [
-  {
-    id: "00000000-0000-0000-0000-000000000001",
-    username: "Admin",
-    email: "admin@api-sandbox.local",
-    displayName: "System Administrator",
-    avatarUrl: "",
-  },
-  {
-    id: "user-alexr",
-    username: "alexr",
-    email: "alex@coollab.io",
-    displayName: "Alex Rivera",
-    avatarUrl: "",
-  },
-  {
-    id: "user-sarahc",
-    username: "sarahc",
-    email: "sarah@coollab.io",
-    displayName: "Sarah Connor",
-    avatarUrl: "",
-  },
-  {
-    id: "user-johndoe",
-    username: "johndoe",
-    email: "john@example.com",
-    displayName: "John Doe",
-    avatarUrl: "",
-  },
-  {
-    id: "user-janesmith",
-    username: "janesmith",
-    email: "jane@example.com",
-    displayName: "Jane Smith",
-    avatarUrl: "",
-  },
-  {
-    id: "user-davidk",
-    username: "davidk",
-    email: "david@coollab.io",
-    displayName: "David Kim",
-    avatarUrl: "",
-  },
-  {
-    id: "user-elenar",
-    username: "elenar",
-    email: "elena@coollab.io",
-    displayName: "Elena Rostova",
-    avatarUrl: "",
-  },
-];
-
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const q = (url.searchParams.get("q") || "").trim().toLowerCase();
@@ -98,11 +45,8 @@ export async function GET(req: NextRequest) {
     // Fallback if backend offline
   }
 
-  // 2. Fetch remote DB users from backend if available
+  // 2. Fetch registered DB users from backend
   const allUsersMap = new Map<string, RegisteredUser>();
-  for (const u of REGISTERED_USERS) {
-    allUsersMap.set(u.username.toLowerCase(), u);
-  }
 
   try {
     const remoteRes = await fetch(`${backend}/api/users/search?q=${encodeURIComponent(q)}`, {
@@ -133,7 +77,7 @@ export async function GET(req: NextRequest) {
       }
     }
   } catch {
-    // Remote backend search failed or endpoint not ready; proceed with local registered users
+    // Remote backend search failed or endpoint not ready
   }
 
   // 3. Filter by query string

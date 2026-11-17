@@ -1,8 +1,10 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/api-sandbox/backend/db"
@@ -26,19 +28,39 @@ func Logout(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
 }
 
-// DevLogin generates a valid session for the local admin user
+// DevLogin generates a valid session for local development without hardcoded admin accounts
 func DevLogin(c *gin.Context) {
+	var req struct {
+		Username string `json:"username"`
+		Email    string `json:"email"`
+	}
+	_ = c.ShouldBindJSON(&req)
+	uname := strings.TrimSpace(req.Username)
+	if uname == "" {
+		uname = os.Getenv("DEV_USER_USERNAME")
+	}
+	if uname == "" {
+		uname = "developer"
+	}
+	email := strings.TrimSpace(req.Email)
+	if email == "" {
+		email = os.Getenv("DEV_USER_EMAIL")
+	}
+	if email == "" {
+		email = fmt.Sprintf("%s@users.api-sandbox.local", strings.ToLower(uname))
+	}
+
 	var user models.User
-	err := db.DB.Where("email = ? OR username = ?", "admin@api-sandbox.local", "admin").First(&user).Error
+	err := db.DB.Where("email = ? OR username = ?", email, uname).First(&user).Error
 	if err != nil {
 		user = models.User{
-			Email:          "admin@api-sandbox.local",
-			Username:       "admin",
+			Email:          email,
+			Username:       uname,
 			GithubID:       "1",
-			GithubUsername: "admin",
+			GithubUsername: uname,
 		}
 		if err := db.DB.Create(&user).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create admin user: " + err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user: " + err.Error()})
 			return
 		}
 	}

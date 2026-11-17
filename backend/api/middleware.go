@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/api-sandbox/backend/db"
@@ -25,15 +24,6 @@ func AuthMiddleware() gin.HandlerFunc {
 		}
 
 		if tokenString == "" {
-			host := c.Request.Host
-			if strings.HasPrefix(host, "localhost") || strings.HasPrefix(host, "127.0.0.1") {
-				var adminUser models.User
-				if err := db.DB.Where("email = ? OR username = ?", "admin@api-sandbox.local", "admin").First(&adminUser).Error; err == nil {
-					c.Set("userId", adminUser.ID)
-					c.Next()
-					return
-				}
-			}
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: missing token"})
 			return
 		}

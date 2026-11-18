@@ -5,10 +5,10 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,17 +19,68 @@ import (
 	"github.com/api-sandbox/backend/db"
 	"github.com/api-sandbox/backend/models"
 	docker "github.com/fsouza/go-dockerclient"
+	"gorm.io/gorm"
 )
 
 var dockerClient *docker.Client
 
+const dockerRequestTimeout = 10 * time.Minute
+
+func newDockerClient() (*docker.Client, error) {
+	client, err := docker.NewVersionedClientFromEnv("1.41")
+	if err != nil {
+		return nil, err
+	}
+	client.SetTimeout(dockerRequestTimeout)
+	return client, nil
+}
+
 func InitDocker() {
 	var err error
-	dockerClient, err = docker.NewVersionedClientFromEnv("1.41")
+	dockerClient, err = newDockerClient()
 	if err != nil {
-		slog.Error("Failed to initialize docker client", "error", err)
-		os.Exit(1)
+		slog.Warn("Failed to initialize docker client", "error", err)
+		if os.Getenv("MODE") == "worker" {
+			slog.Error("Worker mode requires Docker daemon access. Exiting.")
+			os.Exit(1)
+		}
 	}
+}
+
+func getDockerClient() (*docker.Client, error) {
+	if dockerClient != nil {
+		return dockerClient, nil
+	}
+	var err error
+	dockerClient, err = newDockerClient()
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize docker client: %w", err)
+	}
+	return dockerClient, nil
+}
+
+func GetContainerLogs(ctx context.Context, containerID string, tail string) (string, error) {
+	cli, err := getDockerClient()
+	if err != nil {
+		return "", err
+	}
+
+	var buf bytes.Buffer
+	opts := docker.LogsOptions{
+		Context:      ctx,
+		Container:    containerID,
+		OutputStream: &buf,
+		ErrorStream:  &buf,
+		Stdout:       true,
+		Stderr:       true,
+		Tail:         tail,
+	}
+
+	err = cli.Logs(opts)
+	if err != nil {
+		return "", err
+	}
+	return buf.String(), nil
 }
 
 func createLog(entityID string, message string, level models.LogLevel) {
@@ -41,245 +92,223 @@ func createLog(entityID string, message string, level models.LogLevel) {
 	db.DB.Create(&log)
 }
 
-type buildTiming struct {
-	Stage    string
-	Duration time.Duration
-}
-
-func recordBenchmark(id string, timings []buildTiming, totalDuration time.Duration, imageTag, repo string) {
-	condition := os.Getenv("BERTH_CACHE_MODE")
-	if condition == "" {
-		condition = "cold"
+func clearPersistedGitHubTokenRewrite(dir string) error {
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
+		return nil
 	}
-
-	var imageSizeBytes int64
-	if inspect, err := dockerClient.InspectImage(imageTag); err == nil {
-		imageSizeBytes = inspect.Size
+	cmd := exec.Command("git", "-C", dir, "config", "--local", "--null", "--name-only", "--list")
+	keys, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("inspect local Git config: %w", err)
 	}
-
-	for _, t := range timings {
-		run := models.BenchmarkRun{
-			EnvironmentID:  id,
-			Repo:           repo,
-			Condition:      condition,
-			Stage:          t.Stage,
-			DurationMs:     t.Duration.Milliseconds(),
-			ImageSizeBytes: imageSizeBytes,
+	for _, key := range strings.Split(string(keys), "\x00") {
+		lowerKey := strings.ToLower(key)
+		if !strings.HasPrefix(lowerKey, "url.https://x-access-token:") || !strings.Contains(lowerKey, "@github.com/.insteadof") {
+			continue
 		}
-		db.DB.Create(&run)
+		if err := exec.Command("git", "-C", dir, "config", "--local", "--unset-all", key).Run(); err != nil {
+			return fmt.Errorf("remove persisted GitHub credential rewrite")
+		}
 	}
-
-	totalRun := models.BenchmarkRun{
-		EnvironmentID:  id,
-		Repo:           repo,
-		Condition:      condition,
-		Stage:          "total",
-		DurationMs:     totalDuration.Milliseconds(),
-		ImageSizeBytes: imageSizeBytes,
-	}
-	db.DB.Create(&totalRun)
+	return nil
 }
 
-func CloneOrFetch(ctx context.Context, dir, gitURL, branch, githubToken string) error {
-	// Securely inject token via insteadOf if provided
-	configToken := func() {
+func CloneOrFetch(ctx context.Context, dir, gitURL, branch, baseCommit, githubToken string) error {
+	// Keep the credential in process-scoped Git configuration. Unlike --local,
+	// this cannot leave a token in .git/config when any operation fails.
+	git := func(gitCtx context.Context, args ...string) error {
+		cmd := exec.CommandContext(gitCtx, "git", append([]string{"-C", dir}, args...)...)
 		if githubToken != "" {
-			// Ensure it uses x-access-token
-			exec.CommandContext(ctx, "git", "-C", dir, "config", "--local", "url.https://x-access-token:"+githubToken+"@github.com/.insteadOf", "https://github.com/").Run()
+			env := make([]string, 0, len(os.Environ())+3)
+			for _, entry := range os.Environ() {
+				key, _, _ := strings.Cut(entry, "=")
+				if key == "GIT_CONFIG_COUNT" || key == "GIT_CONFIG_PARAMETERS" || strings.HasPrefix(key, "GIT_CONFIG_KEY_") || strings.HasPrefix(key, "GIT_CONFIG_VALUE_") {
+					continue
+				}
+				env = append(env, entry)
+			}
+			cmd.Env = append(env,
+				"GIT_CONFIG_COUNT=1",
+				"GIT_CONFIG_KEY_0=url.https://x-access-token:"+githubToken+"@github.com/.insteadOf",
+				"GIT_CONFIG_VALUE_0=https://github.com/",
+			)
 		}
+		return cmd.Run()
+	}
+	if err := clearPersistedGitHubTokenRewrite(dir); err != nil {
+		return err
 	}
 
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
-		configToken()
-		fetchCmd := exec.CommandContext(ctx, "git", "-C", dir, "fetch", "--depth", "1", "origin", branch)
-		if out, err := fetchCmd.CombinedOutput(); err != nil {
-			// Fallback: fetch default branch if specific branch fetch fails
-			fallbackFetch := exec.CommandContext(ctx, "git", "-C", dir, "fetch", "--depth", "1", "origin")
-			if out2, err2 := fallbackFetch.CombinedOutput(); err2 != nil {
-				return fmt.Errorf("git fetch failed: %s - %v (fallback: %s - %v)", string(out), err, string(out2), err2)
-			}
-			return exec.CommandContext(ctx, "git", "-C", dir, "reset", "--hard", "FETCH_HEAD").Run()
+		// Just fetch everything we might need
+		if err := git(ctx, "fetch", "--all"); err != nil {
+			return fmt.Errorf("git fetch failed: %w", err)
 		}
-		return exec.CommandContext(ctx, "git", "-C", dir, "reset", "--hard", "origin/"+branch).Run()
+
+		targetRef := branch
+		if baseCommit != "" {
+			targetRef = baseCommit
+		}
+
+		if err := git(ctx, "checkout", "-B", branch, targetRef); err != nil {
+			return fmt.Errorf("git checkout failed: %w", err)
+		}
+		return nil
 	}
 
-	// For a fresh clone, if private, we need the token. The safest way without leaking it in the process list
-	// is to init, config, and then fetch/checkout.
+	// For a fresh clone
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
-	if err := exec.CommandContext(ctx, "git", "-C", dir, "init").Run(); err != nil {
+	if err := git(ctx, "init"); err != nil {
 		return err
 	}
-	configToken()
-	if err := exec.CommandContext(ctx, "git", "-C", dir, "remote", "add", "origin", gitURL).Run(); err != nil {
+	if err := git(ctx, "remote", "add", "origin", gitURL); err != nil {
 		return err
 	}
 
-	fetchCmd := exec.CommandContext(ctx, "git", "-C", dir, "fetch", "--depth", "1", "origin", branch)
-	if out, err := fetchCmd.CombinedOutput(); err != nil {
-		// Fallback to fetch all if branch isn't found
-		fetchCmd = exec.CommandContext(ctx, "git", "-C", dir, "fetch", "--depth", "1", "origin")
-		if out2, err2 := fetchCmd.CombinedOutput(); err2 != nil {
-			return fmt.Errorf("git fetch failed: %s - %v (fallback: %s - %v)", string(out), err, string(out2), err2)
+	if err := git(ctx, "fetch", "--all"); err != nil {
+		return fmt.Errorf("git fetch failed: %w", err)
+	}
+
+	targetRef := "FETCH_HEAD"
+	if baseCommit != "" {
+		targetRef = baseCommit
+	} else {
+		// Try to fetch specific branch if no base commit is provided
+		if err := git(ctx, "fetch", "--depth", "1", "origin", branch); err == nil {
+			targetRef = "origin/" + branch
 		}
-		// Checkout default branch (whatever was fetched)
-		return exec.CommandContext(ctx, "git", "-C", dir, "checkout", "FETCH_HEAD").Run()
 	}
-	return exec.CommandContext(ctx, "git", "-C", dir, "checkout", branch).Run()
+
+	if err := git(ctx, "checkout", "-B", branch, targetRef); err != nil {
+		return fmt.Errorf("git checkout failed: %w", err)
+	}
+	return nil
 }
 
-func ProvisionDevSandbox(ctx context.Context, envID string, config DevRuntimeConfig, orgID string, dbURL string) (string, int, error) {
-	createLog(envID, fmt.Sprintf("Provisioning Dev Sandbox (Image: %s)...", config.BaseImage), models.LogLevelInfo)
-
-	_ = CleanupContainer(ctx, fmt.Sprintf("api-sandbox-env-%s", envID))
-
-	// Pull image if not exists
-	err := dockerClient.PullImage(docker.PullImageOptions{
-		Repository: config.BaseImage,
-	}, docker.AuthConfiguration{})
-	if err != nil {
-		createLog(envID, fmt.Sprintf("Pulling base image %s...", config.BaseImage), models.LogLevelInfo)
-	}
-
-	domain := os.Getenv("DOMAIN")
-	if domain == "" {
-		domain = "localhost"
-	}
-
-	exposedPort := config.ExposedPort
-	if exposedPort == "" {
-		exposedPort = "5000" // Fallback
-	}
-
-	labels := map[string]string{
-		"traefik.enable": "true",
-		fmt.Sprintf("traefik.http.routers.env-%s.rule", envID):                      fmt.Sprintf("Host(`%s.%s`)", envID, domain),
-		fmt.Sprintf("traefik.http.services.env-%s.loadbalancer.server.port", envID): exposedPort,
-		"traefik.docker.network": fmt.Sprintf("api-sandbox-net-%s", orgID),
-	}
-
-	if domain != "localhost" {
-		labels[fmt.Sprintf("traefik.http.routers.env-%s.entrypoints", envID)] = "websecure"
-		labels[fmt.Sprintf("traefik.http.routers.env-%s.tls.certresolver", envID)] = "myresolver"
-
-		// Security headers
-		labels[fmt.Sprintf("traefik.http.middlewares.security-%s.headers.customresponseheaders.X-Sandbox-Environment", envID)] = envID
-
-		// Apply middlewares
-		labels[fmt.Sprintf("traefik.http.routers.env-%s.middlewares", envID)] = fmt.Sprintf("security-%s", envID)
-	} else {
-		labels[fmt.Sprintf("traefik.http.routers.env-%s.entrypoints", envID)] = "web"
-	}
-
-	networkName, networkID, err := EnsureOrgNetwork(ctx, orgID)
-	if err != nil {
-		createLog(envID, err.Error(), models.LogLevelError)
-		return "", 0, err
-	}
-
-	if networkID != "" {
-		_ = dockerClient.ConnectNetwork(networkID, docker.NetworkConnectionOptions{
-			Container: "api-sandbox-traefik",
-		})
-	}
-
-	wd, err := os.Getwd()
-	if err != nil {
-		return "", 0, fmt.Errorf("failed to get working directory: %v", err)
-	}
-
-	// Determine the host path for the bind mount
-	hostWorkspacesDir := os.Getenv("HOST_WORKSPACES_DIR")
-	var hostWorkspaceDir string
-	if hostWorkspacesDir != "" {
-		hostWorkspaceDir = filepath.Join(hostWorkspacesDir, envID)
-	} else {
-		hostWorkspaceDir = filepath.Join(wd, "workspaces", envID)
-	}
-
-	pidsLimit := int64(256)
-	opts := docker.CreateContainerOptions{
-		Name: fmt.Sprintf("api-sandbox-env-%s", envID),
-		Config: &docker.Config{
-			Image:      config.BaseImage,
-			WorkingDir: config.WorkDir,
-			Env: func() []string {
-				e := []string{fmt.Sprintf("PORT=%s", exposedPort), "HOST=0.0.0.0"}
-				if dbURL != "" {
-					e = append(e, fmt.Sprintf("DATABASE_URL=%s", dbURL), fmt.Sprintf("MONGO_URI=%s", dbURL))
-					if u, err := url.Parse(dbURL); err == nil {
-						e = append(e, fmt.Sprintf("DB_HOST=%s", u.Hostname()))
-						e = append(e, fmt.Sprintf("DB_PORT=%s", u.Port()))
-						e = append(e, fmt.Sprintf("DB_USER=%s", u.User.Username()))
-						if pwd, ok := u.User.Password(); ok {
-							e = append(e, fmt.Sprintf("DB_PASSWORD=%s", pwd))
-						}
-						e = append(e, fmt.Sprintf("DB_NAME=%s", strings.TrimPrefix(u.Path, "/")))
-					}
-				}
-				return e
-			}(),
-			Labels: labels,
-			Cmd:    []string{"/bin/sh", "sandbox-start.sh"},
-		},
-		HostConfig: &docker.HostConfig{
-			Memory:        512 * 1024 * 1024,
-			MemorySwap:    512 * 1024 * 1024,
-			CPUQuota:      100000,
-			CPUPeriod:     100000,
-			CPUShares:     1024,
-			PidsLimit:     &pidsLimit,
-			RestartPolicy: docker.RestartOnFailure(3),
-			SecurityOpt:   []string{"no-new-privileges:true"},
-			CapDrop:       []string{"ALL"},
-			Binds: []string{
-				fmt.Sprintf("%s:%s", hostWorkspaceDir, config.WorkDir),
-			},
-		},
-		NetworkingConfig: &docker.NetworkingConfig{
-			EndpointsConfig: map[string]*docker.EndpointConfig{
-				networkName: {},
-			},
-		},
-	}
-
-	container, err := dockerClient.CreateContainer(opts)
-	if err != nil {
-		return "", 0, fmt.Errorf("failed to create container: %v", err)
-	}
-
-	if err := dockerClient.StartContainer(container.ID, nil); err != nil {
-		return "", 0, fmt.Errorf("failed to start container: %v", err)
-	}
-
-	assignedPort, _ := strconv.Atoi(config.ExposedPort)
-	if assignedPort == 0 {
-		assignedPort = 8080 // fallback
-	}
-
-	createLog(envID, fmt.Sprintf("Dev Sandbox started successfully on port %d (Container ID: %s).", assignedPort, container.ID[:12]), models.LogLevelInfo)
-
-	return container.ID, assignedPort, nil
-}
-
+// ProvisionDevSandbox has been moved to warmpool.go
 func CleanupContainer(ctx context.Context, containerID string) error {
-	_ = dockerClient.StopContainer(containerID, 10)
-	return dockerClient.RemoveContainer(docker.RemoveContainerOptions{
-		ID:    containerID,
-		Force: true,
+	cli, err := getDockerClient()
+	if err != nil {
+		return err
+	}
+	if _, err := cli.InspectContainerWithContext(containerID, ctx); err != nil {
+		var missing *docker.NoSuchContainer
+		if errors.As(err, &missing) {
+			return nil
+		}
+		return fmt.Errorf("inspect container %q before cleanup: %w", containerID, err)
+	}
+	stopErr := cli.StopContainerWithContext(containerID, 10, ctx)
+	removeErr := cli.RemoveContainer(docker.RemoveContainerOptions{
+		ID:      containerID,
+		Force:   true,
+		Context: ctx,
 	})
+	if removeErr != nil && strings.Contains(removeErr.Error(), "removal of container") && strings.Contains(removeErr.Error(), "already in progress") {
+		removeErr = waitForContainerRemoval(ctx, cli, containerID, removeErr)
+	}
+	if removeErr != nil {
+		slog.Error("Docker container removal failed", "container", containerID, "stop_error", stopErr, "remove_error", removeErr)
+		return fmt.Errorf("remove container %q (stop error: %v): %w", containerID, stopErr, removeErr)
+	}
+	return nil
+}
+
+func waitForContainerRemoval(ctx context.Context, cli *docker.Client, containerID string, removeErr error) error {
+	waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		_, inspectErr := cli.InspectContainerWithContext(containerID, waitCtx)
+		if inspectErr != nil {
+			var missing *docker.NoSuchContainer
+			if errors.As(inspectErr, &missing) {
+				return nil
+			}
+			if waitCtx.Err() != nil {
+				return errors.Join(removeErr, waitCtx.Err())
+			}
+			return errors.Join(removeErr, fmt.Errorf("inspect container during removal: %w", inspectErr))
+		}
+		select {
+		case <-waitCtx.Done():
+			return errors.Join(removeErr, waitCtx.Err())
+		case <-ticker.C:
+		}
+	}
 }
 
 // Helper to create tarball from a directory
 
 func CleanupWorkspace(envID string) error {
-	wd, err := os.Getwd()
-	if err != nil {
-		return err
+	workspaceDir := GetWorkspacePath(envID)
+	workspaceErr := os.RemoveAll(workspaceDir)
+	if workspaceErr != nil {
+		// Fallback to docker if permission denied
+		slog.Warn("Workspace removal failed; trying scoped Docker cleanup", "dir", workspaceDir, "error", workspaceErr)
+
+		if cli, clientErr := getDockerClient(); clientErr == nil {
+			hostRoot := os.Getenv("HOST_WORKSPACES_DIR")
+			if hostRoot == "" {
+				hostRoot = GetWorkspacesRootDir()
+			}
+			hostWorkspaceDir := filepath.Join(hostRoot, envID)
+			if err := os.MkdirAll(workspaceDir, 0755); err != nil {
+				workspaceErr = errors.Join(workspaceErr, fmt.Errorf("create cleanup mount source: %w", err))
+			} else if err := cli.PullImage(docker.PullImageOptions{Repository: "alpine:3.20"}, docker.AuthConfiguration{}); err != nil {
+				workspaceErr = errors.Join(workspaceErr, fmt.Errorf("pull cleanup image: %w", err))
+			} else {
+				opts := docker.CreateContainerOptions{
+					Config: &docker.Config{
+						Image: "alpine:3.20",
+						Cmd:   []string{"sh", "-c", "find /workspace -mindepth 1 -delete"},
+					},
+					HostConfig: &docker.HostConfig{
+						NetworkMode: "none",
+						Binds: []string{
+							fmt.Sprintf("%s:/workspace", hostWorkspaceDir),
+						},
+						AutoRemove: true,
+					},
+				}
+				container, cErr := cli.CreateContainer(opts)
+				if cErr != nil {
+					workspaceErr = errors.Join(workspaceErr, fmt.Errorf("create cleanup container: %w", cErr))
+				} else if startErr := cli.StartContainer(container.ID, nil); startErr != nil {
+					workspaceErr = errors.Join(workspaceErr, fmt.Errorf("start cleanup container: %w", startErr))
+					_ = CleanupContainer(context.Background(), container.ID)
+				} else {
+					code, waitErr := cli.WaitContainerWithContext(container.ID, context.Background())
+					if waitErr != nil {
+						workspaceErr = errors.Join(workspaceErr, fmt.Errorf("wait for cleanup container: %w", waitErr))
+					} else if code != 0 {
+						workspaceErr = errors.Join(workspaceErr, fmt.Errorf("cleanup container exited with status %d", code))
+					} else if removeErr := os.RemoveAll(hostWorkspaceDir); removeErr != nil {
+						workspaceErr = errors.Join(workspaceErr, fmt.Errorf("remove workspace after scoped cleanup: %w", removeErr))
+					}
+					if cleanupErr := CleanupContainer(context.Background(), container.ID); cleanupErr != nil {
+						workspaceErr = errors.Join(workspaceErr, fmt.Errorf("remove cleanup container: %w", cleanupErr))
+					}
+				}
+			}
+		} else {
+			workspaceErr = errors.Join(workspaceErr, clientErr)
+		}
 	}
-	workspaceDir := filepath.Join(wd, "workspaces", envID)
-	return os.RemoveAll(workspaceDir)
+	cacheRoot := os.Getenv("HOST_CACHE_DIR")
+	if cacheRoot == "" {
+		cacheRoot = filepath.Join(GetWorkspacesRootDir(), ".cache")
+	}
+	if cacheErr := os.RemoveAll(filepath.Join(cacheRoot, envID)); cacheErr != nil {
+		workspaceErr = errors.Join(workspaceErr, fmt.Errorf("remove environment cache: %w", cacheErr))
+	}
+	if workspaceErr != nil {
+		slog.Error("Environment workspace cleanup incomplete", "environment_id", envID, "error", workspaceErr)
+	}
+	return workspaceErr
 }
 
 func RestartContainer(ctx context.Context, containerID string) error {
@@ -304,63 +333,72 @@ func GetContainerPort(containerID string) (int, error) {
 
 func WaitForAppReady(ctx context.Context, envID string, domain string) error {
 	host := fmt.Sprintf("%s.%s", envID, domain)
-	client := &http.Client{} // Removed 500ms timeout which aborted connections prematurely
-	
-	timeout := time.After(30 * time.Second)
-	ticker := time.NewTicker(200 * time.Millisecond)
+	client := &http.Client{
+		Timeout: 2 * time.Second,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-timeout:
-			return fmt.Errorf("timed out waiting for app %s to be reachable", envID)
 		case <-ticker.C:
-			req, err := http.NewRequestWithContext(ctx, "GET", "http://api-sandbox-traefik/", nil)
+			traefikURL := os.Getenv("TRAEFIK_URL")
+			if traefikURL == "" {
+				traefikURL = "http://api-sandbox-traefik"
+			}
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(traefikURL, "/")+"/", nil)
 			if err != nil {
 				continue
 			}
 			req.Host = host
-			
+
 			resp, err := client.Do(req)
 			if err != nil {
 				slog.Warn("WaitForAppReady HTTP error", "err", err)
 				continue
 			}
-			
-			// Must close immediately, not defer, to prevent connection leaks
+
 			statusCode := resp.StatusCode
 			resp.Body.Close()
 
 			slog.Info("WaitForAppReady HTTP response", "statusCode", statusCode)
-			
-			if statusCode != http.StatusBadGateway {
+
+			if IsHTTPReadyStatus(statusCode) {
 				return nil
 			}
 		}
 	}
 }
 
-func StartSidecarDatabase(ctx context.Context, envID string, orgID string, dbType DBType) (string, error) {
+func StartSidecarDatabase(ctx context.Context, envID string, userID string, dbType DBType) (string, error) {
 	if dbType == DBTypeNone {
 		return "", nil
 	}
 
-	networkName, _, err := EnsureOrgNetwork(ctx, orgID)
+	networkName, _, err := EnsureUserNetwork(ctx, userID)
 	if err != nil {
 		return "", fmt.Errorf("failed to ensure network: %v", err)
 	}
 
 	containerName := fmt.Sprintf("api-sandbox-db-%s", envID)
-	_ = CleanupContainer(ctx, containerName)
+	if err := CleanupContainer(ctx, containerName); err != nil {
+		return "", fmt.Errorf("remove previous database sidecar %s: %w", containerName, err)
+	}
 
 	var image, dbURL string
 	var env []string
 
 	// Generate a secure random password for sidecar
 	passwordBytes := make([]byte, 8)
-	rand.Read(passwordBytes)
+	if _, err := rand.Read(passwordBytes); err != nil {
+		return "", fmt.Errorf("generate database sidecar password: %w", err)
+	}
 	securePassword := hex.EncodeToString(passwordBytes)
 
 	switch dbType {
@@ -393,17 +431,20 @@ func StartSidecarDatabase(ctx context.Context, envID string, orgID string, dbTyp
 
 	createLog(envID, fmt.Sprintf("Pulling %s database image (this may take a minute on first run)...", string(dbType)), models.LogLevelInfo)
 
-	pullOpts := docker.PullImageOptions{
-		Repository: image,
+	pullCtx, cancelPull := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancelPull()
+	pullOpts := docker.PullImageOptions{Repository: image, Context: pullCtx, InactivityTimeout: time.Minute}
+	if err := dockerClient.PullImage(pullOpts, docker.AuthConfiguration{}); err != nil {
+		return "", fmt.Errorf("pull database image %s: %w", image, err)
 	}
-	_ = dockerClient.PullImage(pullOpts, docker.AuthConfiguration{})
 
 	createLog(envID, fmt.Sprintf("Starting sidecar database container (%s)...", containerName), models.LogLevelInfo)
 
 	pidsLimit := int64(256)
 
 	opts := docker.CreateContainerOptions{
-		Name: containerName,
+		Name:    containerName,
+		Context: ctx,
 		Config: &docker.Config{
 			Image: image,
 			Env:   env,
@@ -431,15 +472,17 @@ func StartSidecarDatabase(ctx context.Context, envID string, orgID string, dbTyp
 		return "", fmt.Errorf("failed to create db container: %v", err)
 	}
 
-	if err := dockerClient.StartContainer(container.ID, nil); err != nil {
-		return "", fmt.Errorf("failed to start db container: %v", err)
+	if err := dockerClient.StartContainerWithContext(container.ID, nil, ctx); err != nil {
+		cleanupErr := CleanupContainer(ctx, container.ID)
+		return "", errors.Join(fmt.Errorf("failed to start db container: %w", err), cleanupErr)
 	}
 
 	createLog(envID, "Waiting for database to initialize and accept connections...", models.LogLevelInfo)
 
 	err = waitForDatabaseReady(ctx, container.ID, dbType, envID, securePassword)
 	if err != nil {
-		return "", fmt.Errorf("database readiness check failed: %v", err)
+		cleanupErr := CleanupContainer(ctx, container.ID)
+		return "", errors.Join(fmt.Errorf("database readiness check failed: %w", err), cleanupErr)
 	}
 
 	return dbURL, nil
@@ -471,6 +514,7 @@ func waitForDatabaseReady(ctx context.Context, containerID string, dbType DBType
 		case <-ticker.C:
 			execOpts := docker.CreateExecOptions{
 				Container:    containerID,
+				Context:      ctx,
 				AttachStdout: true,
 				AttachStderr: true,
 				Cmd:          cmd,
@@ -484,6 +528,7 @@ func waitForDatabaseReady(ctx context.Context, containerID string, dbType DBType
 			startOpts := docker.StartExecOptions{
 				OutputStream: &stdout,
 				ErrorStream:  &stderr,
+				Context:      ctx,
 			}
 			err = dockerClient.StartExec(exec.ID, startOpts)
 			if err != nil {
@@ -499,18 +544,19 @@ func waitForDatabaseReady(ctx context.Context, containerID string, dbType DBType
 	}
 }
 
-func EnsureOrgNetwork(ctx context.Context, orgID string) (string, string, error) {
-	networkName := fmt.Sprintf("api-sandbox-net-%s", orgID)
+func EnsureUserNetwork(ctx context.Context, userID string) (string, string, error) {
+	networkName := fmt.Sprintf("api-sandbox-net-%s", userID)
 	networks, err := dockerClient.ListNetworks()
+	if err != nil {
+		return "", "", fmt.Errorf("list Docker networks: %w", err)
+	}
 	var networkFound bool
 	var networkID string
-	if err == nil {
-		for _, net := range networks {
-			if net.Name == networkName {
-				networkFound = true
-				networkID = net.ID
-				break
-			}
+	for _, net := range networks {
+		if net.Name == networkName {
+			networkFound = true
+			networkID = net.ID
+			break
 		}
 	}
 
@@ -522,19 +568,44 @@ func EnsureOrgNetwork(ctx context.Context, orgID string) (string, string, error)
 			EnableIPv6:     false,
 		})
 		if err != nil && err != docker.ErrNetworkAlreadyExists {
-			return "", "", fmt.Errorf("failed to create network %s: %v", networkName, err)
+			return "", "", fmt.Errorf("failed to create network %s: %w", networkName, err)
 		}
 		if net != nil {
 			networkID = net.ID
+		} else if err == docker.ErrNetworkAlreadyExists {
+			networks, err = dockerClient.ListNetworks()
+			if err != nil {
+				return "", "", fmt.Errorf("find concurrently created network %s: %w", networkName, err)
+			}
+			for _, existing := range networks {
+				if existing.Name == networkName {
+					networkID = existing.ID
+					break
+				}
+			}
 		}
 	}
+	if networkID == "" {
+		return "", "", fmt.Errorf("Docker network %s has no ID after lookup/create", networkName)
+	}
 
-	// Ensure Traefik is connected to this network so it can route traffic to the sandbox
-	_ = dockerClient.ConnectNetwork(networkID, docker.NetworkConnectionOptions{
-		Container: "api-sandbox-traefik",
-	})
+	// Traefik is intentionally attached to each user's network for routing.
+	if err := connectContainerToNetwork(networkName, networkID, "api-sandbox-traefik"); err != nil {
+		return "", "", fmt.Errorf("connect Traefik to user network %s: %w", networkName, err)
+	}
 
 	return networkName, networkID, nil
+}
+
+func connectContainerToNetwork(networkName, networkID, containerName string) error {
+	info, err := dockerClient.InspectContainer(containerName)
+	if err != nil {
+		return err
+	}
+	if _, connected := info.NetworkSettings.Networks[networkName]; connected {
+		return nil
+	}
+	return dockerClient.ConnectNetwork(networkID, docker.NetworkConnectionOptions{Container: containerName})
 }
 
 // TouchFileInContainer creates an empty file or updates the timestamp of a file
@@ -562,47 +633,117 @@ func TouchFileInContainer(ctx context.Context, envID string, filePath string) er
 }
 
 func ReapOrphanContainers(ctx context.Context) error {
-	containers, err := dockerClient.ListContainers(docker.ListContainersOptions{All: true})
+	cli, err := getDockerClient()
 	if err != nil {
 		return err
 	}
+	containers, err := cli.ListContainers(docker.ListContainersOptions{All: true})
+	if err != nil {
+		return err
+	}
+	mainContainers := make(map[string]docker.APIContainers)
+	var failures []error
+	reconcileTime := time.Now()
 
 	for _, c := range containers {
-		name := ""
-		if len(c.Names) > 0 {
-			name = strings.TrimPrefix(c.Names[0], "/")
-		}
+		for _, rawName := range c.Names {
+			name := strings.TrimPrefix(rawName, "/")
+			isMain := strings.HasPrefix(name, "api-sandbox-env-")
+			isDB := strings.HasPrefix(name, "api-sandbox-db-")
+			if !isMain && !isDB {
+				continue
+			}
+			envID := strings.TrimPrefix(strings.TrimPrefix(name, "api-sandbox-env-"), "api-sandbox-db-")
+			if isMain {
+				mainContainers[envID] = c
+			}
 
-		var envID string
-		isEnv := strings.HasPrefix(name, "api-sandbox-env-")
-		isDB := strings.HasPrefix(name, "api-sandbox-db-")
-
-		if isEnv {
-			envID = strings.TrimPrefix(name, "api-sandbox-env-")
-		} else if isDB {
-			envID = strings.TrimPrefix(name, "api-sandbox-db-")
-		} else {
-			continue
-		}
-
-		var env models.Environment
-		err := db.DB.Where("id = ?", envID).First(&env).Error
-
-		// We reap if it's not in the DB, OR if the DB says it's STOPPED/FAILED
-		shouldReap := false
-		if err != nil {
-			shouldReap = true
-		} else if env.Status != models.StatusRunning && env.Status != models.StatusBuilding {
-			shouldReap = true
-		}
-
-		if shouldReap {
-			slog.Info("Reaper: Removing orphan container", "name", name, "env_id", envID)
-			_ = CleanupContainer(ctx, name)
-			if isEnv {
-				_ = CleanupWorkspace(envID)
+			var env models.Environment
+			lookupErr := db.DB.Where("id = ?", envID).First(&env).Error
+			if errors.Is(lookupErr, gorm.ErrRecordNotFound) {
+				lookupErr = nil
+			} else if lookupErr != nil {
+				failures = append(failures, fmt.Errorf("load environment %s for container %s: %w", envID, name, lookupErr))
+				continue
+			}
+			orphan := lookupErr == nil && isOrphanEnvironment(env)
+			deadRuntime := isMain && lookupErr == nil && env.Status == models.StatusRunning && needsRuntimeFailure(env.Status, true, c.State, env.UpdatedAt, reconcileTime)
+			staleBuild := isMain && lookupErr == nil && env.Status == models.StatusBuilding && needsRuntimeFailure(env.Status, true, c.State, env.UpdatedAt, reconcileTime)
+			if orphan || deadRuntime || staleBuild {
+				slog.Info("Removing stale Docker container", "name", name, "environment_id", envID, "state", c.State, "orphan", orphan, "stale_build", staleBuild)
+				if removeErr := CleanupContainer(ctx, c.ID); removeErr != nil {
+					failures = append(failures, fmt.Errorf("remove stale container %s: %w", name, removeErr))
+				}
+				if isMain {
+					if routeErr := ClearRuntimeRoute(ctx, envID); routeErr != nil {
+						failures = append(failures, fmt.Errorf("clear stale Traefik route for %s: %w", envID, routeErr))
+					}
+				}
+			}
+			if deadRuntime || staleBuild {
+				message := fmt.Sprintf("Runtime container was %s; marked environment failed by Docker reconciliation.", c.State)
+				if staleBuild {
+					message = "Environment remained BUILDING for over 60 minutes; marked failed by Docker reconciliation."
+				}
+				if dbErr := failReconciledEnvironment(envID, message); dbErr != nil {
+					failures = append(failures, dbErr)
+				}
 			}
 		}
 	}
+
+	var activeEnvs []models.Environment
+	if err := db.DB.Where("status IN ?", []models.EnvironmentStatus{models.StatusRunning, models.StatusBuilding}).Find(&activeEnvs).Error; err != nil {
+		return errors.Join(append(failures, fmt.Errorf("list active environments for Docker reconciliation: %w", err))...)
+	}
+	for _, env := range activeEnvs {
+		if _, exists := mainContainers[env.ID]; exists {
+			continue
+		}
+		if needsRuntimeFailure(env.Status, false, "", env.UpdatedAt, reconcileTime) && env.Status == models.StatusRunning {
+			if err := failReconciledEnvironment(env.ID, "Runtime container is missing; marked environment failed by Docker reconciliation."); err != nil {
+				failures = append(failures, err)
+			}
+			if err := ClearRuntimeRoute(ctx, env.ID); err != nil {
+				failures = append(failures, fmt.Errorf("clear missing-runtime Traefik route for %s: %w", env.ID, err))
+			}
+		} else if env.Status == models.StatusBuilding && needsRuntimeFailure(env.Status, false, "", env.UpdatedAt, reconcileTime) {
+			if err := failReconciledEnvironment(env.ID, "Provisioning exceeded 60 minutes without a runtime container; marked environment failed by Docker reconciliation."); err != nil {
+				failures = append(failures, err)
+			}
+			if err := ClearRuntimeRoute(ctx, env.ID); err != nil {
+				failures = append(failures, fmt.Errorf("clear stale-build Traefik route for %s: %w", env.ID, err))
+			}
+		}
+	}
+	return errors.Join(failures...)
+}
+
+func isOrphanEnvironment(env models.Environment) bool {
+	return env.ID == "" || (env.Status != models.StatusRunning && env.Status != models.StatusBuilding)
+}
+
+func needsRuntimeFailure(status models.EnvironmentStatus, containerFound bool, containerState string, updatedAt, now time.Time) bool {
+	switch status {
+	case models.StatusRunning:
+		return !containerFound || containerState != "running"
+	case models.StatusBuilding:
+		return now.Sub(updatedAt) > 60*time.Minute
+	default:
+		return false
+	}
+}
+
+func failReconciledEnvironment(envID, message string) error {
+	updates := map[string]interface{}{"status": models.StatusFailed, "container_id": nil, "public_url": nil}
+	if err := db.DB.Model(&models.Environment{}).Where("id = ? AND status IN ?", envID, []models.EnvironmentStatus{models.StatusRunning, models.StatusBuilding}).Updates(updates).Error; err != nil {
+		return fmt.Errorf("mark environment %s failed after Docker reconciliation: %w", envID, err)
+	}
+	level := models.LogLevelError
+	log := models.Log{EnvironmentID: &envID, Message: message, Level: level}
+	if err := db.DB.Create(&log).Error; err != nil {
+		return fmt.Errorf("write Docker reconciliation log for environment %s: %w", envID, err)
+	}
+	slog.Error(message, "environment_id", envID)
 	return nil
 }

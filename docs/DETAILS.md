@@ -21,22 +21,28 @@ Because of this, the Go JSON serializer defaults to exactly capitalizing the str
 
 ## The Orphan Reaper Daemon
 
-Because sandboxes are physical Docker containers, a crash in the Go backend could result in orphaned containers running infinitely and exhausting host resources. 
+Because environments are Docker containers, a process or database failure can leave orphaned containers consuming host resources.
 
-To mitigate this, `backend/worker/worker.go` runs a continuous daemon loop:
-1. It queries the local Docker socket for all containers labeled with `api-sandbox`.
-2. It cross-references the container IDs against the active `environments` table in PostgreSQL.
-3. If an environment is marked as `deleted` in the database, or missing entirely, the reaper force-kills and removes the container.
+To mitigate this, the backend schedules an Asynq reconciliation task every minute:
+1. It lists Docker containers with the application labels.
+2. It cross-references runtime container names/IDs with environment records in PostgreSQL.
+3. It removes orphan containers, records failure for a `RUNNING` environment whose container is missing, and marks stale `BUILDING` records failed.
 
-This guarantees that the system state eventually converges with the PostgreSQL source of truth.
+This provides periodic reconciliation; it does not guarantee immediate recovery if Docker, Redis, or PostgreSQL is unavailable. Failures are logged for diagnosis.
 
 ## Database Sidecar Orchestration
 
 Sidecar databases (PostgreSQL, MySQL, MongoDB, Redis) are generated dynamically based on the repository's needs.
 1. The backend provisions the primary application container.
-2. It detects required database types (e.g., scanning `requirements.txt` for `psycopg2`).
-3. It spins up a secondary database container connected directly to the specific Organization's isolated Docker network (`api-sandbox-net-<org_id>`).
+2. It detects required database types from the repository.
+3. It starts a secondary database container on the user's bridge network (`api-sandbox-net-<user-id>`), shared with that user's other environments.
 4. The database credentials are injected into the primary sandbox via environment variables (e.g., `DATABASE_URL=postgres://user:pass@<db-alias>:5432/db`).
+
+Runtime containers are freshly created per environment. The warm pool downloads images and stores image references; it does not reuse running containers. Runtime workspace and package-cache mounts are scoped to the environment. The runtime has no Docker socket and is isolated from Compose's shared `traefik-net`, though outbound internet access is currently available. Environments owned by the same user share a user-scoped bridge and can reach one another's network endpoints. Readiness defaults to HTTP 2xx for web apps; TCP-connect and process-only policies are available for TCP services and workers.
+
+## Docker Socket Authority
+
+The backend/worker service has a read/write Docker socket because it performs image pulls and runtime/sidecar container and network lifecycle operations. This is broad, host-root-equivalent authority. Traefik mounts the socket `:ro` for its Docker provider to discover Compose labels; this does not restrict the Docker API to read-only calls. Replacing either access path would require a meaningful change to the current Docker orchestration or routing responsibilities, so deployment must remain limited to a trusted single host.
 
 ## Preventing HTTP Socket Leaks
 

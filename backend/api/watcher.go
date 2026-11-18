@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/api-sandbox/backend/provider"
+
 	"github.com/api-sandbox/backend/db"
 	"github.com/api-sandbox/backend/models"
 	"github.com/fsnotify/fsnotify"
@@ -20,15 +22,7 @@ func WatchAllEnvironments() {
 	}
 	defer watcher.Close()
 
-	workspacesDir := os.Getenv("WORKSPACES_PATH")
-	if workspacesDir == "" {
-		wd, err := os.Getwd()
-		if err != nil {
-			slog.Error("Failed to get working directory for watcher", "error", err)
-			return
-		}
-		workspacesDir = filepath.Join(wd, "workspaces")
-	}
+	workspacesDir := provider.GetWorkspacesRootDir()
 
 	// Create workspaces dir if it doesn't exist
 	if _, err := os.Stat(workspacesDir); os.IsNotExist(err) {

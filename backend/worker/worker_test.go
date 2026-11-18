@@ -9,8 +9,8 @@ import (
 	"github.com/api-sandbox/backend/db"
 	"github.com/api-sandbox/backend/models"
 	"github.com/api-sandbox/backend/provider"
+	"github.com/glebarez/sqlite"
 	"github.com/hibiken/asynq"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -26,7 +26,11 @@ func setupTestDB(t *testing.T) {
 
 	err = db.DB.AutoMigrate(
 		&models.Environment{},
+		&models.EnvironmentVariable{},
 		&models.Log{},
+		&models.Workspace{},
+		&models.WorkspaceRepository{},
+		&models.ProjectRepository{},
 	)
 	if err != nil {
 		t.Fatalf("AutoMigrate failed: %v", err)
@@ -43,7 +47,7 @@ func TestHandleBuildEnvironmentTask_CloneError(t *testing.T) {
 	db.DB.Create(&env)
 
 	// Mock ProviderCloneOrFetch to fail
-	ProviderCloneOrFetch = func(ctx context.Context, targetDir, repoURL, branch, token string) error {
+	ProviderCloneOrFetch = func(ctx context.Context, targetDir, repoURL, branch, baseCommit, token string) error {
 		return fmt.Errorf("mock clone failure")
 	}
 
@@ -79,10 +83,10 @@ func TestHandleBuildEnvironmentTask_SidecarError(t *testing.T) {
 	db.DB.Create(&env)
 
 	// Mock providers
-	ProviderCloneOrFetch = func(ctx context.Context, targetDir, repoURL, branch, token string) error {
+	ProviderCloneOrFetch = func(ctx context.Context, targetDir, repoURL, branch, baseCommit, token string) error {
 		return nil
 	}
-	ProviderCheckContainerHealth = func(containerID string) (bool, string, error) {
+	ProviderCheckContainerHealth = func(context.Context, string) (bool, string, error) {
 		return true, "", nil
 	}
 	ProviderDetectDatabaseRequirements = func(workspaceDir string) (provider.DBType, error) {

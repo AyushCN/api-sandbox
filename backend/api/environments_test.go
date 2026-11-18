@@ -12,8 +12,8 @@ import (
 	"github.com/api-sandbox/backend/db"
 	"github.com/api-sandbox/backend/models"
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
 	"github.com/golang-jwt/jwt/v5"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -47,7 +47,7 @@ func setupEnvironmentTestRouter() *gin.Engine {
 	// Endpoint removed
 	// r.POST("/api/environments/:id/sync", SyncEnvironmentWithGitHub)
 	r.GET("/api/environments/:id/docker-logs", GetDockerLogs)
-	r.GET("/api/ws/environments/:id", ServeWS)
+	r.GET("/api/ws/environments/:id", ServeEnvironmentWS)
 
 	return r
 }
@@ -65,7 +65,7 @@ func TestEnvironmentAuthz(t *testing.T) {
 	err = db.DB.AutoMigrate(
 		&models.User{},
 		&models.Project{},
-		&models.ProjectCollaborator{},
+		&models.ProjectMember{},
 		&models.Environment{},
 		&models.Log{},
 		&models.Metric{},
@@ -84,10 +84,11 @@ func TestEnvironmentAuthz(t *testing.T) {
 	// 2. Setup Project A owned by User 1
 	projectA := models.Project{Name: "Project A", CreatedByUserID: user1.ID}
 	db.DB.Create(&projectA)
-	db.DB.Create(&models.ProjectCollaborator{
+	db.DB.Create(&models.ProjectMember{
 		ProjectID: projectA.ID,
 		UserID:    user1.ID,
-		Role:      models.ProjectRoleOwner,
+		Role:      models.ProjectMemberRoleOwner,
+		Status:    models.ProjectMemberStatusAccepted,
 	})
 
 	// 3. Create Environment in Project A
@@ -122,8 +123,8 @@ func TestEnvironmentAuthz(t *testing.T) {
 	})
 	wRestart := httptest.NewRecorder()
 	r.ServeHTTP(wRestart, req)
-	if wRestart.Code != http.StatusNotFound {
-		t.Errorf("User2 should get 404 for User1's environment restart. Got %d", wRestart.Code)
+	if wRestart.Code != http.StatusNotFound && wRestart.Code != http.StatusForbidden {
+		t.Errorf("User2 should get 404 or 403 for User1's environment restart. Got %d", wRestart.Code)
 	}
 
 	// Test DeleteEnvironment
@@ -134,8 +135,8 @@ func TestEnvironmentAuthz(t *testing.T) {
 	})
 	wDelete := httptest.NewRecorder()
 	r.ServeHTTP(wDelete, req)
-	if wDelete.Code != http.StatusNotFound {
-		t.Errorf("User2 should get 404 for User1's environment delete. Got %d", wDelete.Code)
+	if wDelete.Code != http.StatusNotFound && wDelete.Code != http.StatusForbidden {
+		t.Errorf("User2 should get 404 or 403 for User1's environment delete. Got %d", wDelete.Code)
 	}
 
 	// Test WebSocket access

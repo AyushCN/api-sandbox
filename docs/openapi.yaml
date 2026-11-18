@@ -76,7 +76,7 @@ components:
           type: string
         description:
           type: string
-        ownerOrganizationId:
+        createdByUserId:
           type: string
     User:
       type: object
@@ -240,7 +240,7 @@ paths:
               required: [identifier, role]
               properties:
                 identifier: { type: string }
-                role: { type: string, enum: [ADMIN, COLLABORATOR, VIEWER] }
+                role: { type: string, enum: [OWNER, EDITOR, VIEWER] }
       responses:
         '200':
           description: User invited

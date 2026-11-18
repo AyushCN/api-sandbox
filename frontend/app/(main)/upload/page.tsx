@@ -1,44 +1,34 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
-import { Code, Loader2 } from "lucide-react";
+import { Loader2, ArrowRight, GitBranch, Database, Sparkles, Folder } from "lucide-react";
 import { fetchWithAuth } from "@/lib/auth";
-
 import useSWR from "swr";
 
-const schema = z
-  .object({
-    name: z.string().min(3, "Name must be at least 3 characters").max(50),
-    gitUrl: z
-      .string()
-      .url("Must be a valid URL")
-      .regex(/^https:\/\/github\.com/, "Must be a GitHub repository"),
-    githubBranch: z.string().min(1, "Branch is required"),
-    projectId: z.string().min(1, "Project is required"),
-    newProjectName: z.string().optional(),
-  })
-  .refine(
-    (data) => {
-      if (data.projectId === "new") {
-        return data.newProjectName && data.newProjectName.length >= 3;
-      }
-      return true;
-    },
-    {
-      message: "New project name must be at least 3 characters",
-      path: ["newProjectName"],
-    },
-  );
+const schema = z.object({
+  name: z.string().min(3, "Name must be at least 3 characters").max(50),
+  gitUrl: z
+    .string()
+    .url("Must be a valid URL")
+    .regex(/^https:\/\/github\.com/, "Must be a GitHub repository"),
+  githubBranch: z.string().min(1, "Branch is required"),
+  database: z.enum(["auto", "postgres", "mysql", "none"]),
+  projectId: z.string().optional(),
+  newProjectName: z.string().optional(),
+});
 
 type FormData = z.infer<typeof schema>;
 
-export default function UploadPage() {
+function UploadForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const queryProjectId = searchParams.get("projectId");
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [branches, setBranches] = useState<string[]>([]);
   const [isFetchingBranches, setIsFetchingBranches] = useState(false);
@@ -51,23 +41,26 @@ export default function UploadPage() {
     formState: { errors },
   } = useForm<FormData>({
     resolver: zodResolver(schema),
-    defaultValues: { githubBranch: "main" },
+    defaultValues: { githubBranch: "main", database: "auto", projectId: queryProjectId || undefined },
   });
 
   const { data: projects, isLoading: isProjectsLoading } = useSWR(
     "/api/projects",
-    (url) => fetchWithAuth(url),
+    (url) => fetchWithAuth(url)
   );
 
   const gitUrl = watch("gitUrl");
   const projectId = watch("projectId");
+  const selectedDb = watch("database");
 
-  // Auto-select first project when projects load
+  // Pre-select project from query param or auto-select first project when loaded
   useEffect(() => {
-    if (projects && projects.length > 0 && !projectId) {
+    if (queryProjectId) {
+      setValue("projectId", queryProjectId);
+    } else if (projects && projects.length > 0 && !projectId) {
       setValue("projectId", projects[0].id);
     }
-  }, [projects, projectId, setValue]);
+  }, [projects, projectId, queryProjectId, setValue]);
 
   useEffect(() => {
     const fetchBranches = async () => {
@@ -82,7 +75,7 @@ export default function UploadPage() {
       setIsFetchingBranches(true);
       try {
         const res = await fetch(
-          `https://api.github.com/repos/${owner}/${repo}/branches`,
+          `https://api.github.com/repos/${owner}/${repo}/branches`
         );
         if (!res.ok) {
           setBranches([]);
@@ -92,14 +85,12 @@ export default function UploadPage() {
         const branchNames = data.map((b: { name: string }) => b.name);
         setBranches(branchNames);
 
-        // Auto-select main or master if available
         if (branchNames.includes("main")) setValue("githubBranch", "main");
         else if (branchNames.includes("master"))
           setValue("githubBranch", "master");
         else if (branchNames.length > 0)
           setValue("githubBranch", branchNames[0]);
-      } catch (err) {
-        // Silently fail and fallback to manual input if network request fails entirely
+      } catch {
         setBranches([]);
       } finally {
         setIsFetchingBranches(false);
@@ -113,37 +104,27 @@ export default function UploadPage() {
   const onSubmit = async (data: FormData) => {
     setIsSubmitting(true);
     try {
-      let targetProjectId = data.projectId;
-
-      if (targetProjectId === "new") {
-        // Create new project first
-        const projRes = await fetchWithAuth("/api/projects", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name: data.newProjectName,
-            description: "Auto-created workspace",
-          }),
-        });
-        targetProjectId = projRes.id;
-      }
-
-      const response = await fetchWithAuth("/api/environments", {
+      const response = await fetchWithAuth("/api/sandboxes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: data.name,
-          gitUrl: data.gitUrl,
-          githubBranch: data.githubBranch,
-          projectId:
-            targetProjectId && targetProjectId !== ""
-              ? targetProjectId
-              : undefined,
+          repo_url: data.gitUrl,
+          branch: data.githubBranch || "main",
+          lifetime_seconds: 86400,
+          idle_timeout_seconds: 900,
+          database: data.database,
         }),
       });
 
       const env = response;
-      toast.success("Sandbox created! Building image...");
+      if (data.projectId && env?.id) {
+        await fetch(`/api/projects/${data.projectId}/link`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sandboxId: env.id }),
+        }).catch(() => {});
+      }
+      toast.success("Sandbox queued! Initializing build...");
       router.push(`/environments/${env.id}`);
     } catch (error: unknown) {
       toast.error((error as Error).message);
@@ -153,122 +134,100 @@ export default function UploadPage() {
   };
 
   return (
-    <div className="max-w-2xl mx-auto mt-12 mb-24">
-      <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-8 md:p-12 shadow-2xl relative overflow-hidden">
-        <div className="absolute top-0 right-0 p-16 opacity-5 pointer-events-none">
-          <span className="material-symbols-outlined text-[200px] text-primary-fixed">
-            cloud_upload
-          </span>
-        </div>
-
-        <div className="text-center mb-10 relative z-10">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary-container/20 text-primary-fixed mb-6 border border-primary-container/30 hover:scale-110 transition-transform">
-            <span className="material-symbols-outlined text-[32px]">
-              deployed_code
-            </span>
+    <div className="max-w-2xl mx-auto py-6">
+      <div className="bg-surface-container-lowest border border-outline-variant rounded-[32px] p-8 sm:p-12 shadow-xl relative overflow-hidden transition-colors">
+        {/* Header Icon + Title */}
+        <div className="text-center mb-10">
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-[#FF416C] to-[#FF4B2B] text-white flex items-center justify-center mx-auto mb-5 shadow-lg">
+            <Sparkles className="w-7 h-7" />
           </div>
-          <h1 className="text-3xl font-bold text-on-surface mb-3">
+          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-on-surface mb-2">
             Deploy New Sandbox
           </h1>
-          <p className="text-on-surface-variant">
-            Connect a public GitHub repository to instantly build and deploy an
-            isolated container.
+          <p className="text-xs sm:text-sm text-on-surface-variant max-w-sm mx-auto leading-relaxed">
+            Connect a GitHub repository to build an isolated container
+            environment with optional sidecar databases.
           </p>
         </div>
 
-        <form
-          onSubmit={handleSubmit(onSubmit)}
-          className="space-y-6 relative z-10"
-        >
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+          {/* Project Destination */}
           <div className="space-y-2">
-            <label className="text-sm font-bold tracking-wide text-on-surface-variant uppercase">
+            <label className="text-xs font-bold uppercase tracking-wider text-on-surface-variant flex items-center gap-1.5">
+              <Folder className="w-3.5 h-3.5" />
               Project Destination
             </label>
             {isProjectsLoading ? (
-              <div className="w-full bg-surface-container px-4 py-3 rounded-lg border border-outline-variant text-on-surface opacity-50 flex items-center">
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Loading
-                projects...
+              <div className="w-full h-11 bg-surface-container-low px-4 rounded-xl border border-outline-variant text-on-surface-variant/50 flex items-center text-xs font-mono">
+                <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" /> Loading projects...
               </div>
             ) : (
               <select
                 {...register("projectId")}
-                className="w-full bg-surface-container px-4 py-3 rounded-lg border border-outline-variant text-on-surface focus:border-primary-fixed focus:ring-1 focus:ring-primary-fixed transition-all appearance-none"
+                className="w-full h-11 bg-surface-container-low px-4 rounded-xl border border-outline-variant text-xs font-mono text-on-surface focus:outline-none focus:border-outline-variant/60 transition-colors"
               >
                 {projects?.map((p: { id: string; name: string }) => (
-                  <option key={p.id} value={p.id}>
+                  <option key={p.id} value={p.id} className="bg-surface text-on-surface">
                     {p.name}
                   </option>
                 ))}
-                <option value="new">+ Create New Workspace Project</option>
+                <option value="new" className="bg-surface text-on-surface">
+                  + Create New Project
+                </option>
               </select>
-            )}
-
-            {projectId === "new" && (
-              <div className="pt-3">
-                <input
-                  {...register("newProjectName")}
-                  placeholder="New Project Name (e.g. My Secret App)"
-                  className="w-full bg-surface-container px-4 py-3 rounded-lg border border-outline-variant text-on-surface focus:border-primary-fixed focus:ring-1 focus:ring-primary-fixed transition-all"
-                />
-                {errors.newProjectName && (
-                  <p className="text-sm text-error font-medium mt-1">
-                    {errors.newProjectName.message}
-                  </p>
-                )}
-              </div>
             )}
           </div>
 
+          {/* Sandbox Name */}
           <div className="space-y-2">
-            <label className="text-sm font-bold tracking-wide text-on-surface-variant uppercase">
-              Project Name
+            <label className="text-xs font-bold uppercase tracking-wider text-on-surface-variant">
+              Sandbox Label
             </label>
             <input
               {...register("name")}
-              placeholder="e.g. my-awesome-api"
-              className="w-full bg-surface-container px-4 py-3 rounded-lg border border-outline-variant text-on-surface focus:border-primary-fixed focus:ring-1 focus:ring-primary-fixed transition-all"
+              placeholder="e.g. inventory-service-api"
+              className="w-full h-11 bg-surface-container-low px-4 rounded-xl border border-outline-variant text-xs font-mono text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-outline-variant/60 transition-colors"
             />
             {errors.name && (
-              <p className="text-sm text-error font-medium">
+              <p className="text-xs text-red-500 font-mono mt-1">
                 {errors.name.message}
               </p>
             )}
           </div>
 
+          {/* GitHub Repo URL */}
           <div className="space-y-2">
-            <label className="text-sm font-bold tracking-wide text-on-surface-variant uppercase">
+            <label className="text-xs font-bold uppercase tracking-wider text-on-surface-variant">
               GitHub Repository URL
             </label>
             <input
               {...register("gitUrl")}
-              placeholder="https://github.com/username/repo"
-              className="w-full bg-surface-container px-4 py-3 rounded-lg border border-outline-variant text-on-surface focus:border-primary-fixed focus:ring-1 focus:ring-primary-fixed transition-all"
+              placeholder="https://github.com/username/repository"
+              className="w-full h-11 bg-surface-container-low px-4 rounded-xl border border-outline-variant text-xs font-mono text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-outline-variant/60 transition-colors"
             />
             {errors.gitUrl && (
-              <p className="text-sm text-error font-medium">
+              <p className="text-xs text-red-500 font-mono mt-1">
                 {errors.gitUrl.message}
               </p>
             )}
           </div>
 
+          {/* Branch Picker */}
           <div className="space-y-2">
-            <label className="text-sm font-bold tracking-wide text-on-surface-variant uppercase flex items-center gap-2">
+            <label className="text-xs font-bold uppercase tracking-wider text-on-surface-variant flex items-center gap-1.5">
+              <GitBranch className="w-3.5 h-3.5 text-[#FF416C]" />
               Branch
               {isFetchingBranches && (
-                <Loader2 className="w-3 h-3 animate-spin text-primary-fixed" />
+                <Loader2 className="w-3 h-3 animate-spin text-on-surface-variant ml-1" />
               )}
             </label>
             {branches.length > 0 ? (
               <select
                 {...register("githubBranch")}
-                className="w-full bg-surface-container px-4 py-3 rounded-lg border border-outline-variant text-on-surface focus:border-primary-fixed focus:ring-1 focus:ring-primary-fixed transition-all appearance-none"
+                className="w-full h-11 bg-surface-container-low px-4 rounded-xl border border-outline-variant text-xs font-mono text-on-surface focus:outline-none focus:border-outline-variant/60 transition-colors"
               >
                 {branches.map((b) => (
-                  <option
-                    key={b}
-                    value={b}
-                    className="bg-surface-container text-on-surface"
-                  >
+                  <option key={b} value={b} className="bg-surface text-on-surface">
                     {b}
                   </option>
                 ))}
@@ -277,32 +236,81 @@ export default function UploadPage() {
               <input
                 {...register("githubBranch")}
                 placeholder="main"
-                className="w-full bg-surface-container px-4 py-3 rounded-lg border border-outline-variant text-on-surface focus:border-primary-fixed focus:ring-1 focus:ring-primary-fixed transition-all"
+                className="w-full h-11 bg-surface-container-low px-4 rounded-xl border border-outline-variant text-xs font-mono text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-outline-variant/60 transition-colors"
               />
             )}
             {errors.githubBranch && (
-              <p className="text-sm text-error font-medium">
+              <p className="text-xs text-red-500 font-mono mt-1">
                 {errors.githubBranch.message}
               </p>
             )}
           </div>
 
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="w-full py-4 mt-8 flex items-center justify-center text-lg bg-primary-container text-on-primary-fixed-variant rounded-xl font-bold hover:shadow-[0_0_20px_rgba(0,240,255,0.2)] active:scale-95 transition-all disabled:opacity-50 disabled:pointer-events-none"
-          >
-            {isSubmitting ? (
-              <>
-                <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                Deploying...
-              </>
-            ) : (
-              "Deploy Project"
-            )}
-          </button>
+          {/* Sidecar Database Option */}
+          <div className="space-y-2 pt-2">
+            <label className="text-xs font-bold uppercase tracking-wider text-on-surface-variant flex items-center gap-1.5">
+              <Database className="w-3.5 h-3.5 text-amber-500" />
+              Sidecar Database Provisioning
+            </label>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+              {[
+                { value: "auto", label: "Auto-Detect" },
+                { value: "mysql", label: "MySQL 8.0" },
+                { value: "postgres", label: "PostgreSQL 16" },
+                { value: "none", label: "None" },
+              ].map((opt) => (
+                <button
+                  type="button"
+                  key={opt.value}
+                  onClick={() => setValue("database", opt.value as any)}
+                  className={`h-11 rounded-xl text-xs font-mono font-bold border transition-all cursor-pointer ${
+                    selectedDb === opt.value
+                      ? "bg-on-surface text-surface border-on-surface shadow-md"
+                      : "bg-surface-container-low text-on-surface-variant border-outline-variant hover:border-outline-variant/60 hover:text-on-surface"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Submit Button */}
+          <div className="pt-4">
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="w-full h-12 rounded-full bg-gradient-to-r from-[#FF416C] to-[#FF4B2B] text-white text-xs font-bold uppercase tracking-wider shadow-xl hover:opacity-95 active:scale-[0.99] transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Provisioning Sandbox...</span>
+                </>
+              ) : (
+                <>
+                  <span>Deploy Project</span>
+                  <ArrowRight className="w-4 h-4" />
+                </>
+              )}
+            </button>
+          </div>
         </form>
       </div>
     </div>
+  );
+}
+
+export default function UploadPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex items-center justify-center min-h-[400px]">
+          <Loader2 className="w-8 h-8 animate-spin text-primary-fixed" />
+        </div>
+      }
+    >
+      <UploadForm />
+    </Suspense>
   );
 }

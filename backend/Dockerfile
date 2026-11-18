@@ -2,7 +2,7 @@
 FROM golang:1.25-alpine AS builder
 
 # Install required build tools
-RUN apk add --no-cache git gcc musl-dev
+RUN apk add --no-cache git
 
 WORKDIR /app
 
@@ -14,7 +14,7 @@ RUN go mod download
 COPY . .
 
 # Build the binary
-RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o api-sandbox-backend .
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o api-sandbox-backend .
 
 # Stage 2: Create a minimal runner image
 FROM alpine:3.19

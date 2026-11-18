@@ -48,16 +48,16 @@ export default function TeamCollaborationDashboard({ projectId }: TeamCollaborat
   const blockersCount = teamStatusData.blockers?.length || 0;
 
   return (
-    <div className="flex flex-col h-full bg-[#0a0e17]">
+    <div className="flex flex-col h-full bg-surface-container-lowest">
       {/* Dashboard Sub-Header */}
-      <div className="border-b border-outline-variant/50 bg-surface-container/30 px-6 py-4">
+      <div className="border-b border-outline-variant bg-surface-container/30 px-6 py-4">
         <div className="flex gap-4">
           <button
             onClick={() => setActiveTab("activity")}
-            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 ${
+            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 cursor-pointer ${
               activeTab === "activity"
                 ? "bg-primary-fixed/10 text-primary-fixed border border-primary-fixed/20"
-                : "text-on-surface-variant hover:bg-white/5"
+                : "text-on-surface-variant hover:bg-surface-container-high"
             }`}
           >
             <Activity className="w-4 h-4" />
@@ -66,10 +66,10 @@ export default function TeamCollaborationDashboard({ projectId }: TeamCollaborat
           
           <button
             onClick={() => setActiveTab("blockers")}
-            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 ${
+            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 cursor-pointer ${
               activeTab === "blockers"
                 ? "bg-error/10 text-error border border-error/20"
-                : "text-on-surface-variant hover:bg-white/5"
+                : "text-on-surface-variant hover:bg-surface-container-high"
             }`}
           >
             <AlertTriangle className="w-4 h-4" />

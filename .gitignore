@@ -56,9 +56,11 @@ skills-lock.json
 
 # API Sandbox Workspaces & Infrastructure
 backend/workspaces/
+backend/cache/
 backend/sandbox-start.sh
 backend/scripts/**/main
 /workspaces/
+/cache/
 
 # Database, Data, and Secrets
 *.db

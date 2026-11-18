@@ -1,0 +1,76 @@
+# Development compose file: Only runs infrastructure (Postgres, Redis, Traefik).
+# Applications (backend and frontend) run directly on the host.
+#
+# Usage:
+#   docker compose -f docker-compose.dev.yml up -d
+#
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: api-sandbox-postgres-1
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${DB_NAME:-api_sandbox}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    networks:
+      - traefik-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-api_sandbox}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: api-sandbox-redis-1
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    networks:
+      - traefik-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  traefik:
+    image: traefik:v3.7
+    container_name: api-sandbox-traefik
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.redis=true"
+      - "--providers.redis.endpoints=redis:6379"
+      - "--providers.file.directory=/etc/traefik/dynamic"
+      - "--providers.file.watch=true"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--api.insecure=${TRAEFIK_DASHBOARD:-false}"
+      - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
+      - "--certificatesresolvers.myresolver.acme.email=${ACME_EMAIL:-admin@example.com}"
+      - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8081:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "traefik_dev_certs:/letsencrypt"
+      - "./traefik-dynamic:/etc/traefik/dynamic:ro"
+    networks:
+      - traefik-net
+
+networks:
+  traefik-net:
+    name: traefik-net
+    driver: bridge
+
+volumes:
+  postgres_dev_data:
+  traefik_dev_certs:

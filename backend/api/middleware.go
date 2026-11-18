@@ -17,6 +17,13 @@ func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tokenString, err := c.Cookie("token")
 		if err != nil || tokenString == "" {
+			authHeader := c.GetHeader("Authorization")
+			if len(authHeader) > 7 && authHeader[:7] == "Bearer " {
+				tokenString = authHeader[7:]
+			}
+		}
+
+		if tokenString == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: missing token"})
 			return
 		}
@@ -186,17 +193,16 @@ func RateLimitVerifyEmail() gin.HandlerFunc {
 	}
 }
 
-func hasProjectPermission(userRole, requiredRole models.ProjectRole) bool {
-	hierarchy := map[models.ProjectRole]int{
-		models.ProjectRoleOwner:        3,
-		models.ProjectRoleAdmin:        2,
-		models.ProjectRoleCollaborator: 1,
-		models.ProjectRoleViewer:       0,
+func hasProjectMemberPermission(userRole, requiredRole models.ProjectMemberRole) bool {
+	hierarchy := map[models.ProjectMemberRole]int{
+		models.ProjectMemberRoleOwner:  2,
+		models.ProjectMemberRoleEditor: 1,
+		models.ProjectMemberRoleViewer: 0,
 	}
 	return hierarchy[userRole] >= hierarchy[requiredRole]
 }
 
-func AuthorizeProjectAccess(requiredRole models.ProjectRole) gin.HandlerFunc {
+func AuthorizeProjectMemberAccess(requiredRole models.ProjectMemberRole) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		projectID := c.Param("projectId")
 		if projectID == "" {
@@ -211,28 +217,48 @@ func AuthorizeProjectAccess(requiredRole models.ProjectRole) gin.HandlerFunc {
 		}
 		userID := userIDVal.(string)
 
-		var collab models.ProjectCollaborator
+		var project models.Project
+		if err := db.DB.First(&project, "id = ?", projectID).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+			c.Abort()
+			return
+		}
+
+		// If Default Project (Personal Space), only the owner can access it
+		if project.IsDefault || project.ID == "default-project" {
+			if project.CreatedByUserID != userID {
+				c.JSON(http.StatusForbidden, gin.H{"error": "Access denied: personal default project is private"})
+				c.Abort()
+				return
+			}
+			c.Set("projectMemberRole", models.ProjectMemberRoleOwner)
+			c.Set("projectID", projectID)
+			c.Next()
+			return
+		}
+
+		var member models.ProjectMember
 		err := db.DB.
 			Where("project_id = ? AND user_id = ?", projectID, userID).
-			First(&collab).Error
+			First(&member).Error
 
 		if err != nil {
 			c.JSON(http.StatusForbidden, gin.H{
-				"error": "Not a collaborator on this project or project does not exist",
+				"error": "Not a member of this project or project does not exist",
 			})
 			c.Abort()
 			return
 		}
 
-		if collab.AcceptedAt == nil {
+		if member.Status != models.ProjectMemberStatusAccepted {
 			c.JSON(http.StatusForbidden, gin.H{
-				"error": "Invite pending acceptance",
+				"error": "Pending invitations do not grant access to project resources",
 			})
 			c.Abort()
 			return
 		}
 
-		if !hasProjectPermission(collab.Role, requiredRole) {
+		if !hasProjectMemberPermission(member.Role, requiredRole) {
 			c.JSON(http.StatusForbidden, gin.H{
 				"error": "Insufficient permissions on this project",
 			})
@@ -240,7 +266,7 @@ func AuthorizeProjectAccess(requiredRole models.ProjectRole) gin.HandlerFunc {
 			return
 		}
 
-		c.Set("projectRole", collab.Role)
+		c.Set("projectMemberRole", member.Role)
 		c.Set("projectID", projectID)
 		c.Next()
 	}

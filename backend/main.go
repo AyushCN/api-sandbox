@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/api-sandbox/backend/api"
-	"github.com/api-sandbox/backend/cron"
 	"github.com/api-sandbox/backend/db"
 	"github.com/api-sandbox/backend/models"
 	"github.com/api-sandbox/backend/provider"
@@ -34,7 +33,6 @@ func main() {
 
 	// Initialize singletons
 	db.InitDB()
-	cron.StartIdleCleanup(db.DB)
 
 	// Recover environments stuck in BUILDING from previous runs
 	var stuckEnvs []models.Environment
@@ -145,16 +143,11 @@ func startScheduler() *asynq.Scheduler {
 	scheduler := asynq.NewScheduler(opt, &asynq.SchedulerOpts{})
 
 	// Register cron jobs
-	if _, err := scheduler.Register("@every 30s", asynq.NewTask(queue.TaskCollectMetrics, nil)); err != nil {
-		slog.Error("Failed to register metrics cron", "error", err)
-		os.Exit(1)
-	}
-
 	if _, err := scheduler.Register("@every 5m", asynq.NewTask(queue.TaskCleanupContainers, nil)); err != nil {
 		slog.Error("Failed to register cleanup cron", "error", err)
 		os.Exit(1)
 	}
-	if _, err := scheduler.Register("@every 1h", asynq.NewTask(queue.TaskReapOrphans, nil)); err != nil {
+	if _, err := scheduler.Register("@every 1m", asynq.NewTask(queue.TaskReapOrphans, nil)); err != nil {
 		slog.Error("Failed to register orphan reaper cron", "error", err)
 		os.Exit(1)
 	}
@@ -211,11 +204,12 @@ func startWorker() *asynq.Server {
 
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(queue.TaskBuildEnvironment, worker.HandleBuildEnvironmentTask)
-	mux.HandleFunc(queue.TaskCollectMetrics, worker.HandleCollectMetricsTask)
 	mux.HandleFunc(queue.TaskCleanupContainers, worker.HandleCleanupContainersTask)
 	mux.HandleFunc(queue.TaskReapOrphans, worker.HandleReapOrphansTask)
 
 	slog.Info("Starting Asynq worker...")
+	go worker.MaintainWarmPool()
+
 	go func() {
 		if err := srv.Start(mux); err != nil {
 			slog.Error("Could not run Asynq server", "error", err)

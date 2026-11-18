@@ -6,11 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -43,8 +43,14 @@ func SetupRoutes(router *gin.Engine) {
 		api.GET("/health", HealthCheck)
 
 		api.POST("/auth/logout", Logout)
+		api.POST("/auth/dev-login", DevLogin)
+		api.GET("/auth/dev-login", DevLogin)
 		api.GET("/auth/github", GithubLogin)
 		api.GET("/auth/github/callback", GithubCallback)
+		api.GET("/me", AuthMiddleware(), GetMe)
+		api.GET("/user/invitations", AuthMiddleware(), GetUserInvitations)
+		api.POST("/invitations/:id/accept", AuthMiddleware(), AcceptInvitation)
+		api.POST("/invitations/:id/reject", AuthMiddleware(), RejectInvitation)
 
 		projects := api.Group("/projects")
 		projects.Use(AuthMiddleware(), RateLimitAPI())
@@ -59,13 +65,38 @@ func SetupRoutes(router *gin.Engine) {
 			projectDetail.POST("/invites/decline", DeclineProjectInvite)
 
 			// Authorized project endpoints
-			projectDetail.Use(AuthorizeProjectAccess(models.ProjectRoleViewer))
+			projectDetail.Use(AuthorizeProjectMemberAccess(models.ProjectMemberRoleViewer))
 			{
 				projectDetail.GET("", GetProject)
+				projectDetail.DELETE("", AuthorizeProjectMemberAccess(models.ProjectMemberRoleOwner), DeleteProject)
+				projectDetail.POST("/transfer", AuthorizeProjectMemberAccess(models.ProjectMemberRoleOwner), TransferProjectOwnership)
 				projectDetail.GET("/activity", GetProjectActivity)
 				projectDetail.GET("/team-status", GetProjectTeamStatus)
-				projectDetail.POST("/invite", AuthorizeProjectAccess(models.ProjectRoleAdmin), InviteToProject)
+				projectDetail.GET("/members", GetProjectMembers)
+				projectDetail.POST("/invite", AuthorizeProjectMemberAccess(models.ProjectMemberRoleOwner), InviteToProject)
+				projectDetail.POST("/invitations", AuthorizeProjectMemberAccess(models.ProjectMemberRoleOwner), InviteToProject)
+				projectDetail.DELETE("/invitations/:id", AuthorizeProjectMemberAccess(models.ProjectMemberRoleOwner), RevokeInvitation)
 				projectDetail.DELETE("/collaborators/:userId", RemoveCollaborator)
+				projectDetail.PUT("/collaborators/:userId/role", AuthorizeProjectMemberAccess(models.ProjectMemberRoleOwner), UpdateMemberRole)
+
+				// Editing
+				projectDetail.POST("/edit", AuthorizeProjectMemberAccess(models.ProjectMemberRoleEditor), EditProject)
+
+				// Repositories
+				projectDetail.GET("/repositories", GetProjectRepositories)
+				projectDetail.POST("/repositories", AuthorizeProjectMemberAccess(models.ProjectMemberRoleOwner), AddProjectRepository)
+				projectDetail.DELETE("/repositories/:repositoryId", AuthorizeProjectMemberAccess(models.ProjectMemberRoleOwner), RemoveProjectRepository)
+
+				// Workspaces
+				projectDetail.GET("/workspaces", GetProjectWorkspaces)
+				projectDetail.GET("/workspaces/:workspaceId", GetWorkspace)
+				projectDetail.POST("/workspaces/:workspaceId/start", StartWorkspace)
+
+				// Change Requests
+				projectDetail.GET("/change-requests", GetChangeRequests)
+				projectDetail.POST("/change-requests", CreateChangeRequest)
+				projectDetail.GET("/change-requests/:requestId", GetChangeRequest)
+				projectDetail.POST("/change-requests/:requestId/review", AuthorizeProjectMemberAccess(models.ProjectMemberRoleOwner), ReviewChangeRequest)
 			}
 		}
 
@@ -97,12 +128,39 @@ func SetupRoutes(router *gin.Engine) {
 			protected.POST("/:id/git/checkout", GitCheckout)
 			protected.POST("/:id/git/pull", GitPull)
 			protected.GET("/:id/git/log", GitLog)
+			protected.GET("/:id/git/diff", GitDiff)
+			protected.GET("/:id/git/file-diff", GitFileDiff)
 		}
 
-		wsGroup := api.Group("/ws/environments")
+		sandboxes := api.Group("/sandboxes")
+		sandboxes.Use(AuthMiddleware(), RateLimitAPI())
+		{
+			sandboxes.GET("", GetEnvironments)
+			sandboxes.POST("", CreateEnvironment)
+			sandboxes.GET("/:id", GetEnvironment)
+			sandboxes.PUT("/:id/settings", UpdateEnvironmentSettings)
+			sandboxes.POST("/:id/restart", RestartEnvironment)
+			sandboxes.POST("/:id/transfer", TransferEnvironment)
+			sandboxes.POST("/:id/fork", ForkEnvironment)
+			sandboxes.DELETE("/:id", DeleteEnvironment)
+			sandboxes.GET("/:id/logs/stream", StreamLogs)
+			sandboxes.GET("/:id/files", GetWorkspaceFiles)
+			sandboxes.GET("/:id/files/content", GetWorkspaceFileContent)
+			sandboxes.POST("/:id/files/content", UpdateWorkspaceFileContent)
+			sandboxes.POST("/:id/files/create", CreateWorkspaceFileOrFolder)
+			sandboxes.POST("/:id/files/delete", DeleteWorkspaceFileOrFolder)
+			sandboxes.GET("/:id/docker-logs", GetDockerLogs)
+			sandboxes.GET("/:id/git-tree", GetGitTree)
+			sandboxes.POST("/:id/commit", CommitChanges)
+			sandboxes.POST("/:id/push", PushChanges)
+		}
+
+		wsGroup := api.Group("/ws")
 		wsGroup.Use(AuthMiddleware())
 		{
-			wsGroup.GET("/:id", ServeWS)
+			wsGroup.GET("/environments/:id", ServeEnvironmentWS)
+			wsGroup.GET("/projects/:projectId", ServeProjectWS)
+			wsGroup.GET("/projects/:projectId/workspaces/:workspaceId", ServeWorkspaceWS)
 		}
 
 		userGroup := api.Group("/user")
@@ -293,44 +351,26 @@ func CreateEnvironment(c *gin.Context) {
 
 	// Find project to assign to
 	var projectID string
-	var orgID string
 	if req.ProjectID != "" {
 		// Verify access
-		var collab models.ProjectCollaborator
-		if err := db.DB.Preload("Project").Where("project_id = ? AND user_id = ?", req.ProjectID, uid).First(&collab).Error; err != nil {
+		var member models.ProjectMember
+		if err := db.DB.Preload("Project").Where("project_id = ? AND user_id = ? AND status = ?", req.ProjectID, uid, models.ProjectMemberStatusAccepted).First(&member).Error; err != nil {
 			c.JSON(http.StatusForbidden, gin.H{"error": "You do not have access to this project"})
 			return
 		}
-		if collab.Role == models.ProjectRoleViewer {
+		if member.Role == models.ProjectMemberRoleViewer {
 			c.JSON(http.StatusForbidden, gin.H{"error": "Viewers cannot create environments"})
 			return
 		}
 		projectID = req.ProjectID
-		orgID = collab.Project.OwnerOrganizationID
 	} else {
-		// Fallback for legacy frontend: use first available project, or create one
-		var collab models.ProjectCollaborator
-		if err := db.DB.Preload("Project").Where("user_id = ?", uid).First(&collab).Error; err == nil {
-			projectID = collab.ProjectID
-			orgID = collab.Project.OwnerOrganizationID
+		// Fallback for legacy frontend: use first available project
+		var member models.ProjectMember
+		if err := db.DB.Preload("Project").Where("user_id = ? AND status = ?", uid, models.ProjectMemberStatusAccepted).First(&member).Error; err == nil {
+			projectID = member.ProjectID
 		} else {
-			// No projects exist, create a default one (legacy behavior fallback)
-			var orgMember models.OrganizationMember
-			if err := db.DB.Where("user_id = ?", uid).First(&orgMember).Error; err == nil {
-				defaultProject := models.Project{
-					Name:                "Default Workspace",
-					OwnerOrganizationID: orgMember.OrganizationID,
-					CreatedByUserID:     uid,
-				}
-				db.DB.Create(&defaultProject)
-				db.DB.Create(&models.ProjectCollaborator{
-					ProjectID: defaultProject.ID,
-					UserID:    uid,
-					Role:      models.ProjectRoleOwner,
-				})
-				projectID = defaultProject.ID
-				orgID = orgMember.OrganizationID
-			}
+			c.JSON(http.StatusBadRequest, gin.H{"error": "No project available. Create a project first."})
+			return
 		}
 	}
 
@@ -342,7 +382,6 @@ func CreateEnvironment(c *gin.Context) {
 	env := models.Environment{
 		UserID:            uid,
 		ProjectID:         projectID,
-		OrganizationID:    orgID,
 		Name:              req.Name,
 		GitURL:            req.GitURL,
 		GithubBranch:      req.GithubBranch,
@@ -405,7 +444,8 @@ func GetEnvironment(c *gin.Context) {
 			}).
 			Preload("Metrics", func(db *gorm.DB) *gorm.DB {
 				return db.Order("timestamp desc").Limit(100)
-			})
+			}).
+			Preload("EnvVars")
 
 		return query.First(&env, "id = ?", id).Error
 	})
@@ -423,11 +463,11 @@ func GetEnvironment(c *gin.Context) {
 }
 
 func getUserProjectIDs(userID interface{}) []string {
-	var collabs []models.ProjectCollaborator
-	db.DB.Where("user_id = ? AND accepted_at IS NOT NULL", userID).Find(&collabs)
+	var members []models.ProjectMember
+	db.DB.Where("user_id = ? AND status = ?", userID, models.ProjectMemberStatusAccepted).Find(&members)
 	var projectIDs []string
-	for _, c := range collabs {
-		projectIDs = append(projectIDs, c.ProjectID)
+	for _, m := range members {
+		projectIDs = append(projectIDs, m.ProjectID)
 	}
 	return projectIDs
 }
@@ -498,16 +538,21 @@ type TransferEnvironmentRequest struct {
 
 func UpdateEnvironmentSettings(c *gin.Context) {
 	id := c.Param("id")
-	env, err := checkWorkspaceWriteAccess(c, id)
+	env, err := checkWorkspaceOwnerAccess(c, id)
 	if err != nil {
 		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		return
 	}
 
 	var req struct {
-		StartCommand    *string `json:"startCommand"`
-		Port            *int    `json:"port"`
-		HealthCheckType *string `json:"healthCheckType"`
+		StartCommand     *string            `json:"startCommand"`
+		RuntimeType      *string            `json:"runtimeType"`
+		Port             *int               `json:"port"`
+		HealthCheckType  *string            `json:"healthCheckType"`
+		EnvVars          *map[string]string `json:"envVars"`
+		RootDirectory    *string            `json:"rootDirectory"`
+		DockerfilePath   *string            `json:"dockerfilePath"`
+		PreDeployCommand *string            `json:"preDeployCommand"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -521,6 +566,22 @@ func UpdateEnvironmentSettings(c *gin.Context) {
 		updates["start_command"] = req.StartCommand
 	}
 
+	if req.RuntimeType != nil {
+		updates["runtime_type"] = req.RuntimeType
+	}
+
+	if req.RootDirectory != nil {
+		updates["root_directory"] = req.RootDirectory
+	}
+
+	if req.DockerfilePath != nil {
+		updates["dockerfile_path"] = req.DockerfilePath
+	}
+
+	if req.PreDeployCommand != nil {
+		updates["pre_deploy_command"] = req.PreDeployCommand
+	}
+
 	if req.Port != nil {
 		if *req.Port < 1 || *req.Port > 65535 {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Port must be between 1 and 65535"})
@@ -530,8 +591,8 @@ func UpdateEnvironmentSettings(c *gin.Context) {
 	}
 
 	if req.HealthCheckType != nil {
-		if *req.HealthCheckType != "tcp" && *req.HealthCheckType != "none" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "HealthCheckType must be 'tcp' or 'none'"})
+		if *req.HealthCheckType != "http" && *req.HealthCheckType != "tcp" && *req.HealthCheckType != "none" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "HealthCheckType must be 'http', 'tcp', or 'none'"})
 			return
 		}
 		updates["health_check_type"] = req.HealthCheckType
@@ -541,6 +602,21 @@ func UpdateEnvironmentSettings(c *gin.Context) {
 		if err := db.DB.Model(&env).Updates(updates).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update settings"})
 			return
+		}
+	}
+
+	if req.EnvVars != nil {
+		db.DB.Where("environment_id = ?", env.ID).Delete(&models.EnvironmentVariable{})
+		var vars []models.EnvironmentVariable
+		for k, v := range *req.EnvVars {
+			vars = append(vars, models.EnvironmentVariable{
+				EnvironmentID: env.ID,
+				Key:           k,
+				Value:         v,
+			})
+		}
+		if len(vars) > 0 {
+			db.DB.Create(&vars)
 		}
 	}
 
@@ -570,14 +646,14 @@ func TransferEnvironment(c *gin.Context) {
 		return
 	}
 
-	// Verify user has access to target project (Owner or Collaborator)
-	var collab models.ProjectCollaborator
-	if err := db.DB.Where("project_id = ? AND user_id = ? AND accepted_at IS NOT NULL", req.ProjectID, userID).First(&collab).Error; err != nil {
+	// Verify user has access to target project (Owner or Editor)
+	var member models.ProjectMember
+	if err := db.DB.Where("project_id = ? AND user_id = ? AND status = ?", req.ProjectID, userID, models.ProjectMemberStatusAccepted).First(&member).Error; err != nil {
 		c.JSON(http.StatusForbidden, gin.H{"error": "You do not have access to the target project"})
 		return
 	}
 
-	if collab.Role == models.ProjectRoleViewer {
+	if member.Role == models.ProjectMemberRoleViewer {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Viewers cannot transfer sandboxes into this project"})
 		return
 	}
@@ -594,23 +670,38 @@ func TransferEnvironment(c *gin.Context) {
 func DeleteEnvironment(c *gin.Context) {
 	id := c.Param("id")
 	userID, _ := c.Get("userId")
-	var env models.Environment
-	query := applyEnvironmentScope(db.DB, userID)
-
-	if err := query.First(&env, "id = ?", id).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Environment not found"})
+	envPtr, err := checkWorkspaceOwnerAccess(c, id)
+	if err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		return
 	}
+	env := *envPtr
 
-	// Try to stop and remove docker container if it exists
+	// Stop runtime resources and clear the workspace before deleting the row so
+	// any failure remains retryable and visible to the caller.
+	var cleanupErrs []error
 	if env.ContainerID != nil && *env.ContainerID != "" {
-		_ = provider.CleanupContainer(c.Request.Context(), *env.ContainerID)
+		if err := provider.CleanupContainer(c.Request.Context(), *env.ContainerID); err != nil {
+			cleanupErrs = append(cleanupErrs, err)
+		}
 	}
-	// Also attempt to cleanup by predictable name, in case it was created but ContainerID wasn't saved
-	_ = provider.CleanupContainer(c.Request.Context(), fmt.Sprintf("api-sandbox-env-%s", env.ID))
-
-	// Cleanup database sidecar if it exists
-	_ = provider.CleanupContainer(c.Request.Context(), fmt.Sprintf("api-sandbox-db-%s", env.ID))
+	if err := provider.CleanupContainer(c.Request.Context(), fmt.Sprintf("api-sandbox-env-%s", env.ID)); err != nil {
+		cleanupErrs = append(cleanupErrs, err)
+	}
+	if err := provider.CleanupContainer(c.Request.Context(), fmt.Sprintf("api-sandbox-db-%s", env.ID)); err != nil {
+		cleanupErrs = append(cleanupErrs, err)
+	}
+	if err := provider.CleanupWorkspace(env.ID); err != nil {
+		cleanupErrs = append(cleanupErrs, err)
+	}
+	if err := provider.ClearRuntimeRoute(c.Request.Context(), env.ID); err != nil {
+		cleanupErrs = append(cleanupErrs, err)
+	}
+	if cleanupErr := errors.Join(cleanupErrs...); cleanupErr != nil {
+		slog.Error("Environment deletion cleanup failed", "environment_id", env.ID, "error", cleanupErr)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Environment cleanup is incomplete; retry deletion"})
+		return
+	}
 
 	// Delete associated data first to satisfy foreign key constraints
 	db.DB.Where("environment_id = ?", env.ID).Delete(&models.Log{})
@@ -627,9 +718,6 @@ func DeleteEnvironment(c *gin.Context) {
 		return
 	}
 
-	// Cleanup workspace folder on host AFTER deleting DB record to prevent watcher race condition
-	_ = provider.CleanupWorkspace(env.ID)
-
 	db.DB.Create(&models.AuditLog{
 		UserID:    fmt.Sprintf("%v", userID),
 		Action:    "DELETE_ENVIRONMENT",
@@ -643,20 +731,12 @@ func DeleteEnvironment(c *gin.Context) {
 func RestartEnvironment(c *gin.Context) {
 	id := c.Param("id")
 	userID, _ := c.Get("userId")
-	projectIDs := getUserProjectIDs(userID)
-
-	var env models.Environment
-	query := db.DB
-	if len(projectIDs) > 0 {
-		query = query.Where("project_id IN ? OR user_id = ?", projectIDs, userID)
-	} else {
-		query = query.Where("user_id = ?", userID)
-	}
-
-	if err := query.First(&env, "id = ?", id).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Environment not found"})
+	envPtr, err := checkWorkspaceWriteAccess(c, id)
+	if err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		return
 	}
+	env := *envPtr
 
 	TouchEnvironmentActivity(env.ID)
 
@@ -664,27 +744,49 @@ func RestartEnvironment(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{"error": "Environment is already building"})
 		return
 	}
+	oldContainerID := env.ContainerID
 
-	// Try to stop and remove old docker container if it exists
-	if env.ContainerID != nil && *env.ContainerID != "" {
-		_ = provider.CleanupContainer(c.Request.Context(), *env.ContainerID)
-	}
-	// Also attempt to cleanup by predictable name, in case it was created but ContainerID wasn't saved
-	_ = provider.CleanupContainer(c.Request.Context(), fmt.Sprintf("api-sandbox-env-%s", env.ID))
-
-	// Cleanup database sidecar if it exists
-	_ = provider.CleanupContainer(c.Request.Context(), fmt.Sprintf("api-sandbox-db-%s", env.ID))
-
-	// Delete old logs
-	db.DB.Where("environment_id = ?", env.ID).Delete(&models.Log{})
-
-	// Update status back to building
-	env.Status = models.StatusBuilding
-	env.ContainerID = nil
-	if err := db.DB.Save(&env).Error; err != nil {
+	// Move out of RUNNING before touching the old process so an application
+	// crash or partial cleanup cannot leave a falsely-running database row.
+	if err := db.DB.Model(&env).Updates(map[string]interface{}{
+		"status":       models.StatusBuilding,
+		"container_id": nil,
+		"public_url":   nil,
+	}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update environment status"})
 		return
 	}
+	env.Status = models.StatusBuilding
+	env.ContainerID = nil
+	env.PublicURL = nil
+
+	// Do not enqueue a replacement while old Docker resources still exist.
+	var cleanupErrs []error
+	if oldContainerID != nil && *oldContainerID != "" {
+		if err := provider.CleanupContainer(c.Request.Context(), *oldContainerID); err != nil {
+			cleanupErrs = append(cleanupErrs, err)
+		}
+	}
+	if err := provider.CleanupContainer(c.Request.Context(), fmt.Sprintf("api-sandbox-env-%s", env.ID)); err != nil {
+		cleanupErrs = append(cleanupErrs, err)
+	}
+	if err := provider.CleanupContainer(c.Request.Context(), fmt.Sprintf("api-sandbox-db-%s", env.ID)); err != nil {
+		cleanupErrs = append(cleanupErrs, err)
+	}
+	if err := provider.ClearRuntimeRoute(c.Request.Context(), env.ID); err != nil {
+		cleanupErrs = append(cleanupErrs, err)
+	}
+	if cleanupErr := errors.Join(cleanupErrs...); cleanupErr != nil {
+		slog.Error("Environment restart cleanup failed", "environment_id", env.ID, "error", cleanupErr)
+		if err := db.DB.Model(&env).Where("status = ?", models.StatusBuilding).Update("status", models.StatusFailed).Error; err != nil {
+			slog.Error("Failed to mark restart as FAILED after cleanup error", "environment_id", env.ID, "error", err)
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Environment cleanup is incomplete; retry restart"})
+		return
+	}
+
+	// Delete old logs
+	db.DB.Where("environment_id = ?", env.ID).Delete(&models.Log{})
 
 	db.DB.Create(&models.AuditLog{
 		UserID:    fmt.Sprintf("%v", userID),
@@ -734,14 +836,13 @@ func GetDockerLogs(c *gin.Context) {
 		containerRef = *env.ContainerID
 	}
 
-	cmd := exec.CommandContext(c.Request.Context(), "docker", "logs", "--tail", "500", containerRef)
-	output, err := cmd.CombinedOutput()
+	output, err := provider.GetContainerLogs(c.Request.Context(), containerRef, "500")
 	if err != nil {
-		outStr := string(output)
+		outStr := err.Error()
 
 		// Container doesn't exist — the env is still building or crashed between retries.
 		// Surface the crash/error logs from the DB so the dev can see what went wrong.
-		if strings.Contains(outStr, "No such container") || len(output) == 0 {
+		if strings.Contains(strings.ToLower(outStr), "no such container") || len(output) == 0 {
 			var dbLogs []models.Log
 			db.DB.Where("environment_id = ?", id).
 				Order("timestamp desc").
@@ -768,7 +869,7 @@ func GetDockerLogs(c *gin.Context) {
 		}
 	}
 
-	c.String(http.StatusOK, string(output))
+	c.String(http.StatusOK, output)
 }
 
 type MeResponse struct {
@@ -805,15 +906,6 @@ func GetMe(c *gin.Context) {
 	var envCount int64
 	db.DB.Model(&models.Environment{}).Where("user_id = ?", userID).Count(&envCount)
 
-	// Get org membership
-	var orgMember models.OrganizationMember
-	orgName := ""
-	orgRole := ""
-	if err := db.DB.Preload("Organization").Where("user_id = ?", userID).First(&orgMember).Error; err == nil {
-		orgName = orgMember.Organization.Name
-		orgRole = string(orgMember.Role)
-	}
-
 	c.JSON(http.StatusOK, MeResponse{
 		ID:               user.ID,
 		Email:            user.Email,
@@ -831,8 +923,8 @@ func GetMe(c *gin.Context) {
 		Github:           user.Github,
 		CreatedAt:        user.CreatedAt.Format(time.RFC3339),
 		EnvCount:         envCount,
-		OrgName:          orgName,
-		OrgRole:          orgRole,
+		OrgName:          "",
+		OrgRole:          "",
 	})
 }
 
@@ -965,9 +1057,9 @@ func ForkEnvironment(c *gin.Context) {
 	forkedName := fmt.Sprintf("%s (Fork)", originalEnv.Name)
 
 	newEnv := models.Environment{
-		UserID:            uid,
-		ProjectID:         originalEnv.ProjectID,
-		OrganizationID:    originalEnv.OrganizationID,
+		UserID:    uid,
+		ProjectID: originalEnv.ProjectID,
+
 		Name:              forkedName,
 		GitURL:            originalEnv.GitURL,
 		GithubBranch:      originalEnv.GithubBranch,

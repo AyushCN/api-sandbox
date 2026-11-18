@@ -11,7 +11,7 @@ export function LogoutButton() {
   return (
     <button
       onClick={logout}
-      className="text-sm font-medium text-white/70 hover:text-white transition-colors flex items-center gap-2"
+      className="text-sm font-medium text-neutral-600 hover:text-black dark:text-neutral-400 dark:hover:text-white transition-colors flex items-center gap-2 cursor-pointer"
     >
       <LogOut className="w-4 h-4" />
       Sign out
